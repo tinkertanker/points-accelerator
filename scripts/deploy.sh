@@ -2,13 +2,14 @@
 set -euo pipefail
 
 REMOTE_HOST="${REMOTE_HOST:-tinkertanker@dev.tk.sg}"
-REMOTE_PATH="${REMOTE_PATH:-~/Docker/economy-rice}"
+REMOTE_PATH="${REMOTE_PATH:-/home/tinkertanker-server/Docker/economy-rice}"
 REPO_URL="${REPO_URL:-https://github.com/tinkertanker/economy-rice.git}"
 BRANCH="${BRANCH:-main}"
+SSH_OPTS="${SSH_OPTS:--o IdentityAgent=none -o IdentitiesOnly=yes}"
 
-ssh "${REMOTE_HOST}" "mkdir -p \"${REMOTE_PATH}\""
+ssh ${SSH_OPTS} "${REMOTE_HOST}" "mkdir -p \"${REMOTE_PATH}\""
 
-ssh "${REMOTE_HOST}" "
+ssh ${SSH_OPTS} "${REMOTE_HOST}" "
   set -euo pipefail
   if [ ! -d \"${REMOTE_PATH}/.git\" ]; then
     rm -rf \"${REMOTE_PATH}\"
@@ -29,4 +30,3 @@ ssh "${REMOTE_HOST}" "
   docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend npx prisma migrate deploy
   docker compose --env-file .env.production -f docker-compose.prod.yml ps
 "
-
