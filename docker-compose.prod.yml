@@ -1,0 +1,81 @@
+version: "3.9"
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+    image: economy-rice-frontend:latest
+    container_name: economy-rice-frontend
+    expose:
+      - "80"
+    environment:
+      VIRTUAL_PORT: 80
+      VIRTUAL_HOST: ${APP_DOMAIN}
+      LETSENCRYPT_HOST: ${APP_DOMAIN}
+      LETSENCRYPT_EMAIL: ${APP_EMAIL}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - default
+      - devtksg
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    image: economy-rice-backend:latest
+    container_name: economy-rice-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: ${DATABASE_URL}
+      GUILD_ID: ${GUILD_ID}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
+      DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      PUBLIC_APP_NAME: ${PUBLIC_APP_NAME}
+      MESSAGE_REWARD_COOLDOWN_SECONDS: ${MESSAGE_REWARD_COOLDOWN_SECONDS:-60}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "dist/healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: economy-rice-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - economy-rice-postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  economy-rice-postgres:
+
+networks:
+  devtksg:
+    external: true
+
