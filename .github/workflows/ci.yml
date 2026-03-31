@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: economyrice
+          POSTGRES_USER: economyrice
+          POSTGRES_PASSWORD: economyrice
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U economyrice"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://economyrice:economyrice@localhost:5432/economyrice
+      ADMIN_TOKEN: ci-admin-token
+      GUILD_ID: ci-guild
+      VITE_API_BASE_URL: http://127.0.0.1:4173
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install
+      - run: npm --workspace apps/backend run prisma:generate
+      - run: npm --workspace apps/backend run prisma:migrate
+      - run: npm run build
+      - run: npm run test
+
