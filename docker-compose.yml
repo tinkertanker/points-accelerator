@@ -1,0 +1,74 @@
+version: "3.9"
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:3001}
+    expose:
+      - "80"
+    environment:
+      VIRTUAL_PORT: 80
+      VIRTUAL_HOST: ${FRONTEND_DOMAIN:-economy-rice.local}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - devtksg
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    expose:
+      - "3001"
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: ${DATABASE_URL}
+      GUILD_ID: ${GUILD_ID}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
+      DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      VIRTUAL_PORT: 3001
+      VIRTUAL_HOST: ${BACKEND_DOMAIN:-economy-rice-api.local}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - devtksg
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "dist/healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: economyrice
+      POSTGRES_USER: economyrice
+      POSTGRES_PASSWORD: economyrice
+    volumes:
+      - economyrice-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U economyrice"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - devtksg
+    restart: unless-stopped
+
+volumes:
+  economyrice-postgres:
+
+networks:
+  devtksg:
+    external: true
+
