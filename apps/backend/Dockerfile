@@ -5,6 +5,7 @@ WORKDIR /app
 COPY package.json package.json
 COPY tsconfig.base.json tsconfig.base.json
 COPY apps/backend/package.json apps/backend/package.json
+COPY apps/backend/prisma apps/backend/prisma
 COPY apps/frontend/package.json apps/frontend/package.json
 
 RUN npm install
@@ -26,4 +27,3 @@ COPY --from=build /app/apps/backend/package.json ./package.json
 COPY --from=build /app/apps/backend/prisma ./prisma
 
 CMD ["node", "dist/index.js"]
-
