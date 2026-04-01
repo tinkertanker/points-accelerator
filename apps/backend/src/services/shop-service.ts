@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { AppError } from "../utils/app-error.js";
 import { decimal, decimalToNumber } from "../utils/decimal.js";
@@ -79,26 +79,31 @@ export class ShopService {
       throw new AppError("Quantity must be greater than zero.");
     }
 
-    const item = await this.prisma.shopItem.findUnique({
-      where: { id: params.shopItemId },
-    });
-
-    if (!item || item.guildId !== params.guildId) {
-      throw new AppError("Shop item not found.", 404);
-    }
-
-    if (!item.enabled) {
-      throw new AppError("This item is disabled.", 409);
-    }
-
-    if (item.stock !== null && item.stock < quantity) {
-      throw new AppError("Not enough stock available.", 409);
-    }
-
-    const totalCurrencyCost = decimalToNumber(item.currencyCost) * quantity;
-    await this.economyService.assertGroupHasCurrency(params.groupId, totalCurrencyCost);
-
     const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockGroup(tx, params.guildId, params.groupId);
+      await this.lockShopItem(tx, params.guildId, params.shopItemId);
+
+      const item = await tx.shopItem.findUnique({
+        where: { id: params.shopItemId },
+      });
+      if (!item || item.guildId !== params.guildId) {
+        throw new AppError("Shop item not found.", 404);
+      }
+
+      if (!item.enabled) {
+        throw new AppError("This item is disabled.", 409);
+      }
+
+      if (item.stock !== null && item.stock < quantity) {
+        throw new AppError("Not enough stock available.", 409);
+      }
+
+      const totalCurrencyCost = decimalToNumber(item.currencyCost) * quantity;
+      const groupBalance = await this.getGroupCurrencyBalance(tx, params.groupId);
+      if (groupBalance < totalCurrencyCost) {
+        throw new AppError("Group does not have enough currency.", 409);
+      }
+
       const redemption = await tx.shopRedemption.create({
         data: {
           guildId: params.guildId,
@@ -139,7 +144,10 @@ export class ShopService {
         });
       }
 
-      return redemption;
+      return {
+        redemption,
+        totalCurrencyCost,
+      };
     });
 
     await this.auditService.record({
@@ -148,15 +156,57 @@ export class ShopService {
       actorUsername: params.requestedByUsername,
       action: "shop.item.redeemed",
       entityType: "ShopRedemption",
-      entityId: result.id,
+      entityId: result.redemption.id,
       payload: {
         shopItemId: params.shopItemId,
         groupId: params.groupId,
         quantity,
-        totalCurrencyCost,
+        totalCurrencyCost: result.totalCurrencyCost,
       },
     });
 
-    return result;
+    return result.redemption;
+  }
+
+  private async lockGroup(tx: Prisma.TransactionClient, guildId: string, groupId: string) {
+    const lockedGroups = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id
+      FROM "Group"
+      WHERE "guildId" = ${guildId}
+        AND id = ${groupId}
+      FOR UPDATE
+    `);
+
+    if (lockedGroups.length === 0) {
+      throw new AppError("Group not found.", 404);
+    }
+  }
+
+  private async lockShopItem(tx: Prisma.TransactionClient, guildId: string, shopItemId: string) {
+    const lockedItems = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id
+      FROM "ShopItem"
+      WHERE "guildId" = ${guildId}
+        AND id = ${shopItemId}
+      FOR UPDATE
+    `);
+
+    if (lockedItems.length === 0) {
+      throw new AppError("Shop item not found.", 404);
+    }
+  }
+
+  private async getGroupCurrencyBalance(tx: Prisma.TransactionClient, groupId: string) {
+    const [balanceRow] = await tx.ledgerSplit.groupBy({
+      by: ["groupId"],
+      where: {
+        groupId,
+      },
+      _sum: {
+        currencyDelta: true,
+      },
+    });
+
+    return decimalToNumber(balanceRow?._sum.currencyDelta);
   }
 }

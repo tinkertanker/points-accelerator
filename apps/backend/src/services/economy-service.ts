@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { assertCanAward, resolveCapabilities } from "../domain/permissions.js";
 import { AppError } from "../utils/app-error.js";
@@ -23,6 +23,8 @@ type LedgerEntryKind =
   | "DONATION"
   | "SHOP_REDEMPTION"
   | "ADJUSTMENT";
+
+type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
 
 export class EconomyService {
   public constructor(
@@ -136,8 +138,9 @@ export class EconomyService {
     messageId: string;
     content: string;
     channelId: string;
+    config?: Awaited<ReturnType<ConfigService["getOrCreate"]>>;
   }) {
-    const config = await this.configService.getOrCreate(params.guildId);
+    const config = params.config ?? (await this.configService.getOrCreate(params.guildId));
 
     if (params.content.trim().length < config.passiveMinimumCharacters) {
       return null;
@@ -200,35 +203,38 @@ export class EconomyService {
       throw new AppError("Source and destination groups must be different.");
     }
 
-    const balances = await this.groupService.getBalanceMap([params.sourceGroupId, params.targetGroupId]);
-    const sourceBalance = balances[params.sourceGroupId]?.currencyBalance ?? 0;
+    const entry = await this.prisma.$transaction(async (tx) => {
+      await this.lockGroups(tx, params.guildId, [params.sourceGroupId, params.targetGroupId]);
 
-    if (sourceBalance < params.amount) {
-      throw new AppError("Source group does not have enough currency.", 409);
-    }
+      const balances = await this.getBalanceMapWithExecutor(tx, [params.sourceGroupId]);
+      const sourceBalance = balances[params.sourceGroupId]?.currencyBalance ?? 0;
+      if (sourceBalance < params.amount) {
+        throw new AppError("Source group does not have enough currency.", 409);
+      }
 
-    const entry = await this.prisma.ledgerEntry.create({
-      data: {
-        guildId: params.guildId,
-        type: "TRANSFER",
-        description: params.description ?? "Group-to-group transfer",
-        createdByUserId: params.actor.userId,
-        createdByUsername: params.actor.username,
-        splits: {
-          create: [
-            {
-              groupId: params.sourceGroupId,
-              pointsDelta: decimal(0),
-              currencyDelta: decimal(-params.amount),
-            },
-            {
-              groupId: params.targetGroupId,
-              pointsDelta: decimal(0),
-              currencyDelta: decimal(params.amount),
-            },
-          ],
+      return tx.ledgerEntry.create({
+        data: {
+          guildId: params.guildId,
+          type: "TRANSFER",
+          description: params.description ?? "Group-to-group transfer",
+          createdByUserId: params.actor.userId,
+          createdByUsername: params.actor.username,
+          splits: {
+            create: [
+              {
+                groupId: params.sourceGroupId,
+                pointsDelta: decimal(0),
+                currencyDelta: decimal(-params.amount),
+              },
+              {
+                groupId: params.targetGroupId,
+                pointsDelta: decimal(0),
+                currencyDelta: decimal(params.amount),
+              },
+            ],
+          },
         },
-      },
+      });
     });
 
     await this.auditService.record({
@@ -259,28 +265,31 @@ export class EconomyService {
       throw new AppError("Donation amount must be greater than zero.");
     }
 
-    const balances = await this.groupService.getBalanceMap([params.sourceGroupId]);
-    const sourceBalance = balances[params.sourceGroupId]?.currencyBalance ?? 0;
+    const entry = await this.prisma.$transaction(async (tx) => {
+      await this.lockGroups(tx, params.guildId, [params.sourceGroupId]);
 
-    if (sourceBalance < params.amount) {
-      throw new AppError("Source group does not have enough currency.", 409);
-    }
+      const balances = await this.getBalanceMapWithExecutor(tx, [params.sourceGroupId]);
+      const sourceBalance = balances[params.sourceGroupId]?.currencyBalance ?? 0;
+      if (sourceBalance < params.amount) {
+        throw new AppError("Source group does not have enough currency.", 409);
+      }
 
-    const entry = await this.prisma.ledgerEntry.create({
-      data: {
-        guildId: params.guildId,
-        type: "DONATION",
-        description: params.description ?? "Group donation",
-        createdByUserId: params.actor.userId,
-        createdByUsername: params.actor.username,
-        splits: {
-          create: {
-            groupId: params.sourceGroupId,
-            pointsDelta: decimal(0),
-            currencyDelta: decimal(-params.amount),
+      return tx.ledgerEntry.create({
+        data: {
+          guildId: params.guildId,
+          type: "DONATION",
+          description: params.description ?? "Group donation",
+          createdByUserId: params.actor.userId,
+          createdByUsername: params.actor.username,
+          splits: {
+            create: {
+              groupId: params.sourceGroupId,
+              pointsDelta: decimal(0),
+              currencyDelta: decimal(-params.amount),
+            },
           },
         },
-      },
+      });
     });
 
     await this.auditService.record({
@@ -300,7 +309,7 @@ export class EconomyService {
   }
 
   public async assertGroupHasCurrency(groupId: string, amount: number) {
-    const balances = await this.groupService.getBalanceMap([groupId]);
+    const balances = await this.getBalanceMapWithExecutor(this.prisma, [groupId]);
     const balance = balances[groupId]?.currencyBalance ?? 0;
 
     if (balance < amount) {
@@ -340,5 +349,53 @@ export class EconomyService {
         currencyDelta: decimalToNumber(split.currencyDelta),
       })),
     }));
+  }
+
+  private async getBalanceMapWithExecutor(executor: PrismaExecutor, groupIds: string[]) {
+    if (groupIds.length === 0) {
+      return {};
+    }
+
+    const grouped = await executor.ledgerSplit.groupBy({
+      by: ["groupId"],
+      where: {
+        groupId: {
+          in: groupIds,
+        },
+      },
+      _sum: {
+        pointsDelta: true,
+        currencyDelta: true,
+      },
+    });
+
+    return Object.fromEntries(
+      grouped.map((row) => [
+        row.groupId,
+        {
+          pointsBalance: decimalToNumber(row._sum.pointsDelta),
+          currencyBalance: decimalToNumber(row._sum.currencyDelta),
+        },
+      ]),
+    );
+  }
+
+  private async lockGroups(tx: Prisma.TransactionClient, guildId: string, groupIds: string[]) {
+    const uniqueGroupIds = Array.from(new Set(groupIds)).sort();
+    if (uniqueGroupIds.length === 0) {
+      return;
+    }
+
+    const lockedGroups = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id
+      FROM "Group"
+      WHERE "guildId" = ${guildId}
+        AND id IN (${Prisma.join(uniqueGroupIds)})
+      FOR UPDATE
+    `);
+
+    if (lockedGroups.length !== uniqueGroupIds.length) {
+      throw new AppError("One or more groups do not exist.", 404);
+    }
   }
 }

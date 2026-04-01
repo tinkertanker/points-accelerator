@@ -57,7 +57,7 @@ const shopItemSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
   currencyCost: z.number().nonnegative(),
-  stock: z.number().int().positive().nullable(),
+  stock: z.number().int().nonnegative().nullable(),
   enabled: z.boolean(),
   fulfillmentInstructions: z.string().nullable().optional(),
 });

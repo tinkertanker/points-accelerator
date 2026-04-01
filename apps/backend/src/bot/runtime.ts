@@ -56,34 +56,15 @@ export class BotRuntime {
         return;
       }
 
-      const group = await this.services.groupService
-        .resolveGroupFromRoleIds(this.env.GUILD_ID, Array.from(member.roles.cache.keys()))
-        .catch(() => null);
-
-      if (!group) {
-        return;
-      }
-
-      const cooldownKey = `${member.id}:${group.id}`;
-      const now = Date.now();
-      const previous = this.cooldowns.get(cooldownKey);
-      if (previous && now - previous.seenAt < this.env.MESSAGE_REWARD_COOLDOWN_SECONDS * 1000) {
-        return;
-      }
-
-      const entry = await this.services.economyService.rewardPassiveMessage({
-        guildId: this.env.GUILD_ID,
-        groupId: group.id,
+      await this.handlePassiveMessage({
+        memberId: member.id,
+        roleIds: Array.from(member.roles.cache.keys()),
         userId: message.author.id,
         username: message.author.username,
         messageId: message.id,
         content: message.content,
         channelId: message.channelId,
       });
-
-      if (entry) {
-        this.cooldowns.set(cooldownKey, { seenAt: now });
-      }
     });
 
     this.client.on("interactionCreate", async (interaction) => {
@@ -166,6 +147,44 @@ export class BotRuntime {
       channelId: sent.channelId,
       messageId: sent.id,
     };
+  }
+
+  private async handlePassiveMessage(params: {
+    memberId: string;
+    roleIds: string[];
+    userId: string;
+    username: string;
+    messageId: string;
+    content: string;
+    channelId: string;
+  }) {
+    const group = await this.services.groupService.resolveGroupFromRoleIds(this.env.GUILD_ID, params.roleIds).catch(() => null);
+    if (!group) {
+      return;
+    }
+
+    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    const cooldownKey = `${params.memberId}:${group.id}`;
+    const now = Date.now();
+    const previous = this.cooldowns.get(cooldownKey);
+    if (previous && now - previous.seenAt < config.passiveCooldownSeconds * 1000) {
+      return;
+    }
+
+    const entry = await this.services.economyService.rewardPassiveMessage({
+      guildId: this.env.GUILD_ID,
+      groupId: group.id,
+      userId: params.userId,
+      username: params.username,
+      messageId: params.messageId,
+      content: params.content,
+      channelId: params.channelId,
+      config,
+    });
+
+    if (entry) {
+      this.cooldowns.set(cooldownKey, { seenAt: now });
+    }
   }
 
   private async handleCommand(interaction: ChatInputCommandInteraction) {
@@ -297,9 +316,9 @@ export class BotRuntime {
         const lines = items
           .filter((item) => item.enabled)
           .slice(0, 15)
-          .map((item) => `${item.id.slice(0, 8)}: ${item.name} (${item.currencyCost.toString()})`);
+          .map((item) => `${item.id}: ${item.name} (${item.currencyCost.toString()})`);
         await interaction.reply({
-          content: lines.length > 0 ? `Store items:\n${lines.join("\n")}\nUse /buy with an item id.` : "Store is empty.",
+          content: lines.length > 0 ? `Store items:\n${lines.join("\n")}\nUse /buy with the full item id.` : "Store is empty.",
           ephemeral: true,
         });
         return;

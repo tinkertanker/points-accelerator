@@ -311,4 +311,45 @@ describe("economy rice API", () => {
       }),
     ]);
   });
+
+  it("allows sold-out shop items to be saved with zero stock", async () => {
+    await ctx.services.configService.getOrCreate(ctx.env.GUILD_ID);
+
+    const createResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/shop-items",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        name: "Mystery Box",
+        description: "limited drop",
+        currencyCost: 8,
+        stock: 1,
+        enabled: true,
+        fulfillmentInstructions: null,
+      },
+    });
+    expect(createResponse.statusCode).toBe(200);
+    const createdItem = createResponse.json() as { id: string };
+
+    const updateResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/shop-items",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        id: createdItem.id,
+        name: "Mystery Box",
+        description: "limited drop",
+        currencyCost: 8,
+        stock: 0,
+        enabled: true,
+        fulfillmentInstructions: null,
+      },
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.json()).toMatchObject({
+      id: createdItem.id,
+      stock: 0,
+    });
+  });
 });
