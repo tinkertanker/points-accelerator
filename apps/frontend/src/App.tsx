@@ -220,6 +220,74 @@ export default function App() {
         </article>
       </section>
 
+      <section className="panel walkthrough-panel">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Phase 1</p>
+            <h2>Class launch walkthrough</h2>
+          </div>
+          <p className="walkthrough-note">
+            This is the shortest path to getting awards, balances, the leaderboard, and the ledger working in your class
+            server.
+          </p>
+        </div>
+
+        <div className="walkthrough-grid">
+          <article className="walkthrough-step">
+            <span className="walkthrough-step-number">1</span>
+            <div>
+              <h3>Give staff roles their powers</h3>
+              <p>
+                In <strong>Capability matrix</strong>, add your admin and alumni roles, then turn on <strong>award</strong>
+                and <strong>deduct</strong>. Set a max award if you want a hard cap per command.
+              </p>
+            </div>
+          </article>
+
+          <article className="walkthrough-step">
+            <span className="walkthrough-step-number">2</span>
+            <div>
+              <h3>Map every student team to a Discord role</h3>
+              <p>
+                In <strong>Role mapping</strong>, create one group per student role. Students can only use{" "}
+                <code>/balance</code> when their Discord role maps to exactly one active group.
+              </p>
+            </div>
+          </article>
+
+          <article className="walkthrough-step">
+            <span className="walkthrough-step-number">3</span>
+            <div>
+              <h3>Name the economy once</h3>
+              <p>
+                In <strong>Economy shape</strong>, set the labels for <strong>{settingsDraft.pointsName}</strong> and{" "}
+                <strong>{settingsDraft.currencyName}</strong>, plus any passive earning rules you want before class starts.
+              </p>
+            </div>
+          </article>
+
+          <article className="walkthrough-step">
+            <span className="walkthrough-step-number">4</span>
+            <div>
+              <h3>Smoke test the class commands in Discord</h3>
+              <p>
+                Staff should test award and deduct flows with a reason. Students should test their own balance, the shared
+                leaderboard, and the paged ledger feed.
+              </p>
+            </div>
+          </article>
+        </div>
+
+        <div className="walkthrough-commands">
+          <code>/award targets:@gryffindor points:5 reason:"helped another group"</code>
+          <code>/deduct targets:@gryffindor points:2 reason:"late submission"</code>
+          <code>/balance</code>
+          <code>/leaderboard</code>
+          <code>/ledger</code>
+          <code>/ledger page:2</code>
+        </div>
+      </section>
+
       <section className="grid content-grid">
         <article className="panel section-card">
           <div className="section-head">

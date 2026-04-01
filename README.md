@@ -28,8 +28,15 @@ It tracks permanent `points` for leaderboards, separate spendable `currency` for
 
 - Group-based passive message rewards
 - Manual awards and deductions with per-role caps
+- Discord ledger command with paging for recent transactions
 - Group transfers and donations
 - Custom shop with spendable currency
 - Role capability matrix
 - Configurable channels and role mappings
 
+## Phase 1 command set
+
+- Staff roles such as admins or alumni: `/award`, `/deduct`
+- Students: `/balance`, `/leaderboard`, `/ledger`
+
+After signing into the dashboard, use the built-in Phase 1 walkthrough in the control room to configure role powers, map groups, and smoke test the commands in Discord.

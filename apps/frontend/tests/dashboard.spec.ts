@@ -48,7 +48,8 @@ test("admin can sign in and see the control room", async ({ page }) => {
   await page.getByRole("button", { name: "Sign In" }).click();
 
   await expect(page.getByRole("heading", { name: /control room/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /class launch walkthrough/i })).toBeVisible();
   await expect(page.getByText(/dashboard synced/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /save settings/i })).toBeVisible();
+  await expect(page.getByText("/ledger page:2")).toBeVisible();
 });
-

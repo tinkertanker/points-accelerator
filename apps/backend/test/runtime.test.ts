@@ -13,7 +13,9 @@ function createRuntimeFixture() {
   });
 
   const config = {
+    currencyName: "rice",
     passiveCooldownSeconds: 120,
+    pointsName: "points",
   };
   const services = {
     configService: {
@@ -23,6 +25,7 @@ function createRuntimeFixture() {
       resolveGroupFromRoleIds: vi.fn().mockResolvedValue({ id: "group-1" }),
     },
     economyService: {
+      getLedger: vi.fn().mockResolvedValue([]),
       rewardPassiveMessage: vi.fn().mockResolvedValue({ id: "entry-1" }),
     },
     shopService: {
@@ -106,6 +109,59 @@ describe("bot runtime", () => {
     expect(reply).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining("shop-item-1234567890"),
+      }),
+    );
+  });
+
+  it("shows a paged ledger summary in Discord", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.economyService.getLedger.mockResolvedValue([
+      {
+        id: "entry-1",
+        type: "MANUAL_AWARD",
+        description: "Answered the toughest warm-up question",
+        createdAt: "2026-04-01T12:00:00.000Z",
+        splits: [
+          {
+            id: "split-1",
+            group: { displayName: "Gryffindor" },
+            pointsDelta: 5,
+            currencyDelta: 0,
+          },
+        ],
+      },
+    ]);
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "ledger",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue(null),
+        },
+      },
+      options: {
+        getInteger: vi.fn().mockReturnValue(2),
+      },
+      reply,
+      user: {
+        id: "user-1",
+        username: "Alice",
+      },
+    });
+
+    expect(services.economyService.getLedger).toHaveBeenCalledWith("guild-test", {
+      limit: 10,
+      offset: 10,
+    });
+    expect(reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("Recent transactions, page 2"),
+      }),
+    );
+    expect(reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("Gryffindor +5 points"),
       }),
     );
   });

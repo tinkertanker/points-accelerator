@@ -48,10 +48,11 @@ In `.env.production` set:
 After deployment:
 
 1. Sign in at `https://pointsbot.tk.sg` with `ADMIN_TOKEN`.
-2. Create role capability rules.
-3. Map each group role to a group entry.
-4. Set listing, redemption, and log channels.
-5. Add shop items.
+2. Follow the **Phase 1 walkthrough** shown in the control room.
+3. Create role capability rules for admin and alumni roles.
+4. Map each student group role to a group entry.
+5. Set listing, redemption, and log channels.
+6. Add shop items if you want the shop enabled during phase 1.
 
 ## 6. Test commands
 
@@ -61,9 +62,9 @@ Run these in the test server before production rollout:
 - `/deduct`
 - `/leaderboard`
 - `/balance`
+- `/ledger`
 - `/pay`
 - `/donate`
 - `/store`
 - `/buy`
 - `/sell`
-

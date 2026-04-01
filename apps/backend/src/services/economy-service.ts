@@ -327,7 +327,21 @@ export class EconomyService {
     return groups.sort((left, right) => right.pointsBalance - left.pointsBalance);
   }
 
-  public async getLedger(guildId: string, limit = 50) {
+  public async getLedger(
+    guildId: string,
+    limitOrOptions: number | { limit?: number; offset?: number } = 50,
+  ) {
+    const options =
+      typeof limitOrOptions === "number"
+        ? {
+            limit: limitOrOptions,
+            offset: 0,
+          }
+        : {
+            limit: limitOrOptions.limit ?? 50,
+            offset: limitOrOptions.offset ?? 0,
+          };
+
     const entries = await this.prisma.ledgerEntry.findMany({
       where: { guildId },
       include: {
@@ -338,7 +352,8 @@ export class EconomyService {
         },
       },
       orderBy: { createdAt: "desc" },
-      take: limit,
+      skip: options.offset,
+      take: options.limit,
     });
 
     return entries.map((entry) => ({

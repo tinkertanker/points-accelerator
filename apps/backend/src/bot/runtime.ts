@@ -18,6 +18,8 @@ type CooldownEntry = {
   seenAt: number;
 };
 
+type CommandLedgerEntry = Awaited<ReturnType<AppServices["economyService"]["getLedger"]>>[number];
+
 export class BotRuntime {
   private readonly cooldowns = new Map<string, CooldownEntry>();
   private client: Client | null = null;
@@ -217,6 +219,35 @@ export class BotRuntime {
         });
         return;
       }
+      case "ledger": {
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const page = interaction.options.getInteger("page") ?? 1;
+        const limit = 10;
+        const offset = (page - 1) * limit;
+        const entries = await this.services.economyService.getLedger(this.env.GUILD_ID, {
+          limit,
+          offset,
+        });
+
+        if (entries.length === 0) {
+          await interaction.reply({
+            content:
+              page === 1
+                ? "No ledger entries yet."
+                : `No ledger entries found on page ${page}. Try a smaller page number.`,
+          });
+          return;
+        }
+
+        const content = [
+          `Recent transactions, page ${page}:`,
+          ...entries.map((entry, index) => this.formatLedgerLine(entry, config, offset + index + 1)),
+          "Use /ledger with page:2, page:3, and so on to go back further.",
+        ].join("\n");
+
+        await interaction.reply({ content });
+        return;
+      }
       case "pay": {
         const target = interaction.options.getString("target", true);
         const amount = interaction.options.getNumber("amount", true);
@@ -346,6 +377,30 @@ export class BotRuntime {
     }
   }
 
+  private formatLedgerLine(
+    entry: CommandLedgerEntry,
+    config: Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>,
+    index: number,
+  ) {
+    const timestamp = Math.floor(new Date(entry.createdAt).getTime() / 1000);
+    const splitSummary = entry.splits
+      .map((split) => {
+        const deltas = [
+          split.pointsDelta === 0 ? null : `${this.formatSignedNumber(split.pointsDelta)} ${config.pointsName}`,
+          split.currencyDelta === 0 ? null : `${this.formatSignedNumber(split.currencyDelta)} ${config.currencyName}`,
+        ].filter((value): value is string => value !== null);
+
+        return `${split.group.displayName} ${deltas.join(" / ")}`;
+      })
+      .join("; ");
+
+    return `${index}. <t:${timestamp}:g> · ${entry.type} · ${splitSummary} · ${entry.description}`;
+  }
+
+  private formatSignedNumber(value: number) {
+    return `${value >= 0 ? "+" : ""}${value}`;
+  }
+
   private async registerCommands() {
     if (!this.env.DISCORD_APPLICATION_ID || !this.env.DISCORD_BOT_TOKEN || !this.env.DISCORD_GUILD_ID) {
       return;
@@ -355,6 +410,12 @@ export class BotRuntime {
     const commands = [
       new SlashCommandBuilder().setName("leaderboard").setDescription("Show the group leaderboard."),
       new SlashCommandBuilder().setName("balance").setDescription("Show your group balance."),
+      new SlashCommandBuilder()
+        .setName("ledger")
+        .setDescription("Show the 10 most recent ledger entries.")
+        .addIntegerOption((option) =>
+          option.setName("page").setDescription("Page number, 10 entries per page").setRequired(false).setMinValue(1),
+        ),
       new SlashCommandBuilder()
         .setName("pay")
         .setDescription("Pay another group from your group wallet.")
