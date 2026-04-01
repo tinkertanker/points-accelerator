@@ -5,11 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "prebuild": "npm run prisma:generate",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "pretest": "npm run prisma:generate",
     "test": "vitest run",
     "test:watch": "vitest",
+    "prelint": "npm run prisma:generate",
     "lint": "tsc --noEmit -p tsconfig.json",
+    "postinstall": "npm run prisma:generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:push": "prisma db push",
@@ -32,4 +36,3 @@
     "vitest": "^3.0.9"
   }
 }
-
