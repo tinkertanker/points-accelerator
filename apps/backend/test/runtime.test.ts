@@ -165,4 +165,53 @@ describe("bot runtime", () => {
       }),
     );
   });
+
+  it("truncates long ledger lines so Discord replies stay within the message limit", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.economyService.getLedger.mockResolvedValue(
+      Array.from({ length: 10 }, (_, index) => ({
+        id: `entry-${index + 1}`,
+        type: "MANUAL_AWARD",
+        description:
+          "Awarded for consistently helping other tables, finishing every checkpoint, and writing up the clearest recap note of the day.",
+        createdAt: "2026-04-01T12:00:00.000Z",
+        splits: [
+          {
+            id: `split-a-${index + 1}`,
+            group: { displayName: "Gryffindor" },
+            pointsDelta: 5,
+            currencyDelta: 0,
+          },
+          {
+            id: `split-b-${index + 1}`,
+            group: { displayName: "Hufflepuff" },
+            pointsDelta: 0,
+            currencyDelta: 3,
+          },
+        ],
+      })),
+    );
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "ledger",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue(null),
+        },
+      },
+      options: {
+        getInteger: vi.fn().mockReturnValue(1),
+      },
+      reply,
+      user: {
+        id: "user-1",
+        username: "Alice",
+      },
+    });
+
+    const [{ content }] = reply.mock.calls[0] as [{ content: string }];
+    expect(content.length).toBeLessThanOrEqual(2000);
+    expect(content).toContain("...");
+  });
 });

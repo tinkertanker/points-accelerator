@@ -20,6 +20,8 @@ type CooldownEntry = {
 
 type CommandLedgerEntry = Awaited<ReturnType<AppServices["economyService"]["getLedger"]>>[number];
 
+const MAX_LEDGER_LINE_LENGTH = 160;
+
 export class BotRuntime {
   private readonly cooldowns = new Map<string, CooldownEntry>();
   private client: Client | null = null;
@@ -239,11 +241,7 @@ export class BotRuntime {
           return;
         }
 
-        const content = [
-          `Recent transactions, page ${page}:`,
-          ...entries.map((entry, index) => this.formatLedgerLine(entry, config, offset + index + 1)),
-          "Use /ledger with page:2, page:3, and so on to go back further.",
-        ].join("\n");
+        const content = this.formatLedgerResponse(entries, config, page, offset);
 
         await interaction.reply({ content });
         return;
@@ -377,6 +375,19 @@ export class BotRuntime {
     }
   }
 
+  private formatLedgerResponse(
+    entries: CommandLedgerEntry[],
+    config: Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>,
+    page: number,
+    offset: number,
+  ) {
+    return [
+      `Recent transactions, page ${page}:`,
+      ...entries.map((entry, index) => this.formatLedgerLine(entry, config, offset + index + 1)),
+      "Use /ledger with page:2, page:3, and so on to go back further.",
+    ].join("\n");
+  }
+
   private formatLedgerLine(
     entry: CommandLedgerEntry,
     config: Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>,
@@ -394,11 +405,22 @@ export class BotRuntime {
       })
       .join("; ");
 
-    return `${index}. <t:${timestamp}:g> · ${entry.type} · ${splitSummary} · ${entry.description}`;
+    return this.truncateText(
+      `${index}. <t:${timestamp}:g> · ${entry.type} · ${splitSummary} · ${entry.description}`,
+      MAX_LEDGER_LINE_LENGTH,
+    );
   }
 
   private formatSignedNumber(value: number) {
     return `${value >= 0 ? "+" : ""}${value}`;
+  }
+
+  private truncateText(value: string, maxLength: number) {
+    if (value.length <= maxLength) {
+      return value;
+    }
+
+    return `${value.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
   }
 
   private async registerCommands() {
