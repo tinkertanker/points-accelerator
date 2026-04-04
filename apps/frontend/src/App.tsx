@@ -183,54 +183,46 @@ export default function App() {
   if (!bootstrap || !settingsDraft) {
     return (
       <main className="shell">
-        <section className="hero">
-          <p className="eyebrow">economy rice</p>
-          <h1>Configure your class economy without editing env files every week.</h1>
-          <p className="lede">
-            Group rewards, transfers, shop pricing, role capabilities, and passive chat earn rates all live here.
-          </p>
-        </section>
+        <div className="login-page">
+          <div>
+            <h1>economy rice</h1>
+            <p className="lede">
+              Group rewards, transfers, shop pricing, role capabilities, and passive chat earn rates all live here.
+            </p>
+          </div>
 
-        <section className="panel auth-panel">
-          <p className="auth-title">Discord Sign-In</p>
-          <p className="auth-copy">
-            Use your Discord account for the configured server. Dashboard access follows your current guild permissions and
-            any roles marked with <strong>manage dashboard</strong>.
-          </p>
-          <button onClick={handleLogin} disabled={isBusy}>
-            {isBusy ? "Redirecting..." : "Sign In with Discord"}
-          </button>
-          <p className="status">{status}</p>
-        </section>
+          <div className="login-card">
+            <h2>Discord Sign-In</h2>
+            <p>
+              Use your Discord account for the configured server. Dashboard access follows your current guild permissions
+              and any roles marked with <strong>manage dashboard</strong>.
+            </p>
+            <button onClick={handleLogin} disabled={isBusy}>
+              {isBusy ? "Redirecting..." : "Sign In with Discord"}
+            </button>
+            <p className="status-bar">{status}</p>
+          </div>
+        </div>
       </main>
     );
   }
 
   return (
     <main className="shell">
-      <header className="hero compact">
-        <div>
-          <p className="eyebrow">{bootstrap.settings.appName}</p>
-          <h1>economy rice control room</h1>
-          <p className="lede">
-            Manage group mapping, role powers, point flow, spendable currency, and what appears in the shop.
-          </p>
+      <header className="topbar">
+        <div className="topbar-brand">
+          <h1>{bootstrap.settings.appName}</h1>
+          <p>Manage groups, roles, shop, and economy settings.</p>
         </div>
-        <div className="hero-actions">
+        <div className="topbar-right">
           {sessionUser ? (
             <div className="session-badge">
               {sessionUser.avatarUrl ? <img src={sessionUser.avatarUrl} alt="" /> : null}
-              <div>
-                <strong>{sessionUser.displayName}</strong>
-                <span>@{sessionUser.username}</span>
-              </div>
+              <strong>{sessionUser.displayName}</strong>
             </div>
           ) : null}
           <button
-            className="secondary"
-            onClick={() => {
-              void loadBootstrap().catch(() => undefined);
-            }}
+            onClick={() => void loadBootstrap().catch(() => undefined)}
             disabled={isBusy}
           >
             Refresh
@@ -239,83 +231,66 @@ export default function App() {
         </div>
       </header>
 
-      <section className="grid overview-grid">
-        <article className="panel stat-card">
-          <span>Total Groups</span>
+      <section className="stats-row">
+        <div className="stat-item">
+          <span>Groups</span>
           <strong>{bootstrap.groups.length}</strong>
-        </article>
-        <article className="panel stat-card">
+        </div>
+        <div className="stat-item">
           <span>Role Rules</span>
           <strong>{bootstrap.capabilities.length}</strong>
-        </article>
-        <article className="panel stat-card">
+        </div>
+        <div className="stat-item">
           <span>Shop Items</span>
           <strong>{bootstrap.shopItems.length}</strong>
-        </article>
-        <article className="panel stat-card">
+        </div>
+        <div className="stat-item">
           <span>Listings</span>
           <strong>{bootstrap.listings.length}</strong>
-        </article>
+        </div>
       </section>
 
-      <section className="panel walkthrough-panel">
-        <div className="section-head">
+      <section className="walkthrough-section">
+        <div className="section-header">
           <div>
-            <p className="eyebrow">Phase 1</p>
+            <p className="section-label">Phase 1</p>
             <h2>Class launch walkthrough</h2>
           </div>
-          <p className="walkthrough-note">
-            This is the shortest path to getting awards, balances, the leaderboard, and the ledger working in your class
-            server.
-          </p>
         </div>
-
-        <div className="walkthrough-grid">
-          <article className="walkthrough-step">
-            <span className="walkthrough-step-number">1</span>
-            <div>
-              <h3>Give staff roles their powers</h3>
-              <p>
-                In <strong>Capability matrix</strong>, add your admin and alumni roles, then turn on <strong>award</strong>
-                and <strong>deduct</strong>. Set a max award if you want a hard cap per command.
-              </p>
-            </div>
-          </article>
-
-          <article className="walkthrough-step">
-            <span className="walkthrough-step-number">2</span>
-            <div>
-              <h3>Map every student team to a Discord role</h3>
-              <p>
-                In <strong>Role mapping</strong>, create one group per student role. Students can only use{" "}
-                <code>/balance</code> when their Discord role maps to exactly one active group.
-              </p>
-            </div>
-          </article>
-
-          <article className="walkthrough-step">
-            <span className="walkthrough-step-number">3</span>
-            <div>
-              <h3>Name the economy once</h3>
-              <p>
-                In <strong>Economy shape</strong>, set the labels for <strong>{settingsDraft.pointsName}</strong> and{" "}
-                <strong>{settingsDraft.currencyName}</strong>, plus any passive earning rules you want before class starts.
-              </p>
-            </div>
-          </article>
-
-          <article className="walkthrough-step">
-            <span className="walkthrough-step-number">4</span>
-            <div>
-              <h3>Smoke test the class commands in Discord</h3>
-              <p>
-                Staff should test award and deduct flows with a reason. Students should test their own balance, the shared
-                leaderboard, and the paged ledger feed.
-              </p>
-            </div>
-          </article>
+        <div className="walkthrough">
+          <div className="walkthrough-step">
+            <div className="step-number">1</div>
+            <h3>Give staff roles their powers</h3>
+            <p>
+              In <strong>Capability matrix</strong>, add your admin and alumni roles, then turn on <strong>award</strong>{" "}
+              and <strong>deduct</strong>. Set a max award if you want a hard cap per command.
+            </p>
+          </div>
+          <div className="walkthrough-step">
+            <div className="step-number">2</div>
+            <h3>Map every student team to a Discord role</h3>
+            <p>
+              In <strong>Role mapping</strong>, create one group per student role. Students can only use{" "}
+              <code>/balance</code> when their Discord role maps to exactly one active group.
+            </p>
+          </div>
+          <div className="walkthrough-step">
+            <div className="step-number">3</div>
+            <h3>Name the economy once</h3>
+            <p>
+              In <strong>Economy shape</strong>, set the labels for <strong>{settingsDraft.pointsName}</strong> and{" "}
+              <strong>{settingsDraft.currencyName}</strong>, plus any passive earning rules you want before class starts.
+            </p>
+          </div>
+          <div className="walkthrough-step">
+            <div className="step-number">4</div>
+            <h3>Smoke test the class commands in Discord</h3>
+            <p>
+              Staff should test award and deduct flows with a reason. Students should test their own balance, the shared
+              leaderboard, and the paged ledger feed.
+            </p>
+          </div>
         </div>
-
         <div className="walkthrough-commands">
           <code>/award targets:@gryffindor points:5 reason:"helped another group"</code>
           <code>/deduct targets:@gryffindor points:2 reason:"late submission"</code>
@@ -326,18 +301,17 @@ export default function App() {
         </div>
       </section>
 
-      <section className="grid content-grid">
-        <article className="panel section-card">
-          <div className="section-head">
+      <section className="two-col" style={{ marginTop: "1rem" }}>
+        <article className="section">
+          <div className="section-header">
             <div>
-              <p className="eyebrow">Settings</p>
+              <p className="section-label">Settings</p>
               <h2>Economy shape</h2>
             </div>
             <button
+              className="primary-action"
               onClick={async () => {
-                if (!settingsDraft) {
-                  return;
-                }
+                if (!settingsDraft) return;
                 setIsBusy(true);
                 try {
                   await api.saveSettings(settingsDraft);
@@ -356,28 +330,28 @@ export default function App() {
 
           <div className="form-grid">
             <label>
-              App Name
+              App name
               <input
                 value={settingsDraft.appName}
                 onChange={(event) => setSettingsDraft({ ...settingsDraft, appName: event.target.value })}
               />
             </label>
             <label>
-              Points Label
+              Points label
               <input
                 value={settingsDraft.pointsName}
                 onChange={(event) => setSettingsDraft({ ...settingsDraft, pointsName: event.target.value })}
               />
             </label>
             <label>
-              Currency Label
+              Currency label
               <input
                 value={settingsDraft.currencyName}
                 onChange={(event) => setSettingsDraft({ ...settingsDraft, currencyName: event.target.value })}
               />
             </label>
             <label>
-              Message Points Reward
+              Message points reward
               <input
                 type="number"
                 value={settingsDraft.passivePointsReward}
@@ -387,7 +361,7 @@ export default function App() {
               />
             </label>
             <label>
-              Message Currency Reward
+              Message currency reward
               <input
                 type="number"
                 value={settingsDraft.passiveCurrencyReward}
@@ -397,7 +371,7 @@ export default function App() {
               />
             </label>
             <label>
-              Cooldown Seconds
+              Cooldown seconds
               <input
                 type="number"
                 value={settingsDraft.passiveCooldownSeconds}
@@ -407,7 +381,7 @@ export default function App() {
               />
             </label>
             <label>
-              Min Characters
+              Min characters
               <input
                 type="number"
                 value={settingsDraft.passiveMinimumCharacters}
@@ -417,7 +391,7 @@ export default function App() {
               />
             </label>
             <label>
-              Economy Mode
+              Economy mode
               <select
                 value={settingsDraft.economyMode}
                 onChange={(event) =>
@@ -432,7 +406,7 @@ export default function App() {
               </select>
             </label>
             <label>
-              Listing Channel
+              Listing channel
               <select
                 value={settingsDraft.listingChannelId ?? ""}
                 onChange={(event) =>
@@ -447,7 +421,7 @@ export default function App() {
               </select>
             </label>
             <label>
-              Redemption Channel
+              Redemption channel
               <select
                 value={settingsDraft.redemptionChannelId ?? ""}
                 onChange={(event) =>
@@ -462,7 +436,7 @@ export default function App() {
               </select>
             </label>
             <label>
-              Log Channel
+              Log channel
               <select
                 value={settingsDraft.commandLogChannelId ?? ""}
                 onChange={(event) =>
@@ -477,7 +451,7 @@ export default function App() {
               </select>
             </label>
             <label className="span-2">
-              Allowed Passive Channels
+              Allowed passive channels
               <input
                 value={settingsDraft.passiveAllowedChannelIds.join(", ")}
                 onChange={(event) =>
@@ -493,7 +467,7 @@ export default function App() {
               />
             </label>
             <label className="span-2">
-              Denied Passive Channels
+              Denied passive channels
               <input
                 value={settingsDraft.passiveDeniedChannelIds.join(", ")}
                 onChange={(event) =>
@@ -511,13 +485,14 @@ export default function App() {
           </div>
         </article>
 
-        <article className="panel section-card">
-          <div className="section-head">
+        <article className="section">
+          <div className="section-header">
             <div>
-              <p className="eyebrow">Roles</p>
+              <p className="section-label">Roles</p>
               <h2>Capability matrix</h2>
             </div>
             <button
+              className="primary-action"
               onClick={async () => {
                 setIsBusy(true);
                 try {
@@ -539,7 +514,7 @@ export default function App() {
 
           <div className="stack">
             {roleDrafts.map((role, index) => (
-              <div className="role-row" key={`${role.roleId}-${index}`}>
+              <div className="data-row role-row" key={`${role.roleId}-${index}`}>
                 <select
                   value={role.roleId}
                   onChange={(event) => {
@@ -661,41 +636,45 @@ export default function App() {
                 </label>
               </div>
             ))}
-            <button
-              className="secondary"
-              onClick={() =>
-                setRoleDrafts([
-                  ...roleDrafts,
-                  {
-                    roleId: "",
-                    roleName: "",
-                    canManageDashboard: false,
-                    canAward: false,
-                    maxAward: null,
-                    canDeduct: false,
-                    canMultiAward: false,
-                    canSell: false,
-                    canReceiveAwards: true,
-                    isGroupRole: false,
-                  },
-                ])
-              }
-            >
-              Add Role Rule
-            </button>
+            <div className="add-row">
+              <button
+                onClick={() =>
+                  setRoleDrafts([
+                    ...roleDrafts,
+                    {
+                      roleId: "",
+                      roleName: "",
+                      canManageDashboard: false,
+                      canAward: false,
+                      maxAward: null,
+                      canDeduct: false,
+                      canMultiAward: false,
+                      canSell: false,
+                      canReceiveAwards: true,
+                      isGroupRole: false,
+                    },
+                  ])
+                }
+              >
+                Add Role Rule
+              </button>
+            </div>
           </div>
         </article>
+      </section>
 
-        <article className="panel section-card">
-          <div className="section-head">
+      <section className="two-col">
+        <article className="section">
+          <div className="section-header">
             <div>
-              <p className="eyebrow">Groups</p>
+              <p className="section-label">Groups</p>
               <h2>Role mapping</h2>
             </div>
           </div>
           <div className="stack">
             {groupDrafts.map((group, index) => (
-              <div className="group-row" key={`${group.id ?? "new"}-${index}`}>
+              <div className="data-row group-row" key={`${group.id ?? "new"}-${index}`}>
+                <label>Display name</label>
                 <input
                   value={group.displayName}
                   onChange={(event) => {
@@ -705,6 +684,7 @@ export default function App() {
                   }}
                   placeholder="Display name"
                 />
+                <label>Slug</label>
                 <input
                   value={group.slug ?? ""}
                   onChange={(event) => {
@@ -714,6 +694,7 @@ export default function App() {
                   }}
                   placeholder="slug"
                 />
+                <label>Role</label>
                 <select
                   value={group.roleId}
                   onChange={(event) => {
@@ -725,6 +706,7 @@ export default function App() {
                   <option value="">Select role</option>
                   {roleOptions}
                 </select>
+                <label>Mentor</label>
                 <input
                   value={group.mentorName ?? ""}
                   onChange={(event) => {
@@ -734,6 +716,7 @@ export default function App() {
                   }}
                   placeholder="Mentor"
                 />
+                <label>Aliases</label>
                 <input
                   value={group.aliasesText}
                   onChange={(event) => {
@@ -741,7 +724,7 @@ export default function App() {
                     next[index] = { ...group, aliasesText: event.target.value };
                     setGroupDrafts(next);
                   }}
-                  placeholder="aliases, comma separated"
+                  placeholder="comma separated"
                 />
                 <label>
                   <input
@@ -753,7 +736,7 @@ export default function App() {
                       setGroupDrafts(next);
                     }}
                   />
-                  active
+                  Active
                 </label>
                 <button
                   onClick={async () => {
@@ -777,16 +760,17 @@ export default function App() {
           </div>
         </article>
 
-        <article className="panel section-card">
-          <div className="section-head">
+        <article className="section">
+          <div className="section-header">
             <div>
-              <p className="eyebrow">Shop</p>
+              <p className="section-label">Shop</p>
               <h2>Catalog</h2>
             </div>
           </div>
           <div className="stack">
             {shopDrafts.map((item, index) => (
-              <div className="shop-row" key={`${item.id ?? "new"}-${index}`}>
+              <div className="data-row shop-row" key={`${item.id ?? "new"}-${index}`}>
+                <label>Name</label>
                 <input
                   value={item.name}
                   onChange={(event) => {
@@ -796,6 +780,7 @@ export default function App() {
                   }}
                   placeholder="Item name"
                 />
+                <label>Description</label>
                 <input
                   value={item.description}
                   onChange={(event) => {
@@ -805,6 +790,7 @@ export default function App() {
                   }}
                   placeholder="Description"
                 />
+                <label>Cost</label>
                 <input
                   type="number"
                   value={item.currencyCost}
@@ -815,6 +801,7 @@ export default function App() {
                   }}
                   placeholder="Cost"
                 />
+                <label>Stock</label>
                 <input
                   type="number"
                   value={item.stock ?? ""}
@@ -825,6 +812,7 @@ export default function App() {
                   }}
                   placeholder="Stock"
                 />
+                <label>Fulfillment</label>
                 <input
                   value={item.fulfillmentInstructions ?? ""}
                   onChange={(event) => {
@@ -832,7 +820,7 @@ export default function App() {
                     next[index] = { ...item, fulfillmentInstructions: event.target.value };
                     setShopDrafts(next);
                   }}
-                  placeholder="Fulfillment notes"
+                  placeholder="Notes"
                 />
                 <label>
                   <input
@@ -844,7 +832,7 @@ export default function App() {
                       setShopDrafts(next);
                     }}
                   />
-                  enabled
+                  Enabled
                 </label>
                 <button
                   onClick={async () => {
@@ -867,43 +855,43 @@ export default function App() {
             ))}
           </div>
         </article>
+      </section>
 
-        <article className="panel section-card">
-          <div className="section-head">
-            <div>
-              <p className="eyebrow">Live view</p>
-              <h2>Leaderboard and activity</h2>
-            </div>
+      <section className="section leaderboard-section">
+        <div className="section-header">
+          <div>
+            <p className="section-label">Live view</p>
+            <h2>Leaderboard and activity</h2>
           </div>
+        </div>
 
-          <div className="dual-list">
-            <div>
-              <h3>Leaderboard</h3>
-              <ol className="leaderboard">
-                {bootstrap.leaderboard.map((group) => (
-                  <li key={group.id}>
-                    <span>{group.displayName}</span>
-                    <strong>
-                      {group.pointsBalance} / {group.currencyBalance}
-                    </strong>
-                  </li>
-                ))}
-              </ol>
-            </div>
-            <div>
-              <h3>Ledger</h3>
-              <ul className="ledger">
-                {bootstrap.ledger.map((entry) => (
-                  <li key={entry.id}>
-                    <strong>{entry.type}</strong>
-                    <p>{entry.description}</p>
-                    <small>{new Date(entry.createdAt).toLocaleString()}</small>
-                  </li>
-                ))}
-              </ul>
-            </div>
+        <div className="dual-list">
+          <div>
+            <h3>Leaderboard</h3>
+            <ol className="leaderboard">
+              {bootstrap.leaderboard.map((group) => (
+                <li key={group.id}>
+                  <span>{group.displayName}</span>
+                  <strong>
+                    {group.pointsBalance} / {group.currencyBalance}
+                  </strong>
+                </li>
+              ))}
+            </ol>
           </div>
-        </article>
+          <div>
+            <h3>Ledger</h3>
+            <ul className="ledger">
+              {bootstrap.ledger.map((entry) => (
+                <li key={entry.id}>
+                  <strong>{entry.type}</strong>
+                  <p>{entry.description}</p>
+                  <small>{new Date(entry.createdAt).toLocaleString()}</small>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
       </section>
 
       <footer className="status-bar">{status}</footer>

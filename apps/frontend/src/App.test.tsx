@@ -26,7 +26,7 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(screen.getByText(/configure your class economy/i)).toBeInTheDocument();
+    expect(screen.getByText(/group rewards, transfers, shop pricing/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign in with discord/i })).toBeInTheDocument();
   });
 });
