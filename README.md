@@ -39,4 +39,6 @@ It tracks permanent `points` for leaderboards, separate spendable `currency` for
 - Staff roles such as admins or alumni: `/award`, `/deduct`
 - Students: `/balance`, `/leaderboard`, `/ledger`
 
+The admin dashboard uses Discord sign-in. Users can access it if they are guild admins or hold a Discord role with `canManageDashboard` enabled in the capability matrix.
+
 After signing into the dashboard, use the built-in Phase 1 walkthrough in the control room to configure role powers, map groups, and smoke test the commands in Discord.

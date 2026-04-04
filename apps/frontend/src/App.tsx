@@ -2,6 +2,7 @@ import { startTransition, useEffect, useMemo, useState } from "react";
 
 import { api } from "./services/api";
 import type {
+  AuthUser,
   BootstrapPayload,
   Group,
   GroupDraft,
@@ -12,7 +13,21 @@ import type {
 } from "./types";
 import "./styles/app.css";
 
-const STORAGE_KEY = "economy-rice-admin-token";
+function getInitialStatus() {
+  if (typeof window === "undefined") {
+    return "Sign in with Discord to configure the bot.";
+  }
+
+  const url = new URL(window.location.href);
+  const authError = url.searchParams.get("auth_error");
+  if (!authError) {
+    return "Sign in with Discord to configure the bot.";
+  }
+
+  url.searchParams.delete("auth_error");
+  window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+  return authError;
+}
 
 function toGroupDraft(group?: Group): GroupDraft {
   if (!group) {
@@ -61,28 +76,22 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
 }
 
 export default function App() {
-  const [token, setToken] = useState<string>(() => {
-    if (typeof window === "undefined" || typeof window.localStorage?.getItem !== "function") {
-      return "";
-    }
-    return window.localStorage.getItem(STORAGE_KEY) ?? "";
-  });
-  const [loginValue, setLoginValue] = useState(token);
+  const [sessionUser, setSessionUser] = useState<AuthUser | null>(null);
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(null);
   const [roleDrafts, setRoleDrafts] = useState<RoleCapability[]>([]);
   const [groupDrafts, setGroupDrafts] = useState<GroupDraft[]>([]);
   const [shopDrafts, setShopDrafts] = useState<ShopItemDraft[]>([]);
-  const [status, setStatus] = useState("Sign in with the admin token to configure the bot.");
+  const [status, setStatus] = useState(getInitialStatus);
   const [isBusy, setIsBusy] = useState(false);
 
   const discordRoles = bootstrap?.discord.roles ?? [];
   const discordChannels = bootstrap?.discord.channels ?? [];
 
-  const loadBootstrap = async (nextToken = token) => {
+  const loadBootstrap = async () => {
     setIsBusy(true);
     try {
-      const payload = await api.bootstrap(nextToken);
+      const payload = await api.bootstrap();
       startTransition(() => {
         setBootstrap(payload);
         setSettingsDraft(payload.settings);
@@ -100,15 +109,44 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!token) {
-      return;
-    }
+    let cancelled = false;
 
-    void loadBootstrap().catch(() => {
-      window.localStorage.removeItem(STORAGE_KEY);
-      setToken("");
-    });
-  }, [token]);
+    const bootstrapDashboard = async () => {
+      setIsBusy(true);
+      try {
+        const session = await api.session();
+        if (!session.authenticated || !session.user) {
+          if (!cancelled) {
+            setSessionUser(null);
+            setBootstrap(null);
+            setSettingsDraft(null);
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setSessionUser(session.user);
+        }
+
+        await loadBootstrap();
+      } catch (error) {
+        if (!cancelled) {
+          setStatus(error instanceof Error ? error.message : "Could not load the dashboard.");
+          setSessionUser(null);
+        }
+      } finally {
+        if (!cancelled && !bootstrap) {
+          setIsBusy(false);
+        }
+      }
+    };
+
+    void bootstrapDashboard();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const roleOptions = useMemo(
     () =>
@@ -130,25 +168,14 @@ export default function App() {
     [discordChannels],
   );
 
-  const handleLogin = async () => {
-    setIsBusy(true);
-    try {
-      await api.login(loginValue);
-      window.localStorage.setItem(STORAGE_KEY, loginValue);
-      setToken(loginValue);
-      setStatus("Signed in.");
-      await loadBootstrap(loginValue);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Could not sign in.");
-    } finally {
-      setIsBusy(false);
-    }
+  const handleLogin = () => {
+    setStatus("Redirecting to Discord...");
+    api.beginDiscordLogin();
   };
 
   const handleLogout = async () => {
-    await api.logout(token).catch(() => undefined);
-    window.localStorage.removeItem(STORAGE_KEY);
-    setToken("");
+    await api.logout().catch(() => undefined);
+    setSessionUser(null);
     setBootstrap(null);
     setStatus("Signed out.");
   };
@@ -165,17 +192,13 @@ export default function App() {
         </section>
 
         <section className="panel auth-panel">
-          <label>
-            Admin Token
-            <input
-              type="password"
-              value={loginValue}
-              onChange={(event) => setLoginValue(event.target.value)}
-              placeholder="Paste the ADMIN_TOKEN value"
-            />
-          </label>
-          <button onClick={() => void handleLogin()} disabled={isBusy || loginValue.length === 0}>
-            {isBusy ? "Signing in..." : "Sign In"}
+          <p className="auth-title">Discord Sign-In</p>
+          <p className="auth-copy">
+            Use your Discord account for the configured server. Dashboard access follows your current guild permissions and
+            any roles marked with <strong>manage dashboard</strong>.
+          </p>
+          <button onClick={handleLogin} disabled={isBusy}>
+            {isBusy ? "Redirecting..." : "Sign In with Discord"}
           </button>
           <p className="status">{status}</p>
         </section>
@@ -194,7 +217,22 @@ export default function App() {
           </p>
         </div>
         <div className="hero-actions">
-          <button className="secondary" onClick={() => void loadBootstrap()} disabled={isBusy}>
+          {sessionUser ? (
+            <div className="session-badge">
+              {sessionUser.avatarUrl ? <img src={sessionUser.avatarUrl} alt="" /> : null}
+              <div>
+                <strong>{sessionUser.displayName}</strong>
+                <span>@{sessionUser.username}</span>
+              </div>
+            </div>
+          ) : null}
+          <button
+            className="secondary"
+            onClick={() => {
+              void loadBootstrap().catch(() => undefined);
+            }}
+            disabled={isBusy}
+          >
             Refresh
           </button>
           <button onClick={() => void handleLogout()}>Sign Out</button>
@@ -302,7 +340,7 @@ export default function App() {
                 }
                 setIsBusy(true);
                 try {
-                  await api.saveSettings(settingsDraft, token);
+                  await api.saveSettings(settingsDraft);
                   await loadBootstrap();
                   setStatus("Settings saved.");
                 } catch (error) {
@@ -485,7 +523,6 @@ export default function App() {
                 try {
                   await api.saveCapabilities(
                     roleDrafts.filter((role) => role.roleId.trim().length > 0 && role.roleName.trim().length > 0),
-                    token,
                   );
                   await loadBootstrap();
                   setStatus("Role capabilities saved.");
@@ -722,7 +759,7 @@ export default function App() {
                   onClick={async () => {
                     setIsBusy(true);
                     try {
-                      await api.saveGroup(group, token);
+                      await api.saveGroup(group);
                       await loadBootstrap();
                       setStatus(`Saved ${group.displayName || "group"}.`);
                     } catch (error) {
@@ -813,7 +850,7 @@ export default function App() {
                   onClick={async () => {
                     setIsBusy(true);
                     try {
-                      await api.saveShopItem(item, token);
+                      await api.saveShopItem(item);
                       await loadBootstrap();
                       setStatus(`Saved ${item.name || "shop item"}.`);
                     } catch (error) {

@@ -1,26 +1,39 @@
+import type { DiscordOAuthClient } from "../../src/auth/discord-oauth.js";
+import type { BotRuntimeApi } from "../../src/bot/runtime.js";
 import { loadEnv } from "../../src/config/env.js";
 import { createPrismaClient } from "../../src/db/client.js";
 import { createServices } from "../../src/services/app-services.js";
 import { createApp } from "../../src/app.js";
 
-export async function createTestApp(databaseUrl: string) {
+export async function createTestApp(
+  databaseUrl: string,
+  options?: {
+    botRuntime?: BotRuntimeApi | null;
+    discordOAuthClient?: DiscordOAuthClient | null;
+  },
+) {
   const env = loadEnv({
+    NODE_ENV: "test",
     DATABASE_URL: databaseUrl,
     GUILD_ID: "guild-test",
     ADMIN_TOKEN: "test-admin-token",
+    APP_PUBLIC_URL: "http://localhost:4173",
+    DISCORD_OAUTH_REDIRECT_URI: "http://localhost:3001/api/auth/discord/callback",
     PORT: 1,
   });
 
+  process.env.NODE_ENV = env.NODE_ENV;
   process.env.DATABASE_URL = databaseUrl;
   process.env.GUILD_ID = env.GUILD_ID;
-  process.env.ADMIN_TOKEN = env.ADMIN_TOKEN;
+  process.env.ADMIN_TOKEN = env.ADMIN_TOKEN ?? "";
 
   const prisma = createPrismaClient();
   const services = createServices(prisma);
   const app = createApp({
     env,
     services,
-    botRuntime: null,
+    botRuntime: options?.botRuntime ?? null,
+    discordOAuthClient: options?.discordOAuthClient ?? null,
   });
 
   await prisma.$connect();

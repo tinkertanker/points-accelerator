@@ -1,14 +1,32 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 
+const fetchMock = vi.fn<typeof fetch>();
+
 describe("App", () => {
-  it("shows the admin sign in prompt before bootstrap data loads", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    fetchMock.mockReset();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the Discord sign-in prompt when there is no active session", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ authenticated: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
     render(<App />);
 
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(screen.getByText(/configure your class economy/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /sign in with discord/i })).toBeInTheDocument();
   });
 });
-

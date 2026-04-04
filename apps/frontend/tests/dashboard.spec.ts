@@ -1,11 +1,24 @@
 import { expect, test } from "@playwright/test";
 
-test("admin can sign in and see the control room", async ({ page }) => {
-  await page.route("**/api/auth/login", async (route) => {
+test("authenticated Discord manager can see the control room", async ({ page }) => {
+  await page.route("**/api/auth/session", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ authenticated: true }),
+      body: JSON.stringify({
+        authenticated: true,
+        user: {
+          userId: "user-1",
+          username: "mentor",
+          displayName: "Mentor",
+          avatarUrl: null,
+          roleIds: ["role-1"],
+          isGuildOwner: false,
+          hasAdministrator: false,
+          hasManageGuild: true,
+          canManageDashboard: true,
+        },
+      }),
     });
   });
 
@@ -44,8 +57,6 @@ test("admin can sign in and see the control room", async ({ page }) => {
   });
 
   await page.goto("/");
-  await page.getByLabel("Admin Token").fill("test-admin-token");
-  await page.getByRole("button", { name: "Sign In" }).click();
 
   await expect(page.getByRole("heading", { name: /control room/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /class launch walkthrough/i })).toBeVisible();

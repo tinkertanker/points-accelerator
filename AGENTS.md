@@ -22,7 +22,7 @@ It is a monorepo with:
 - The ledger is append-only in practice: corrections should be new entries, not mutation of past balances.
 - `points` and `currency` are separate balances. Shop, `/pay`, and `/donate` affect currency, not leaderboard points.
 - Role capability rules are first-class configuration. Avoid hardcoding role names or channel names.
-- Admin auth currently uses `ADMIN_TOKEN`, not Discord OAuth.
+- Admin auth uses Discord OAuth sessions backed by guild membership and dashboard-capable roles.
 
 ## Common commands
 

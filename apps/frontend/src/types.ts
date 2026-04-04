@@ -98,6 +98,23 @@ export type DiscordOption = {
   name: string;
 };
 
+export type AuthUser = {
+  userId: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+  roleIds: string[];
+  isGuildOwner: boolean;
+  hasAdministrator: boolean;
+  hasManageGuild: boolean;
+  canManageDashboard: boolean;
+};
+
+export type AuthSession = {
+  authenticated: boolean;
+  user?: AuthUser;
+};
+
 export type BootstrapPayload = {
   settings: Settings;
   capabilities: RoleCapability[];
@@ -111,4 +128,3 @@ export type BootstrapPayload = {
     channels: DiscordOption[];
   };
 };
-

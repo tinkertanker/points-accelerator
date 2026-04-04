@@ -9,12 +9,13 @@
    - Server Members Intent
    - Message Content Intent
 
-## 2. Collect the IDs and token
+## 2. Collect the IDs, bot token, and OAuth secret
 
 You will need:
 
 - `DISCORD_BOT_TOKEN`
 - `DISCORD_APPLICATION_ID`
+- `DISCORD_CLIENT_SECRET`
 - `DISCORD_GUILD_ID`
 - `GUILD_ID`
 
@@ -39,17 +40,25 @@ In `.env.production` set:
 
 - `DISCORD_BOT_TOKEN`
 - `DISCORD_APPLICATION_ID`
+- `DISCORD_CLIENT_SECRET`
 - `DISCORD_GUILD_ID`
 - `GUILD_ID`
-- `ADMIN_TOKEN`
+- `APP_PUBLIC_URL`
+- `APP_DOMAIN`
+
+In the Discord Developer Portal, add this redirect URI under **OAuth2**:
+
+- `${APP_PUBLIC_URL}/api/auth/discord/callback`
+
+If your deployment uses a dedicated OAuth callback override, set and register `DISCORD_OAUTH_REDIRECT_URI` to that same value instead.
 
 ## 5. First-run dashboard setup
 
 After deployment:
 
-1. Sign in at `https://economyrice.tk.sg` with `ADMIN_TOKEN`.
+1. Sign in at `https://economyrice.tk.sg` with Discord.
 2. Follow the **Phase 1 walkthrough** shown in the control room.
-3. Create role capability rules for admin and alumni roles.
+3. Create role capability rules for admin and alumni roles, and mark trusted staff roles with `canManageDashboard`.
 4. Map each student group role to a group entry.
 5. Set listing, redemption, and log channels.
 6. Add shop items if you want the shop enabled during phase 1.
