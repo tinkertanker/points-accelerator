@@ -226,7 +226,13 @@ export default function App() {
               </div>
             </div>
           ) : null}
-          <button className="secondary" onClick={() => void loadBootstrap()} disabled={isBusy}>
+          <button
+            className="secondary"
+            onClick={() => {
+              void loadBootstrap().catch(() => undefined);
+            }}
+            disabled={isBusy}
+          >
             Refresh
           </button>
           <button onClick={() => void handleLogout()}>Sign Out</button>

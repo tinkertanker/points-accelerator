@@ -48,7 +48,9 @@ In `.env.production` set:
 
 In the Discord Developer Portal, add this redirect URI under **OAuth2**:
 
-- `https://economyrice.tk.sg/api/auth/discord/callback`
+- `${APP_PUBLIC_URL}/api/auth/discord/callback`
+
+If your deployment uses a dedicated OAuth callback override, set and register `DISCORD_OAUTH_REDIRECT_URI` to that same value instead.
 
 ## 5. First-run dashboard setup
 
