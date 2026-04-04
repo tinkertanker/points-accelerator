@@ -10,6 +10,7 @@
     "dev": "npm-run-all --parallel dev:*",
     "dev:backend": "npm --workspace apps/backend run dev",
     "dev:frontend": "npm --workspace apps/frontend run dev",
+    "dev:design": "npm --workspace apps/frontend run dev:design",
     "build": "npm-run-all build:*",
     "build:backend": "npm --workspace apps/backend run build",
     "build:frontend": "npm --workspace apps/frontend run build",

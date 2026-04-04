@@ -1,5 +1,6 @@
 import { startTransition, useEffect, useMemo, useState } from "react";
 
+import { isDesignPreview } from "./designPreview";
 import { api } from "./services/api";
 import type {
   AuthUser,
@@ -209,6 +210,11 @@ export default function App() {
 
   return (
     <main className="shell">
+      {isDesignPreview() ? (
+        <p className="design-preview-banner" role="status">
+          Design preview: local mock data only. No backend or Discord required; saves stay in this browser session.
+        </p>
+      ) : null}
       <header className="topbar">
         <div className="topbar-brand">
           <h1>{bootstrap.settings.appName}</h1>
@@ -227,7 +233,9 @@ export default function App() {
           >
             Refresh
           </button>
-          <button onClick={() => void handleLogout()}>Sign Out</button>
+          {isDesignPreview() ? null : (
+            <button onClick={() => void handleLogout()}>Sign Out</button>
+          )}
         </div>
       </header>
 

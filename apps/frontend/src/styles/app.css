@@ -132,6 +132,16 @@ label input[type="checkbox"] {
   padding: 0 1.5rem 4rem;
 }
 
+.design-preview-banner {
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-bottom: 1rem;
+  padding: 0.65rem 1rem;
+}
+
 /* Top bar */
 .topbar {
   align-items: center;
