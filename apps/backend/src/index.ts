@@ -1,3 +1,4 @@
+import { createDiscordOAuthClient } from "./auth/discord-oauth.js";
 import { createApp } from "./app.js";
 import { BotRuntime } from "./bot/runtime.js";
 import { loadEnv } from "./config/env.js";
@@ -8,7 +9,11 @@ const env = loadEnv();
 const prisma = createPrismaClient();
 const services = createServices(prisma);
 const botRuntime = new BotRuntime(env, services);
-const app = createApp({ env, services, botRuntime });
+const discordOAuthClient = createDiscordOAuthClient({
+  applicationId: env.DISCORD_APPLICATION_ID,
+  clientSecret: env.DISCORD_CLIENT_SECRET,
+});
+const app = createApp({ env, services, botRuntime, discordOAuthClient });
 
 const start = async () => {
   await prisma.$connect();

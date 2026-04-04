@@ -1,17 +1,28 @@
+import { randomBytes } from "node:crypto";
+
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
-import Fastify, { type FastifyRequest } from "fastify";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import type { AppEnv } from "./config/env.js";
-import type { BotRuntime } from "./bot/runtime.js";
+import type { DiscordOAuthClient } from "./auth/discord-oauth.js";
+import type { BotRuntimeApi } from "./bot/runtime.js";
 import type { AppServices } from "./services/app-services.js";
+import { resolveCapabilities } from "./domain/permissions.js";
 import { AppError } from "./utils/app-error.js";
 import { decimalToNumber } from "./utils/decimal.js";
 
-const loginSchema = z.object({
-  token: z.string().min(1),
+const authCallbackSchema = z.object({
+  code: z.string().min(1).optional(),
+  state: z.string().min(1).optional(),
+  error: z.string().optional(),
 });
+
+const SESSION_COOKIE_NAME = "dashboard_session";
+const OAUTH_STATE_COOKIE_NAME = "discord_oauth_state";
+const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
+const OAUTH_STATE_TTL_SECONDS = 60 * 10;
 
 const settingsSchema = z.object({
   appName: z.string().min(1),
@@ -111,19 +122,157 @@ const redeemSchema = z.object({
 export function createApp(params: {
   env: AppEnv;
   services: AppServices;
-  botRuntime: BotRuntime | null;
+  botRuntime: BotRuntimeApi | null;
+  discordOAuthClient?: DiscordOAuthClient | null;
 }) {
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: true, trustProxy: true });
   const { services } = params;
+  const dashboardSessions = new Map<string, { userId: string; expiresAt: number }>();
 
-  const requireAdmin = async (request: FastifyRequest) => {
-    const headerToken = typeof request.headers["x-admin-token"] === "string" ? request.headers["x-admin-token"] : undefined;
-    const cookieToken = request.cookies.admin_session;
-    const token = headerToken ?? cookieToken;
+  const buildAppUrl = (path = "/") => {
+    const appUrl = params.env.APP_PUBLIC_URL ?? (params.env.APP_DOMAIN ? `https://${params.env.APP_DOMAIN}` : undefined);
+    if (!appUrl) {
+      return path;
+    }
 
-    if (token !== params.env.ADMIN_TOKEN) {
+    return new URL(path, appUrl).toString();
+  };
+
+  const buildDiscordRedirectUri = (request: FastifyRequest) => {
+    if (params.env.DISCORD_OAUTH_REDIRECT_URI) {
+      return params.env.DISCORD_OAUTH_REDIRECT_URI;
+    }
+
+    const protocolHeader = request.headers["x-forwarded-proto"];
+    const hostHeader = request.headers["x-forwarded-host"] ?? request.headers.host;
+    const protocol = typeof protocolHeader === "string" ? protocolHeader.split(",")[0] : request.protocol;
+    const host = Array.isArray(hostHeader) ? hostHeader[0] : hostHeader;
+
+    if (!host) {
+      throw new AppError("Could not determine the OAuth callback URL.", 500);
+    }
+
+    return `${protocol}://${host}/api/auth/discord/callback`;
+  };
+
+  const buildAuthRedirectUrl = (errorMessage?: string) => {
+    const baseUrl = buildAppUrl("/");
+    if (!errorMessage) {
+      return baseUrl;
+    }
+
+    const url = new URL(baseUrl, "http://localhost");
+    url.searchParams.set("auth_error", errorMessage);
+    return baseUrl.startsWith("http") ? url.toString() : `${url.pathname}${url.search}`;
+  };
+
+  const shouldUseSecureCookies = (request: FastifyRequest) => {
+    const configuredUrl =
+      params.env.APP_PUBLIC_URL ??
+      params.env.DISCORD_OAUTH_REDIRECT_URI ??
+      (params.env.APP_DOMAIN ? `https://${params.env.APP_DOMAIN}` : undefined);
+
+    if (configuredUrl) {
+      return new URL(configuredUrl).protocol === "https:";
+    }
+
+    const protocolHeader = request.headers["x-forwarded-proto"];
+    const forwardedProtocol = typeof protocolHeader === "string" ? protocolHeader.split(",")[0] : request.protocol;
+    return forwardedProtocol === "https";
+  };
+
+  const destroyDashboardSession = (sessionId?: string) => {
+    if (!sessionId) {
+      return;
+    }
+
+    dashboardSessions.delete(sessionId);
+  };
+
+  const clearDashboardSession = (request: FastifyRequest, reply: FastifyReply) => {
+    destroyDashboardSession(request.cookies[SESSION_COOKIE_NAME]);
+    reply.clearCookie(SESSION_COOKIE_NAME, { path: "/" });
+  };
+
+  const createDashboardSession = (userId: string) => {
+    const sessionId = randomBytes(24).toString("hex");
+    dashboardSessions.set(sessionId, {
+      userId,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    });
+    return sessionId;
+  };
+
+  const getSessionRecord = (sessionId?: string) => {
+    if (!sessionId) {
+      return null;
+    }
+
+    const session = dashboardSessions.get(sessionId);
+    if (!session) {
+      return null;
+    }
+
+    if (session.expiresAt <= Date.now()) {
+      dashboardSessions.delete(sessionId);
+      return null;
+    }
+
+    return session;
+  };
+
+  const resolveDashboardSession = async (request: FastifyRequest) => {
+    if (params.env.NODE_ENV === "test") {
+      const headerToken = typeof request.headers["x-admin-token"] === "string" ? request.headers["x-admin-token"] : undefined;
+      if (headerToken && params.env.ADMIN_TOKEN && headerToken === params.env.ADMIN_TOKEN) {
+        return {
+          userId: "test-admin",
+          username: "Test Admin",
+          displayName: "Test Admin",
+          avatarUrl: null,
+          roleIds: [],
+          isGuildOwner: false,
+          hasAdministrator: true,
+          hasManageGuild: true,
+          canManageDashboard: true,
+        };
+      }
+    }
+
+    const sessionId = request.cookies[SESSION_COOKIE_NAME];
+    const session = getSessionRecord(sessionId);
+    if (!session) {
       throw new AppError("Unauthorized", 401);
     }
+
+    const member = await params.botRuntime?.getDashboardMember(session.userId);
+    if (!member) {
+      destroyDashboardSession(sessionId);
+      throw new AppError("You must be a member of the configured Discord server to use the dashboard.", 401);
+    }
+
+    const capabilities = await services.roleCapabilityService.listForRoleIds(params.env.GUILD_ID, member.roleIds);
+    const resolved = resolveCapabilities(capabilities);
+    const canManageDashboard =
+      resolved.canManageDashboard || member.isGuildOwner || member.hasAdministrator || member.hasManageGuild;
+
+    if (!canManageDashboard) {
+      throw new AppError("Your Discord account does not have dashboard access.", 403);
+    }
+
+    dashboardSessions.set(sessionId!, {
+      userId: session.userId,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    });
+
+    return {
+      ...member,
+      canManageDashboard,
+    };
+  };
+
+  const requireAdmin = async (request: FastifyRequest) => {
+    await resolveDashboardSession(request);
   };
 
   app.register(cors, {
@@ -152,31 +301,108 @@ export function createApp(params: {
     return { status: "ok" };
   });
 
-  app.post("/api/auth/login", async (request, reply) => {
-    const body = loginSchema.parse(request.body);
-    if (body.token !== params.env.ADMIN_TOKEN) {
-      throw new AppError("Invalid admin token", 401);
+  app.get("/api/auth/discord", async (request, reply) => {
+    if (!params.discordOAuthClient) {
+      throw new AppError("Discord login is not configured.", 503);
     }
 
-    reply.setCookie("admin_session", body.token, {
+    const state = randomBytes(18).toString("hex");
+    const redirectUri = buildDiscordRedirectUri(request);
+    const secureCookies = shouldUseSecureCookies(request);
+
+    reply.setCookie(OAUTH_STATE_COOKIE_NAME, state, {
       path: "/",
       httpOnly: true,
       sameSite: "lax",
+      secure: secureCookies,
+      maxAge: OAUTH_STATE_TTL_SECONDS,
     });
 
-    return { authenticated: true };
+    return reply.redirect(params.discordOAuthClient.buildAuthorizeUrl({ state, redirectUri }));
   });
 
-  app.post("/api/auth/logout", async (_request, reply) => {
-    reply.clearCookie("admin_session", { path: "/" });
+  app.get("/api/auth/discord/callback", async (request, reply) => {
+    if (!params.discordOAuthClient) {
+      throw new AppError("Discord login is not configured.", 503);
+    }
+
+    const query = authCallbackSchema.parse(request.query);
+    const cookieState = request.cookies[OAUTH_STATE_COOKIE_NAME];
+
+    reply.clearCookie(OAUTH_STATE_COOKIE_NAME, { path: "/" });
+
+    if (query.error) {
+      clearDashboardSession(request, reply);
+      return reply.redirect(buildAuthRedirectUrl("Discord authorisation was cancelled."));
+    }
+
+    if (!query.code || !query.state || !cookieState || query.state !== cookieState) {
+      clearDashboardSession(request, reply);
+      return reply.redirect(buildAuthRedirectUrl("Discord login could not be verified. Please try again."));
+    }
+
+    const redirectUri = buildDiscordRedirectUri(request);
+    const secureCookies = shouldUseSecureCookies(request);
+
+    try {
+      const identity = await params.discordOAuthClient.exchangeCode({
+        code: query.code,
+        redirectUri,
+      });
+
+      const member = await params.botRuntime?.getDashboardMember(identity.id);
+      if (!member) {
+        clearDashboardSession(request, reply);
+        return reply.redirect(buildAuthRedirectUrl("Join the configured Discord server before signing in."));
+      }
+
+      const capabilities = await services.roleCapabilityService.listForRoleIds(params.env.GUILD_ID, member.roleIds);
+      const resolved = resolveCapabilities(capabilities);
+      const canManageDashboard =
+        resolved.canManageDashboard || member.isGuildOwner || member.hasAdministrator || member.hasManageGuild;
+
+      if (!canManageDashboard) {
+        clearDashboardSession(request, reply);
+        return reply.redirect(buildAuthRedirectUrl("Your Discord account does not have dashboard access."));
+      }
+
+      const sessionId = createDashboardSession(identity.id);
+      reply.setCookie(SESSION_COOKIE_NAME, sessionId, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: secureCookies,
+        maxAge: SESSION_TTL_MS / 1000,
+      });
+
+      return reply.redirect(buildAuthRedirectUrl());
+    } catch (error) {
+      request.log?.warn?.(error);
+      return reply.redirect(buildAuthRedirectUrl("Discord login failed. Please try again."));
+    }
+  });
+
+  app.post("/api/auth/logout", async (request, reply) => {
+    clearDashboardSession(request, reply);
     return { authenticated: false };
   });
 
-  app.get("/api/auth/session", async (request) => ({
-    authenticated:
-      request.cookies.admin_session === params.env.ADMIN_TOKEN ||
-      request.headers["x-admin-token"] === params.env.ADMIN_TOKEN,
-  }));
+  app.get("/api/auth/session", async (request, reply) => {
+    try {
+      const session = await resolveDashboardSession(request);
+      return {
+        authenticated: true,
+        user: session,
+      };
+    } catch (error) {
+      if (error instanceof AppError && (error.statusCode === 401 || error.statusCode === 403)) {
+        clearDashboardSession(request, reply);
+        return { authenticated: false };
+      }
+
+      throw error;
+    }
+  });
 
   app.get("/api/bootstrap", { preHandler: requireAdmin }, async () => {
     const [settings, capabilities, groups, shopItems, listings, leaderboard, ledger, roles, channels] = await Promise.all([

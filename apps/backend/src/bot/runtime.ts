@@ -3,6 +3,7 @@ import {
   Client,
   GatewayIntentBits,
   Partials,
+  PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder,
@@ -21,6 +22,33 @@ type CooldownEntry = {
 type CommandLedgerEntry = Awaited<ReturnType<AppServices["economyService"]["getLedger"]>>[number];
 
 const MAX_LEDGER_LINE_LENGTH = 160;
+
+export type DashboardMember = {
+  userId: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+  roleIds: string[];
+  isGuildOwner: boolean;
+  hasAdministrator: boolean;
+  hasManageGuild: boolean;
+};
+
+export interface BotRuntimeApi {
+  getRoles(): Promise<Array<{ id: string; name: string }>>;
+  getTextChannels(): Promise<Array<{ id: string; name: string }>>;
+  getDashboardMember(userId: string): Promise<DashboardMember | null>;
+  postListing(channelId: string, content: string): Promise<{ channelId: string; messageId: string } | null>;
+}
+
+function isDiscordUnknownMemberError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === 10007
+  );
+}
 
 export class BotRuntime {
   private readonly cooldowns = new Map<string, CooldownEntry>();
@@ -134,6 +162,47 @@ export class BotRuntime {
         name: channel!.name,
       }))
       .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  public async getDashboardMember(userId: string): Promise<DashboardMember | null> {
+    if (!this.client) {
+      throw new AppError("Discord member lookup is unavailable because the bot is not connected.", 503);
+    }
+
+    const guild = await this.client.guilds
+      .fetch(this.env.GUILD_ID)
+      .catch((error: unknown) => {
+        throw new AppError(
+          `Discord guild lookup failed${error instanceof Error && error.message ? `: ${error.message}` : "."}`,
+          503,
+        );
+      });
+
+    const member = await guild.members.fetch(userId).catch((error: unknown) => {
+      if (isDiscordUnknownMemberError(error)) {
+        return null;
+      }
+
+      throw new AppError(
+        `Discord member lookup failed${error instanceof Error && error.message ? `: ${error.message}` : "."}`,
+        503,
+      );
+    });
+
+    if (!member) {
+      return null;
+    }
+
+    return {
+      userId: member.user.id,
+      username: member.user.username,
+      displayName: member.displayName,
+      avatarUrl: member.displayAvatarURL({ size: 128 }) || null,
+      roleIds: Array.from(member.roles.cache.keys()),
+      isGuildOwner: guild.ownerId === member.id,
+      hasAdministrator: member.permissions.has(PermissionFlagsBits.Administrator),
+      hasManageGuild: member.permissions.has(PermissionFlagsBits.ManageGuild),
+    };
   }
 
   public async postListing(channelId: string, content: string): Promise<{ channelId: string; messageId: string } | null> {

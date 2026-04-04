@@ -25,7 +25,7 @@ Run locally:
 
 ### Dashboard
 
-- Sign in with `ADMIN_TOKEN`
+- Sign in with Discord
 - Save settings
 - Create role capability rules
 - Create group mappings

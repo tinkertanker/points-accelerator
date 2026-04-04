@@ -1,4 +1,5 @@
 import type {
+  AuthSession,
   BootstrapPayload,
   GroupDraft,
   RoleCapability,
@@ -9,7 +10,6 @@ import type {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
 
 type ApiOptions = {
-  token?: string | null;
   method?: string;
   body?: unknown;
 };
@@ -43,7 +43,6 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...(options.token ? { "x-admin-token": options.token } : {}),
     },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
@@ -57,44 +56,35 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
 }
 
 export const api = {
-  login(token: string) {
-    return request<{ authenticated: boolean }>("/api/auth/login", {
-      method: "POST",
-      body: { token },
-    });
+  beginDiscordLogin() {
+    window.location.assign(resolveApiUrl(API_BASE_URL, "/api/auth/discord"));
   },
-  logout(token?: string | null) {
+  logout() {
     return request<{ authenticated: boolean }>("/api/auth/logout", {
       method: "POST",
-      token,
     });
   },
-  session(token?: string | null) {
-    return request<{ authenticated: boolean }>("/api/auth/session", {
-      token,
-    });
+  session() {
+    return request<AuthSession>("/api/auth/session");
   },
-  bootstrap(token?: string | null) {
-    return request<BootstrapPayload>("/api/bootstrap", { token });
+  bootstrap() {
+    return request<BootstrapPayload>("/api/bootstrap");
   },
-  saveSettings(payload: Settings, token?: string | null) {
+  saveSettings(payload: Settings) {
     return request<Settings>("/api/settings", {
       method: "PUT",
-      token,
       body: payload,
     });
   },
-  saveCapabilities(payload: RoleCapability[], token?: string | null) {
+  saveCapabilities(payload: RoleCapability[]) {
     return request<RoleCapability[]>("/api/capabilities", {
       method: "PUT",
-      token,
       body: payload,
     });
   },
-  saveGroup(payload: GroupDraft, token?: string | null) {
+  saveGroup(payload: GroupDraft) {
     return request("/api/groups", {
       method: "POST",
-      token,
       body: {
         ...payload,
         aliases: payload.aliasesText
@@ -104,10 +94,9 @@ export const api = {
       },
     });
   },
-  saveShopItem(payload: ShopItemDraft, token?: string | null) {
+  saveShopItem(payload: ShopItemDraft) {
     return request("/api/shop-items", {
       method: "POST",
-      token,
       body: payload,
     });
   },
