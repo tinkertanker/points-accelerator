@@ -47,7 +47,7 @@ In `.env.production` set:
 
 After deployment:
 
-1. Sign in at `https://pointsbot.tk.sg` with `ADMIN_TOKEN`.
+1. Sign in at `https://economyrice.tk.sg` with `ADMIN_TOKEN`.
 2. Follow the **Phase 1 walkthrough** shown in the control room.
 3. Create role capability rules for admin and alumni roles.
 4. Map each student group role to a group entry.

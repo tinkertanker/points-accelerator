@@ -68,7 +68,6 @@ Run locally:
 
 ## Production cutover
 
-1. Deploy the same commit to `pointsbot.tk.sg`.
+1. Deploy the same commit to `economyrice.tk.sg`.
 2. Re-run the staging checklist with the production bot in the real server.
 3. Keep the old system available for one class cycle if you want rollback insurance.
-

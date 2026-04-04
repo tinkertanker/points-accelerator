@@ -52,7 +52,7 @@ Useful backend commands:
 - Production deploys use `docker-compose.prod.yml`.
 - The helper script is `scripts/deploy.sh`.
 - Current production target is `tinkertanker@dev.tk.sg:/home/tinkertanker-server/Docker/economy-rice`.
-- Current public domain is `https://pointsbot.tk.sg`.
+- Current public domain is `https://economyrice.tk.sg`.
 - Production configuration lives in `.env.production` on the server.
 
 ## Relevant docs

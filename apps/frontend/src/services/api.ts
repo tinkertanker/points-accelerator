@@ -14,8 +14,31 @@ type ApiOptions = {
   body?: unknown;
 };
 
+function normaliseBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "");
+}
+
+function normalisePath(path: string): string {
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
+export function resolveApiUrl(baseUrl: string, path: string): string {
+  const normalisedBaseUrl = normaliseBaseUrl(baseUrl);
+  const normalisedPath = normalisePath(path);
+
+  if (normalisedBaseUrl.endsWith("/api") && normalisedPath === "/api") {
+    return normalisedBaseUrl;
+  }
+
+  if (normalisedBaseUrl.endsWith("/api") && normalisedPath.startsWith("/api/")) {
+    return `${normalisedBaseUrl}${normalisedPath.slice(4)}`;
+  }
+
+  return `${normalisedBaseUrl}${normalisedPath}`;
+}
+
 async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(resolveApiUrl(API_BASE_URL, path), {
     method: options.method ?? "GET",
     credentials: "include",
     headers: {
@@ -89,4 +112,3 @@ export const api = {
     });
   },
 };
-
