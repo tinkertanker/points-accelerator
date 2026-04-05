@@ -1,5 +1,6 @@
 import { startTransition, useEffect, useMemo, useState } from "react";
 
+import ThemeToggle from "./components/ThemeToggle";
 import { isDesignPreview } from "./designPreview";
 import { api } from "./services/api";
 import type {
@@ -13,6 +14,27 @@ import type {
   ShopItemDraft,
 } from "./types";
 import "./styles/app.css";
+
+type CapabilityToggleKey = keyof Pick<
+  RoleCapability,
+  | "canManageDashboard"
+  | "canAward"
+  | "canDeduct"
+  | "canMultiAward"
+  | "canSell"
+  | "canReceiveAwards"
+  | "isGroupRole"
+>;
+
+const CAPABILITY_COLUMNS: Array<{ key: CapabilityToggleKey; header: string; abbr: string }> = [
+  { key: "canManageDashboard", header: "Manage dashboard", abbr: "Dash" },
+  { key: "canAward", header: "Award", abbr: "Award" },
+  { key: "canDeduct", header: "Deduct", abbr: "Deduct" },
+  { key: "canMultiAward", header: "Multi-target award", abbr: "Multi" },
+  { key: "canSell", header: "Sell", abbr: "Sell" },
+  { key: "canReceiveAwards", header: "Receivable", abbr: "Recv" },
+  { key: "isGroupRole", header: "Group role", abbr: "Group" },
+];
 
 function getInitialStatus() {
   if (typeof window === "undefined") {
@@ -181,51 +203,50 @@ export default function App() {
     setStatus("Signed out.");
   };
 
-  if (!bootstrap || !settingsDraft) {
-    return (
-      <main className="shell">
-        <div className="login-page">
-          <div>
-            <h1>economy rice</h1>
-            <p className="lede">
-              Group rewards, transfers, shop pricing, role capabilities, and passive chat earn rates all live here.
-            </p>
-          </div>
-
-          <div className="login-card">
-            <h2>Discord Sign-In</h2>
-            <p>
-              Use your Discord account for the configured server. Dashboard access follows your current guild permissions
-              and any roles marked with <strong>manage dashboard</strong>.
-            </p>
-            <button onClick={handleLogin} disabled={isBusy}>
-              {isBusy ? "Redirecting..." : "Sign In with Discord"}
-            </button>
-            <p className="status-bar">{status}</p>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main className="shell">
+      <div className="shell-toolbar">
+        <ThemeToggle />
+      </div>
+      {!bootstrap || !settingsDraft ? (
+          <section className="login-page">
+            <header className="login-hero">
+              <h1>economy rice</h1>
+              <p className="lede">
+                Group rewards, transfers, shop pricing, role capabilities, and passive chat earn rates all live here.
+              </p>
+            </header>
+
+            <article className="login-card">
+              <h2>Discord Sign-In</h2>
+              <p>
+                Use your Discord account for the configured server. Dashboard access follows your current guild permissions
+                and any roles marked with <strong>manage dashboard</strong>.
+              </p>
+              <button onClick={handleLogin} disabled={isBusy}>
+                {isBusy ? "Redirecting..." : "Sign In with Discord"}
+              </button>
+              <p className="status-bar">{status}</p>
+            </article>
+          </section>
+        ) : (
+          <>
       {isDesignPreview() ? (
         <p className="design-preview-banner" role="status">
           Design preview: local mock data only. No backend or Discord required; saves stay in this browser session.
         </p>
       ) : null}
       <header className="topbar">
-        <div className="topbar-brand">
+        <hgroup className="topbar-brand">
           <h1>{bootstrap.settings.appName}</h1>
           <p>Manage groups, roles, shop, and economy settings.</p>
-        </div>
+        </hgroup>
         <div className="topbar-right">
           {sessionUser ? (
-            <div className="session-badge">
+            <p className="session-badge">
               {sessionUser.avatarUrl ? <img src={sessionUser.avatarUrl} alt="" /> : null}
               <strong>{sessionUser.displayName}</strong>
-            </div>
+            </p>
           ) : null}
           <button
             onClick={() => void loadBootstrap().catch(() => undefined)}
@@ -239,83 +260,79 @@ export default function App() {
         </div>
       </header>
 
-      <section className="stats-row">
+      <dl className="stats-row">
         <div className="stat-item">
-          <span>Groups</span>
-          <strong>{bootstrap.groups.length}</strong>
+          <dt>Groups</dt>
+          <dd>{bootstrap.groups.length}</dd>
         </div>
         <div className="stat-item">
-          <span>Role Rules</span>
-          <strong>{bootstrap.capabilities.length}</strong>
+          <dt>Role Rules</dt>
+          <dd>{bootstrap.capabilities.length}</dd>
         </div>
         <div className="stat-item">
-          <span>Shop Items</span>
-          <strong>{bootstrap.shopItems.length}</strong>
+          <dt>Shop Items</dt>
+          <dd>{bootstrap.shopItems.length}</dd>
         </div>
         <div className="stat-item">
-          <span>Listings</span>
-          <strong>{bootstrap.listings.length}</strong>
+          <dt>Listings</dt>
+          <dd>{bootstrap.listings.length}</dd>
         </div>
-      </section>
+      </dl>
 
       <section className="walkthrough-section">
-        <div className="section-header">
-          <div>
+        <header className="section-header">
+          <hgroup>
             <p className="section-label">Phase 1</p>
             <h2>Class launch walkthrough</h2>
-          </div>
-        </div>
-        <div className="walkthrough">
-          <div className="walkthrough-step">
-            <div className="step-number">1</div>
+          </hgroup>
+        </header>
+        <ol className="walkthrough">
+          <li>
             <h3>Give staff roles their powers</h3>
             <p>
               In <strong>Capability matrix</strong>, add your admin and alumni roles, then turn on <strong>award</strong>{" "}
               and <strong>deduct</strong>. Set a max award if you want a hard cap per command.
             </p>
-          </div>
-          <div className="walkthrough-step">
-            <div className="step-number">2</div>
+          </li>
+          <li>
             <h3>Map every student team to a Discord role</h3>
             <p>
               In <strong>Role mapping</strong>, create one group per student role. Students can only use{" "}
               <code>/balance</code> when their Discord role maps to exactly one active group.
             </p>
-          </div>
-          <div className="walkthrough-step">
-            <div className="step-number">3</div>
+          </li>
+          <li>
             <h3>Name the economy once</h3>
             <p>
               In <strong>Economy shape</strong>, set the labels for <strong>{settingsDraft.pointsName}</strong> and{" "}
               <strong>{settingsDraft.currencyName}</strong>, plus any passive earning rules you want before class starts.
             </p>
-          </div>
-          <div className="walkthrough-step">
-            <div className="step-number">4</div>
+          </li>
+          <li>
             <h3>Smoke test the class commands in Discord</h3>
             <p>
               Staff should test award and deduct flows with a reason. Students should test their own balance, the shared
               leaderboard, and the paged ledger feed.
             </p>
-          </div>
-        </div>
-        <div className="walkthrough-commands">
+          </li>
+        </ol>
+        <p className="walkthrough-commands">
           <code>/award targets:@gryffindor points:5 reason:"helped another group"</code>
           <code>/deduct targets:@gryffindor points:2 reason:"late submission"</code>
           <code>/balance</code>
           <code>/leaderboard</code>
           <code>/ledger</code>
           <code>/ledger page:2</code>
-        </div>
+        </p>
       </section>
 
       <section className="two-col" style={{ marginTop: "1rem" }}>
         <article className="section">
-          <div className="section-header">
-            <div>
+          <header className="section-header">
+            <hgroup>
               <p className="section-label">Settings</p>
               <h2>Economy shape</h2>
-            </div>
+            </hgroup>
             <button
               className="primary-action"
               onClick={async () => {
@@ -334,7 +351,7 @@ export default function App() {
             >
               Save Settings
             </button>
-          </div>
+          </header>
 
           <div className="form-grid">
             <label>
@@ -494,11 +511,11 @@ export default function App() {
         </article>
 
         <article className="section">
-          <div className="section-header">
-            <div>
+          <header className="section-header">
+            <hgroup>
               <p className="section-label">Roles</p>
               <h2>Capability matrix</h2>
-            </div>
+            </hgroup>
             <button
               className="primary-action"
               onClick={async () => {
@@ -518,134 +535,103 @@ export default function App() {
             >
               Save Roles
             </button>
-          </div>
+          </header>
 
-          <div className="stack">
-            {roleDrafts.map((role, index) => (
-              <div className="data-row role-row" key={`${role.roleId}-${index}`}>
-                <select
-                  value={role.roleId}
-                  onChange={(event) => {
-                    const selected = discordRoles.find((candidate) => candidate.id === event.target.value);
-                    const next = [...roleDrafts];
-                    next[index] = {
-                      ...role,
-                      roleId: event.target.value,
-                      roleName: selected?.name ?? role.roleName,
-                    };
-                    setRoleDrafts(next);
-                  }}
-                >
-                  <option value="">Select role</option>
-                  {roleOptions}
-                </select>
-                <input
-                  value={role.roleName}
-                  onChange={(event) => {
-                    const next = [...roleDrafts];
-                    next[index] = { ...role, roleName: event.target.value };
-                    setRoleDrafts(next);
-                  }}
-                  placeholder="Role label"
-                />
-                <input
-                  type="number"
-                  value={role.maxAward ?? ""}
-                  onChange={(event) => {
-                    const next = [...roleDrafts];
-                    next[index] = { ...role, maxAward: event.target.value ? Number(event.target.value) : null };
-                    setRoleDrafts(next);
-                  }}
-                  placeholder="Max award"
-                />
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={role.canManageDashboard}
-                    onChange={(event) => {
-                      const next = [...roleDrafts];
-                      next[index] = { ...role, canManageDashboard: event.target.checked };
-                      setRoleDrafts(next);
-                    }}
-                  />
-                  dashboard
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={role.canAward}
-                    onChange={(event) => {
-                      const next = [...roleDrafts];
-                      next[index] = { ...role, canAward: event.target.checked };
-                      setRoleDrafts(next);
-                    }}
-                  />
-                  award
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={role.canDeduct}
-                    onChange={(event) => {
-                      const next = [...roleDrafts];
-                      next[index] = { ...role, canDeduct: event.target.checked };
-                      setRoleDrafts(next);
-                    }}
-                  />
-                  deduct
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={role.canMultiAward}
-                    onChange={(event) => {
-                      const next = [...roleDrafts];
-                      next[index] = { ...role, canMultiAward: event.target.checked };
-                      setRoleDrafts(next);
-                    }}
-                  />
-                  multi
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={role.canSell}
-                    onChange={(event) => {
-                      const next = [...roleDrafts];
-                      next[index] = { ...role, canSell: event.target.checked };
-                      setRoleDrafts(next);
-                    }}
-                  />
-                  sell
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={role.canReceiveAwards}
-                    onChange={(event) => {
-                      const next = [...roleDrafts];
-                      next[index] = { ...role, canReceiveAwards: event.target.checked };
-                      setRoleDrafts(next);
-                    }}
-                  />
-                  receivable
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={role.isGroupRole}
-                    onChange={(event) => {
-                      const next = [...roleDrafts];
-                      next[index] = { ...role, isGroupRole: event.target.checked };
-                      setRoleDrafts(next);
-                    }}
-                  />
-                  group role
-                </label>
-              </div>
-            ))}
-            <div className="add-row">
+          <div className="capability-matrix">
+            <div className="matrix-scroll">
+              <table className="matrix-table capability-table">
+                <thead>
+                  <tr>
+                    <th scope="col" className="capability-table__role">
+                      Discord role
+                    </th>
+                    <th scope="col" className="capability-table__label">
+                      Label
+                    </th>
+                    <th scope="col" className="capability-table__max">
+                      Max award
+                    </th>
+                    {CAPABILITY_COLUMNS.map((col) => (
+                      <th
+                        key={col.key}
+                        scope="col"
+                        className="capability-table__cap"
+                        title={col.header}
+                      >
+                        <span className="capability-table__abbr">{col.abbr}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {roleDrafts.map((role, index) => (
+                    <tr key={`${role.roleId}-${index}`}>
+                      <td>
+                        <select
+                          value={role.roleId}
+                          aria-label="Discord role"
+                          onChange={(event) => {
+                            const selected = discordRoles.find((candidate) => candidate.id === event.target.value);
+                            const next = [...roleDrafts];
+                            next[index] = {
+                              ...role,
+                              roleId: event.target.value,
+                              roleName: selected?.name ?? role.roleName,
+                            };
+                            setRoleDrafts(next);
+                          }}
+                        >
+                          <option value="">Select role</option>
+                          {roleOptions}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          value={role.roleName}
+                          aria-label="Role label"
+                          onChange={(event) => {
+                            const next = [...roleDrafts];
+                            next[index] = { ...role, roleName: event.target.value };
+                            setRoleDrafts(next);
+                          }}
+                          placeholder="Display label"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          value={role.maxAward ?? ""}
+                          aria-label="Max award"
+                          onChange={(event) => {
+                            const next = [...roleDrafts];
+                            next[index] = { ...role, maxAward: event.target.value ? Number(event.target.value) : null };
+                            setRoleDrafts(next);
+                          }}
+                          placeholder="—"
+                        />
+                      </td>
+                      {CAPABILITY_COLUMNS.map((col) => (
+                        <td key={col.key} className="capability-table__cap">
+                          <input
+                            type="checkbox"
+                            checked={role[col.key]}
+                            aria-label={col.header}
+                            onChange={(event) => {
+                              const next = [...roleDrafts];
+                              next[index] = { ...role, [col.key]: event.target.checked };
+                              setRoleDrafts(next);
+                            }}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="capability-matrix-add">
               <button
+                type="button"
                 onClick={() =>
                   setRoleDrafts([
                     ...roleDrafts,
@@ -673,236 +659,347 @@ export default function App() {
 
       <section className="two-col">
         <article className="section">
-          <div className="section-header">
-            <div>
+          <header className="section-header">
+            <hgroup>
               <p className="section-label">Groups</p>
               <h2>Role mapping</h2>
+            </hgroup>
+          </header>
+          <div className="group-mapping-matrix">
+            <div className="matrix-scroll">
+              <table className="matrix-table group-table">
+                <thead>
+                  <tr>
+                    <th scope="col" className="col-display">
+                      Display name
+                    </th>
+                    <th scope="col" className="col-slug">
+                      Slug
+                    </th>
+                    <th scope="col" className="col-role">
+                      Discord role
+                    </th>
+                    <th scope="col" className="col-mentor">
+                      Mentor
+                    </th>
+                    <th scope="col" className="col-aliases">
+                      Aliases
+                    </th>
+                    <th scope="col" className="matrix-table__th--center col-active">
+                      Active
+                    </th>
+                    <th scope="col" className="matrix-table__th--actions col-actions">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupDrafts.map((group, index) => (
+                    <tr key={`${group.id ?? "new"}-${index}`}>
+                      <td className="col-display">
+                        <input
+                          value={group.displayName}
+                          aria-label="Display name"
+                          onChange={(event) => {
+                            const next = [...groupDrafts];
+                            next[index] = { ...group, displayName: event.target.value };
+                            setGroupDrafts(next);
+                          }}
+                          placeholder="Team name"
+                        />
+                      </td>
+                      <td className="col-slug">
+                        <input
+                          value={group.slug ?? ""}
+                          aria-label="Slug"
+                          onChange={(event) => {
+                            const next = [...groupDrafts];
+                            next[index] = { ...group, slug: event.target.value };
+                            setGroupDrafts(next);
+                          }}
+                          placeholder="team-slug"
+                        />
+                      </td>
+                      <td className="col-role">
+                        <select
+                          value={group.roleId}
+                          aria-label="Discord role"
+                          onChange={(event) => {
+                            const next = [...groupDrafts];
+                            next[index] = { ...group, roleId: event.target.value };
+                            setGroupDrafts(next);
+                          }}
+                        >
+                          <option value="">Select role</option>
+                          {roleOptions}
+                        </select>
+                      </td>
+                      <td className="col-mentor">
+                        <input
+                          value={group.mentorName ?? ""}
+                          aria-label="Mentor"
+                          onChange={(event) => {
+                            const next = [...groupDrafts];
+                            next[index] = { ...group, mentorName: event.target.value };
+                            setGroupDrafts(next);
+                          }}
+                          placeholder="Optional"
+                        />
+                      </td>
+                      <td className="col-aliases">
+                        <input
+                          value={group.aliasesText}
+                          aria-label="Aliases"
+                          onChange={(event) => {
+                            const next = [...groupDrafts];
+                            next[index] = { ...group, aliasesText: event.target.value };
+                            setGroupDrafts(next);
+                          }}
+                          placeholder="comma separated"
+                        />
+                      </td>
+                      <td className="col-active">
+                        <input
+                          type="checkbox"
+                          checked={group.active}
+                          aria-label="Active"
+                          onChange={(event) => {
+                            const next = [...groupDrafts];
+                            next[index] = { ...group, active: event.target.checked };
+                            setGroupDrafts(next);
+                          }}
+                        />
+                      </td>
+                      <td className="col-actions">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setIsBusy(true);
+                            try {
+                              await api.saveGroup(group);
+                              await loadBootstrap();
+                              setStatus(`Saved ${group.displayName || "group"}.`);
+                            } catch (error) {
+                              setStatus(error instanceof Error ? error.message : "Failed to save group.");
+                            } finally {
+                              setIsBusy(false);
+                            }
+                          }}
+                          disabled={!group.displayName || !group.roleId}
+                        >
+                          Save
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
-          <div className="stack">
-            {groupDrafts.map((group, index) => (
-              <div className="data-row group-row" key={`${group.id ?? "new"}-${index}`}>
-                <label>Display name</label>
-                <input
-                  value={group.displayName}
-                  onChange={(event) => {
-                    const next = [...groupDrafts];
-                    next[index] = { ...group, displayName: event.target.value };
-                    setGroupDrafts(next);
-                  }}
-                  placeholder="Display name"
-                />
-                <label>Slug</label>
-                <input
-                  value={group.slug ?? ""}
-                  onChange={(event) => {
-                    const next = [...groupDrafts];
-                    next[index] = { ...group, slug: event.target.value };
-                    setGroupDrafts(next);
-                  }}
-                  placeholder="slug"
-                />
-                <label>Role</label>
-                <select
-                  value={group.roleId}
-                  onChange={(event) => {
-                    const next = [...groupDrafts];
-                    next[index] = { ...group, roleId: event.target.value };
-                    setGroupDrafts(next);
-                  }}
-                >
-                  <option value="">Select role</option>
-                  {roleOptions}
-                </select>
-                <label>Mentor</label>
-                <input
-                  value={group.mentorName ?? ""}
-                  onChange={(event) => {
-                    const next = [...groupDrafts];
-                    next[index] = { ...group, mentorName: event.target.value };
-                    setGroupDrafts(next);
-                  }}
-                  placeholder="Mentor"
-                />
-                <label>Aliases</label>
-                <input
-                  value={group.aliasesText}
-                  onChange={(event) => {
-                    const next = [...groupDrafts];
-                    next[index] = { ...group, aliasesText: event.target.value };
-                    setGroupDrafts(next);
-                  }}
-                  placeholder="comma separated"
-                />
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={group.active}
-                    onChange={(event) => {
-                      const next = [...groupDrafts];
-                      next[index] = { ...group, active: event.target.checked };
-                      setGroupDrafts(next);
-                    }}
-                  />
-                  Active
-                </label>
-                <button
-                  onClick={async () => {
-                    setIsBusy(true);
-                    try {
-                      await api.saveGroup(group);
-                      await loadBootstrap();
-                      setStatus(`Saved ${group.displayName || "group"}.`);
-                    } catch (error) {
-                      setStatus(error instanceof Error ? error.message : "Failed to save group.");
-                    } finally {
-                      setIsBusy(false);
-                    }
-                  }}
-                  disabled={!group.displayName || !group.roleId}
-                >
-                  Save
-                </button>
-              </div>
-            ))}
           </div>
         </article>
 
         <article className="section">
-          <div className="section-header">
-            <div>
+          <header className="section-header">
+            <hgroup>
               <p className="section-label">Shop</p>
               <h2>Catalog</h2>
+            </hgroup>
+          </header>
+          <div className="shop-catalog-matrix">
+            <div className="matrix-scroll">
+              <table className="matrix-table shop-table">
+                <thead>
+                  <tr>
+                    <th scope="col" className="col-name">
+                      Name
+                    </th>
+                    <th scope="col" className="col-description">
+                      Description
+                    </th>
+                    <th scope="col" className="col-cost">
+                      Cost
+                    </th>
+                    <th scope="col" className="col-stock">
+                      Stock
+                    </th>
+                    <th scope="col" className="col-fulfil">
+                      Fulfilment
+                    </th>
+                    <th scope="col" className="matrix-table__th--center col-enabled">
+                      Enabled
+                    </th>
+                    <th scope="col" className="matrix-table__th--actions col-actions">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shopDrafts.map((item, index) => (
+                    <tr key={`${item.id ?? "new"}-${index}`}>
+                      <td className="col-name">
+                        <input
+                          value={item.name}
+                          aria-label="Item name"
+                          onChange={(event) => {
+                            const next = [...shopDrafts];
+                            next[index] = { ...item, name: event.target.value };
+                            setShopDrafts(next);
+                          }}
+                          placeholder="Item name"
+                        />
+                      </td>
+                      <td className="col-description">
+                        <input
+                          value={item.description}
+                          aria-label="Description"
+                          onChange={(event) => {
+                            const next = [...shopDrafts];
+                            next[index] = { ...item, description: event.target.value };
+                            setShopDrafts(next);
+                          }}
+                          placeholder="Shown in the shop"
+                        />
+                      </td>
+                      <td className="col-cost">
+                        <input
+                          type="number"
+                          value={item.currencyCost}
+                          aria-label="Cost in currency"
+                          onChange={(event) => {
+                            const next = [...shopDrafts];
+                            next[index] = { ...item, currencyCost: Number(event.target.value) };
+                            setShopDrafts(next);
+                          }}
+                          placeholder="0"
+                        />
+                      </td>
+                      <td className="col-stock">
+                        <input
+                          type="number"
+                          value={item.stock ?? ""}
+                          aria-label="Stock"
+                          onChange={(event) => {
+                            const next = [...shopDrafts];
+                            next[index] = { ...item, stock: event.target.value ? Number(event.target.value) : null };
+                            setShopDrafts(next);
+                          }}
+                          placeholder="∞"
+                        />
+                      </td>
+                      <td className="col-fulfil">
+                        <input
+                          value={item.fulfillmentInstructions ?? ""}
+                          aria-label="Fulfilment notes"
+                          onChange={(event) => {
+                            const next = [...shopDrafts];
+                            next[index] = { ...item, fulfillmentInstructions: event.target.value };
+                            setShopDrafts(next);
+                          }}
+                          placeholder="How to redeem"
+                        />
+                      </td>
+                      <td className="col-enabled">
+                        <input
+                          type="checkbox"
+                          checked={item.enabled}
+                          aria-label="Enabled"
+                          onChange={(event) => {
+                            const next = [...shopDrafts];
+                            next[index] = { ...item, enabled: event.target.checked };
+                            setShopDrafts(next);
+                          }}
+                        />
+                      </td>
+                      <td className="col-actions">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setIsBusy(true);
+                            try {
+                              await api.saveShopItem(item);
+                              await loadBootstrap();
+                              setStatus(`Saved ${item.name || "shop item"}.`);
+                            } catch (error) {
+                              setStatus(error instanceof Error ? error.message : "Failed to save shop item.");
+                            } finally {
+                              setIsBusy(false);
+                            }
+                          }}
+                          disabled={!item.name || !item.description}
+                        >
+                          Save
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
-          <div className="stack">
-            {shopDrafts.map((item, index) => (
-              <div className="data-row shop-row" key={`${item.id ?? "new"}-${index}`}>
-                <label>Name</label>
-                <input
-                  value={item.name}
-                  onChange={(event) => {
-                    const next = [...shopDrafts];
-                    next[index] = { ...item, name: event.target.value };
-                    setShopDrafts(next);
-                  }}
-                  placeholder="Item name"
-                />
-                <label>Description</label>
-                <input
-                  value={item.description}
-                  onChange={(event) => {
-                    const next = [...shopDrafts];
-                    next[index] = { ...item, description: event.target.value };
-                    setShopDrafts(next);
-                  }}
-                  placeholder="Description"
-                />
-                <label>Cost</label>
-                <input
-                  type="number"
-                  value={item.currencyCost}
-                  onChange={(event) => {
-                    const next = [...shopDrafts];
-                    next[index] = { ...item, currencyCost: Number(event.target.value) };
-                    setShopDrafts(next);
-                  }}
-                  placeholder="Cost"
-                />
-                <label>Stock</label>
-                <input
-                  type="number"
-                  value={item.stock ?? ""}
-                  onChange={(event) => {
-                    const next = [...shopDrafts];
-                    next[index] = { ...item, stock: event.target.value ? Number(event.target.value) : null };
-                    setShopDrafts(next);
-                  }}
-                  placeholder="Stock"
-                />
-                <label>Fulfillment</label>
-                <input
-                  value={item.fulfillmentInstructions ?? ""}
-                  onChange={(event) => {
-                    const next = [...shopDrafts];
-                    next[index] = { ...item, fulfillmentInstructions: event.target.value };
-                    setShopDrafts(next);
-                  }}
-                  placeholder="Notes"
-                />
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={item.enabled}
-                    onChange={(event) => {
-                      const next = [...shopDrafts];
-                      next[index] = { ...item, enabled: event.target.checked };
-                      setShopDrafts(next);
-                    }}
-                  />
-                  Enabled
-                </label>
-                <button
-                  onClick={async () => {
-                    setIsBusy(true);
-                    try {
-                      await api.saveShopItem(item);
-                      await loadBootstrap();
-                      setStatus(`Saved ${item.name || "shop item"}.`);
-                    } catch (error) {
-                      setStatus(error instanceof Error ? error.message : "Failed to save shop item.");
-                    } finally {
-                      setIsBusy(false);
-                    }
-                  }}
-                  disabled={!item.name || !item.description}
-                >
-                  Save
-                </button>
-              </div>
-            ))}
           </div>
         </article>
       </section>
 
       <section className="section leaderboard-section">
-        <div className="section-header">
-          <div>
+        <header className="section-header">
+          <hgroup>
             <p className="section-label">Live view</p>
             <h2>Leaderboard and activity</h2>
-          </div>
-        </div>
+          </hgroup>
+        </header>
 
-        <div className="dual-list">
-          <div>
-            <h3>Leaderboard</h3>
-            <ol className="leaderboard">
-              {bootstrap.leaderboard.map((group) => (
-                <li key={group.id}>
-                  <span>{group.displayName}</span>
-                  <strong>
-                    {group.pointsBalance} / {group.currencyBalance}
-                  </strong>
-                </li>
-              ))}
-            </ol>
+        <section aria-labelledby="leaderboard-heading" className="leaderboard-panel">
+          <h3 id="leaderboard-heading">Leaderboard</h3>
+          <div className="matrix-scroll matrix-scroll--flush">
+            <table className="matrix-table leaderboard-table">
+              <thead>
+                <tr>
+                  <th scope="col">Group</th>
+                  <th scope="col">Points</th>
+                  <th scope="col">Currency</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bootstrap.leaderboard.map((group) => (
+                  <tr key={group.id}>
+                    <td>{group.displayName}</td>
+                    <td className="leaderboard-table__num">{group.pointsBalance}</td>
+                    <td className="leaderboard-table__num">{group.currencyBalance}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div>
-            <h3>Ledger</h3>
-            <ul className="ledger">
-              {bootstrap.ledger.map((entry) => (
-                <li key={entry.id}>
-                  <strong>{entry.type}</strong>
-                  <p>{entry.description}</p>
-                  <small>{new Date(entry.createdAt).toLocaleString()}</small>
-                </li>
-              ))}
-            </ul>
+        </section>
+        <section aria-labelledby="ledger-heading" className="ledger-panel">
+          <h3 id="ledger-heading">Ledger</h3>
+          <div className="matrix-scroll matrix-scroll--flush">
+            <table className="matrix-table ledger-table">
+              <thead>
+                <tr>
+                  <th scope="col">Type</th>
+                  <th scope="col">When</th>
+                  <th scope="col">Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bootstrap.ledger.map((entry) => (
+                  <tr key={entry.id}>
+                    <td className="ledger-table__type">{entry.type}</td>
+                    <td className="ledger-table__when">
+                      <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>
+                    </td>
+                    <td>{entry.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
+        </section>
       </section>
 
       <footer className="status-bar">{status}</footer>
-    </main>
+          </>
+        )}
+      </main>
   );
 }
