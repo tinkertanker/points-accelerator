@@ -25,6 +25,11 @@ const envSchema = z.object({
   ADMIN_TOKEN: z.preprocess((value) => (value === "" ? undefined : value), z.string().min(8).optional()),
   PUBLIC_APP_NAME: z.string().default("economy rice"),
   MESSAGE_REWARD_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(60),
+  R2_ENDPOINT: optionalUrlString(),
+  R2_ACCESS_KEY_ID: optionalNonEmptyString(),
+  R2_SECRET_ACCESS_KEY: optionalNonEmptyString(),
+  R2_BUCKET_NAME: optionalNonEmptyString(),
+  R2_PUBLIC_URL: optionalUrlString(),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

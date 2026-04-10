@@ -22,7 +22,8 @@ type LedgerEntryKind =
   | "TRANSFER"
   | "DONATION"
   | "SHOP_REDEMPTION"
-  | "ADJUSTMENT";
+  | "ADJUSTMENT"
+  | "SUBMISSION_REWARD";
 
 type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
 
@@ -43,23 +44,30 @@ export class EconomyService {
     currencyDelta: number;
     description: string;
     type?: LedgerEntryKind;
+    /** Skip actor permission checks for system-initiated awards (e.g. submission rewards). */
+    systemAction?: boolean;
+    executor?: PrismaExecutor;
   }) {
     if (params.targetGroupIds.length === 0) {
       throw new AppError("Select at least one group.");
     }
 
-    const actorCapabilities = await this.roleCapabilityService.listForRoleIds(params.guildId, params.actor.roleIds);
-    const resolved = resolveCapabilities(actorCapabilities);
-    const magnitude = maxDecimalMagnitude(params.pointsDelta, params.currencyDelta);
+    const executor = params.executor ?? this.prisma;
     const isDeduction = params.pointsDelta < 0 || params.currencyDelta < 0;
-    assertCanAward({
-      capabilities: resolved,
-      magnitude,
-      targetCount: params.targetGroupIds.length,
-      isDeduction,
-    });
 
-    const groups = await this.prisma.group.findMany({
+    if (!params.systemAction) {
+      const actorCapabilities = await this.roleCapabilityService.listForRoleIds(params.guildId, params.actor.roleIds);
+      const resolved = resolveCapabilities(actorCapabilities);
+      const magnitude = maxDecimalMagnitude(params.pointsDelta, params.currencyDelta);
+      assertCanAward({
+        capabilities: resolved,
+        magnitude,
+        targetCount: params.targetGroupIds.length,
+        isDeduction,
+      });
+    }
+
+    const groups = await executor.group.findMany({
       where: {
         guildId: params.guildId,
         id: {
@@ -72,7 +80,7 @@ export class EconomyService {
       throw new AppError("One or more target groups do not exist.", 404);
     }
 
-    const targetCapabilities = await this.prisma.discordRoleCapability.findMany({
+    const targetCapabilities = await executor.discordRoleCapability.findMany({
       where: {
         guildId: params.guildId,
         roleId: {
@@ -90,7 +98,7 @@ export class EconomyService {
       throw new AppError(`${blockedGroup.displayName} is not configured to receive awards.`, 409);
     }
 
-    const entry = await this.prisma.ledgerEntry.create({
+    const entry = await executor.ledgerEntry.create({
       data: {
         guildId: params.guildId,
         type:
@@ -125,6 +133,7 @@ export class EconomyService {
         pointsDelta: params.pointsDelta,
         currencyDelta: params.currencyDelta,
       },
+      executor,
     });
 
     return entry;

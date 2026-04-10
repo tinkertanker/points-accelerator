@@ -22,14 +22,23 @@ export type ResolvedCapabilities = {
 
 export function resolveCapabilities(capabilities: RoleCapabilityLike[]): ResolvedCapabilities {
   return capabilities.reduce<ResolvedCapabilities>(
-    (resolved, capability) => ({
-      canManageDashboard: resolved.canManageDashboard || capability.canManageDashboard,
-      canAward: resolved.canAward || capability.canAward,
-      maxAward: Math.max(resolved.maxAward, decimalToNumber(capability.maxAward)),
-      canDeduct: resolved.canDeduct || capability.canDeduct,
-      canMultiAward: resolved.canMultiAward || capability.canMultiAward,
-      canSell: resolved.canSell || capability.canSell,
-    }),
+    (resolved, capability) => {
+      const nextMaxAward =
+        capability.canAward && capability.maxAward === null
+          ? Number.POSITIVE_INFINITY
+          : capability.canAward
+            ? Math.max(resolved.maxAward, decimalToNumber(capability.maxAward))
+            : resolved.maxAward;
+
+      return {
+        canManageDashboard: resolved.canManageDashboard || capability.canManageDashboard,
+        canAward: resolved.canAward || capability.canAward,
+        maxAward: nextMaxAward,
+        canDeduct: resolved.canDeduct || capability.canDeduct,
+        canMultiAward: resolved.canMultiAward || capability.canMultiAward,
+        canSell: resolved.canSell || capability.canSell,
+      };
+    },
     {
       canManageDashboard: false,
       canAward: false,
@@ -60,7 +69,7 @@ export function assertCanAward(params: {
     throw new AppError("This role cannot award groups.", 403);
   }
 
-  if (magnitude > capabilities.maxAward) {
+  if (Number.isFinite(capabilities.maxAward) && magnitude > capabilities.maxAward) {
     throw new AppError(`This role can award at most ${capabilities.maxAward}.`, 403);
   }
 

@@ -29,6 +29,7 @@ Run locally:
 - Save settings
 - Create role capability rules
 - Create group mappings
+- Create at least one assignment
 - Create at least two shop items
 - Confirm leaderboard and ledger render
 
@@ -65,6 +66,17 @@ Run locally:
 - Create a `/sell` listing from a role with sell permission
 - Confirm it posts in the configured listing channel
 - Confirm a user without sell permission is rejected
+
+### Submissions
+
+- Register at least two student test users with `/register`
+- Verify non-alphanumeric index IDs are rejected
+- Submit one assignment with `/submit`
+- Confirm an empty submission is rejected
+- Run `/submissions` and `/missing` from a staff role
+- Confirm a non-staff user is blocked from `/submissions`
+- Review a submission with `/review_submission`
+- Verify approved and outstanding reviews create `SUBMISSION_REWARD` ledger entries
 
 ## Production cutover
 

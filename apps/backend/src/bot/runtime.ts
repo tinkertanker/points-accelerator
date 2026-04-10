@@ -9,10 +9,13 @@ import {
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
   type GuildTextBasedChannel,
+  type GuildMember,
 } from "discord.js";
 
 import type { AppEnv } from "../config/env.js";
+import { resolveCapabilities } from "../domain/permissions.js";
 import type { AppServices } from "../services/app-services.js";
+import type { StorageService } from "../services/storage-service.js";
 import { AppError } from "../utils/app-error.js";
 
 type CooldownEntry = {
@@ -20,6 +23,11 @@ type CooldownEntry = {
 };
 
 type CommandLedgerEntry = Awaited<ReturnType<AppServices["economyService"]["getLedger"]>>[number];
+type ActiveAssignment = Awaited<ReturnType<AppServices["assignmentService"]["listActive"]>>[number];
+type AssignmentLookupResult =
+  | { kind: "resolved"; assignment: ActiveAssignment }
+  | { kind: "ambiguous"; matches: ActiveAssignment[] }
+  | { kind: "missing" };
 
 const MAX_LEDGER_LINE_LENGTH = 160;
 
@@ -57,6 +65,7 @@ export class BotRuntime {
   public constructor(
     private readonly env: AppEnv,
     private readonly services: AppServices,
+    private readonly storageService: StorageService,
   ) {}
 
   public async start() {
@@ -220,6 +229,63 @@ export class BotRuntime {
       channelId: sent.channelId,
       messageId: sent.id,
     };
+  }
+
+  private async assertCanManageSubmissions(member: GuildMember | null, roleIds: string[]) {
+    if (!member) {
+      throw new AppError("This command is only available to configured staff roles.", 403);
+    }
+
+    if (
+      member.permissions.has(PermissionFlagsBits.Administrator) ||
+      member.permissions.has(PermissionFlagsBits.ManageGuild)
+    ) {
+      return;
+    }
+
+    const capabilities = await this.services.roleCapabilityService.listForRoleIds(this.env.GUILD_ID, roleIds);
+    const resolved = resolveCapabilities(capabilities);
+    const canManageSubmissions = resolved.canManageDashboard || resolved.canAward || resolved.canDeduct;
+
+    if (!canManageSubmissions) {
+      throw new AppError("This command is only available to configured staff roles.", 403);
+    }
+  }
+
+  private resolveActiveAssignment(assignments: ActiveAssignment[], identifier: string): AssignmentLookupResult {
+    const value = identifier.trim();
+    if (!value) {
+      return { kind: "missing" };
+    }
+
+    const exactIdMatch = assignments.find((assignment) => assignment.id === value);
+    if (exactIdMatch) {
+      return { kind: "resolved", assignment: exactIdMatch };
+    }
+
+    const titleMatches = assignments.filter((assignment) => assignment.title.toLowerCase() === value.toLowerCase());
+    if (titleMatches.length === 1) {
+      return { kind: "resolved", assignment: titleMatches[0]! };
+    }
+    if (titleMatches.length > 1) {
+      return { kind: "ambiguous", matches: titleMatches };
+    }
+
+    const idPrefixMatches = assignments.filter((assignment) => assignment.id.startsWith(value));
+    if (idPrefixMatches.length === 1) {
+      return { kind: "resolved", assignment: idPrefixMatches[0]! };
+    }
+    if (idPrefixMatches.length > 1) {
+      return { kind: "ambiguous", matches: idPrefixMatches };
+    }
+
+    return { kind: "missing" };
+  }
+
+  private formatAssignmentChoices(assignments: ActiveAssignment[]) {
+    return assignments.length > 0
+      ? assignments.map((assignment) => `"${assignment.title}" [${assignment.id}]`).join(", ")
+      : "none";
   }
 
   private async handlePassiveMessage(params: {
@@ -439,6 +505,212 @@ export class BotRuntime {
         });
         return;
       }
+      case "register": {
+        const indexId = interaction.options.getString("index_id", true);
+        const groupIdentifier = interaction.options.getString("group", true);
+        const targetGroup = await this.services.groupService.resolveGroupByIdentifier(this.env.GUILD_ID, groupIdentifier);
+        if (!targetGroup) {
+          throw new AppError("Could not find that group. Check the name or ask an admin.");
+        }
+
+        const participant = await this.services.participantService.register({
+          guildId: this.env.GUILD_ID,
+          discordUserId: interaction.user.id,
+          discordUsername: interaction.user.username,
+          indexId,
+          groupId: targetGroup.id,
+        });
+
+        await interaction.reply({
+          content: `Registered! Index ID: **${participant.indexId}**, Group: **${participant.group.displayName}**. You can now use /submit.`,
+          ephemeral: true,
+        });
+        return;
+      }
+      case "submit": {
+        await interaction.deferReply({ ephemeral: true });
+
+        const participant = await this.services.participantService.findByDiscordUser(
+          this.env.GUILD_ID,
+          interaction.user.id,
+        );
+        if (!participant) {
+          await interaction.editReply(
+            "You need to register first. Use `/register` with your index ID and group.",
+          );
+          return;
+        }
+
+        const assignmentIdentifier = interaction.options.getString("assignment", true);
+        const text = interaction.options.getString("text") ?? "";
+        const attachment = interaction.options.getAttachment("image");
+
+        const activeAssignments = await this.services.assignmentService.listActive(this.env.GUILD_ID);
+        const assignmentLookup = this.resolveActiveAssignment(activeAssignments, assignmentIdentifier);
+
+        if (assignmentLookup.kind === "missing") {
+          await interaction.editReply(
+            `Assignment not found. Available assignments: ${this.formatAssignmentChoices(activeAssignments)}`,
+          );
+          return;
+        }
+        if (assignmentLookup.kind === "ambiguous") {
+          await interaction.editReply(
+            `Multiple active assignments match "${assignmentIdentifier}". Use the assignment ID instead: ${this.formatAssignmentChoices(assignmentLookup.matches)}`,
+          );
+          return;
+        }
+
+        const assignment = assignmentLookup.assignment;
+
+        let imageUrl: string | undefined;
+        let imageKey: string | undefined;
+
+        if (attachment) {
+          if (!attachment.contentType?.startsWith("image/")) {
+            await interaction.editReply("Only image files are accepted as attachments.");
+            return;
+          }
+
+          if (attachment.size > 10 * 1024 * 1024) {
+            await interaction.editReply("Image must be under 10 MB.");
+            return;
+          }
+
+          if (this.storageService.isConfigured) {
+            try {
+              const response = await fetch(attachment.url);
+              const buffer = Buffer.from(await response.arrayBuffer());
+              const result = await this.storageService.upload({
+                buffer,
+                contentType: attachment.contentType ?? "image/png",
+                folder: `submissions/${this.env.GUILD_ID}`,
+                originalFilename: attachment.name ?? undefined,
+              });
+              imageUrl = result.url;
+              imageKey = result.key;
+            } catch {
+              await interaction.editReply("Failed to upload image. Please try again or contact an admin.");
+              return;
+            }
+          } else {
+            imageUrl = attachment.url;
+          }
+        }
+
+        const submission = await this.services.submissionService.create({
+          guildId: this.env.GUILD_ID,
+          assignmentId: assignment.id,
+          participantId: participant.id,
+          text,
+          imageUrl,
+          imageKey,
+        });
+
+        await interaction.editReply(
+          `Submission received for **${submission.assignment.title}**! It will be reviewed by an admin.`,
+        );
+        return;
+      }
+      case "submissions": {
+        await this.assertCanManageSubmissions(member ?? null, roleIds);
+
+        const assignmentFilter = interaction.options.getString("assignment");
+        const activeAssignments = await this.services.assignmentService.listActive(this.env.GUILD_ID);
+
+        let assignmentId: string | undefined;
+        if (assignmentFilter) {
+          const assignmentLookup = this.resolveActiveAssignment(activeAssignments, assignmentFilter);
+          if (assignmentLookup.kind === "ambiguous") {
+            await interaction.reply({
+              content: `Multiple active assignments match "${assignmentFilter}". Use the assignment ID instead: ${this.formatAssignmentChoices(assignmentLookup.matches)}`,
+              ephemeral: true,
+            });
+            return;
+          }
+          if (assignmentLookup.kind === "resolved") {
+            assignmentId = assignmentLookup.assignment.id;
+          }
+        }
+
+        const submissions = await this.services.submissionService.list(this.env.GUILD_ID, { assignmentId });
+        const recent = submissions.slice(0, 15);
+
+        if (recent.length === 0) {
+          await interaction.reply({
+            content: assignmentFilter
+              ? `No submissions found for "${assignmentFilter}".`
+              : "No submissions yet.",
+            ephemeral: true,
+          });
+          return;
+        }
+
+        const lines = recent.map((sub) => {
+          const status = sub.status === "PENDING" ? "\u23f3" : sub.status === "APPROVED" ? "\u2705" : sub.status === "OUTSTANDING" ? "\u2b50" : "\u274c";
+          const name = sub.participant.discordUsername ?? sub.participant.indexId;
+          return `${status} \`${sub.id.slice(0, 8)}\` **${sub.assignment.title}** \u2014 ${name} (${sub.participant.group.displayName})`;
+        });
+
+        await interaction.reply({
+          content: `Recent submissions:\n${lines.join("\n")}`,
+          ephemeral: true,
+        });
+        return;
+      }
+      case "review_submission": {
+        await this.assertCanManageSubmissions(member ?? null, roleIds);
+
+        const identifier = interaction.options.getString("submission_id", true);
+        const status = interaction.options.getString("decision", true) as "APPROVED" | "OUTSTANDING" | "REJECTED";
+        const note = interaction.options.getString("note") ?? undefined;
+        const target = await this.services.submissionService.resolveIdentifier(this.env.GUILD_ID, identifier);
+        const reviewed = await this.services.submissionService.review({
+          guildId: this.env.GUILD_ID,
+          submissionId: target.id,
+          status,
+          reviewNote: note,
+          reviewedByUserId: interaction.user.id,
+          reviewedByUsername: interaction.user.username,
+        });
+        const participantName = reviewed.participant.discordUsername ?? reviewed.participant.indexId;
+
+        await interaction.reply({
+          content: `Marked \`${reviewed.id.slice(0, 8)}\` as **${reviewed.status}** for **${reviewed.assignment.title}** by ${participantName}.`,
+          ephemeral: true,
+        });
+        return;
+      }
+      case "missing": {
+        await this.assertCanManageSubmissions(member ?? null, roleIds);
+
+        const summary = await this.services.submissionService.getCompletionSummary(this.env.GUILD_ID);
+
+        if (summary.length === 0) {
+          await interaction.reply({ content: "No active assignments.", ephemeral: true });
+          return;
+        }
+
+        const lines = summary.map((entry) => {
+          const missing = entry.missingParticipants.length;
+          const header = `**${entry.assignmentTitle}**: ${entry.submittedCount}/${entry.totalParticipants} submitted`;
+          if (missing === 0) {
+            return `${header} \u2014 all done!`;
+          }
+          const names = entry.missingParticipants
+            .slice(0, 10)
+            .map((p) => `${p.discordUsername ?? p.indexId} (${p.group})`)
+            .join(", ");
+          const extra = missing > 10 ? ` and ${missing - 10} more` : "";
+          return `${header}\n  Missing: ${names}${extra}`;
+        });
+
+        await interaction.reply({
+          content: lines.join("\n\n"),
+          ephemeral: true,
+        });
+        return;
+      }
       default:
         throw new AppError("Unknown command.", 404);
     }
@@ -548,6 +820,42 @@ export class BotRuntime {
         .addStringOption((option) => option.setName("title").setDescription("Listing title").setRequired(true))
         .addStringOption((option) => option.setName("description").setDescription("Listing description").setRequired(true))
         .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity, leave blank for infinite").setRequired(false)),
+      new SlashCommandBuilder()
+        .setName("register")
+        .setDescription("Register for the economy with your index ID and group.")
+        .addStringOption((option) => option.setName("index_id").setDescription("Your index ID (e.g. student number)").setRequired(true))
+        .addStringOption((option) => option.setName("group").setDescription("Your group name or role mention").setRequired(true)),
+      new SlashCommandBuilder()
+        .setName("submit")
+        .setDescription("Submit work for an assignment.")
+        .addStringOption((option) => option.setName("assignment").setDescription("Assignment ID or exact title").setRequired(true))
+        .addAttachmentOption((option) => option.setName("image").setDescription("Image attachment").setRequired(false))
+        .addStringOption((option) => option.setName("text").setDescription("Description or notes for your submission").setRequired(false)),
+      new SlashCommandBuilder()
+        .setName("submissions")
+        .setDescription("View recent submissions (admin).")
+        .addStringOption((option) => option.setName("assignment").setDescription("Filter by assignment ID or exact title").setRequired(false)),
+      new SlashCommandBuilder()
+        .setName("review_submission")
+        .setDescription("Review a student submission (staff).")
+        .addStringOption((option) =>
+          option.setName("submission_id").setDescription("Full submission ID or short prefix from /submissions").setRequired(true),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("decision")
+            .setDescription("Review outcome")
+            .setRequired(true)
+            .addChoices(
+              { name: "Approve", value: "APPROVED" },
+              { name: "Outstanding", value: "OUTSTANDING" },
+              { name: "Reject", value: "REJECTED" },
+            ),
+        )
+        .addStringOption((option) => option.setName("note").setDescription("Optional review note").setRequired(false)),
+      new SlashCommandBuilder()
+        .setName("missing")
+        .setDescription("See who hasn't submitted for each assignment (admin)."),
     ].map((command) => command.toJSON());
 
     await rest.put(Routes.applicationGuildCommands(this.env.DISCORD_APPLICATION_ID, this.env.DISCORD_GUILD_ID), {

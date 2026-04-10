@@ -54,5 +54,26 @@ describe("permission evaluation", () => {
       }),
     ).toThrow(/at most 10/i);
   });
-});
 
+  it("treats an empty max award as unlimited for award-capable staff roles", () => {
+    const resolved = resolveCapabilities([
+      {
+        canManageDashboard: false,
+        canAward: true,
+        maxAward: null,
+        canDeduct: false,
+        canMultiAward: true,
+        canSell: false,
+      },
+    ]);
+
+    expect(() =>
+      assertCanAward({
+        capabilities: resolved,
+        magnitude: 5000,
+        targetCount: 2,
+        isDeduction: false,
+      }),
+    ).not.toThrow();
+  });
+});

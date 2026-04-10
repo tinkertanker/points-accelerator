@@ -1,0 +1,77 @@
+import { randomBytes } from "node:crypto";
+import { extname } from "node:path";
+
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+
+import type { AppEnv } from "../config/env.js";
+
+export class StorageService {
+  private readonly client: S3Client | null;
+  private readonly bucketName: string | undefined;
+  private readonly publicUrl: string | undefined;
+
+  public constructor(env: AppEnv) {
+    if (env.R2_ENDPOINT && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_BUCKET_NAME) {
+      this.client = new S3Client({
+        region: "auto",
+        endpoint: env.R2_ENDPOINT,
+        credentials: {
+          accessKeyId: env.R2_ACCESS_KEY_ID,
+          secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+        },
+      });
+      this.bucketName = env.R2_BUCKET_NAME;
+      this.publicUrl = env.R2_PUBLIC_URL?.replace(/\/+$/, "");
+    } else {
+      this.client = null;
+    }
+  }
+
+  public get isConfigured(): boolean {
+    return this.client !== null;
+  }
+
+  /**
+   * Upload a buffer to R2/S3.
+   * Returns { key, url } where url is the public URL of the uploaded file.
+   */
+  public async upload(params: {
+    buffer: Buffer;
+    contentType: string;
+    folder: string;
+    originalFilename?: string;
+  }): Promise<{ key: string; url: string }> {
+    if (!this.client || !this.bucketName) {
+      throw new Error("Storage is not configured. Set R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME.");
+    }
+
+    const extension = params.originalFilename ? extname(params.originalFilename) : this.extensionFromContentType(params.contentType);
+    const uniqueId = randomBytes(16).toString("hex");
+    const key = `${params.folder}/${uniqueId}${extension}`;
+
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+        Body: params.buffer,
+        ContentType: params.contentType,
+      }),
+    );
+
+    const url = this.publicUrl ? `${this.publicUrl}/${key}` : `https://${this.bucketName}.r2.dev/${key}`;
+
+    return { key, url };
+  }
+
+  private extensionFromContentType(contentType: string): string {
+    const mapping: Record<string, string> = {
+      "image/jpeg": ".jpg",
+      "image/png": ".png",
+      "image/gif": ".gif",
+      "image/webp": ".webp",
+      "image/svg+xml": ".svg",
+      "application/pdf": ".pdf",
+    };
+    return mapping[contentType] ?? "";
+  }
+}

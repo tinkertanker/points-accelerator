@@ -1,8 +1,10 @@
 # economy rice
 
-`economy rice` is a group-first Discord points bot for class communities.
+`economy rice` is a group-first Discord economy bot for class communities.
 
 It tracks permanent `points` for leaderboards, separate spendable `currency` for the shop and transfers, and a role-driven capability system so each Discord role can be configured for what it can award, deduct, sell, or receive.
+
+It also includes a Discord OAuth dashboard, marketplace listings, and a submission workflow for class use: students register once with an alphanumeric index ID and group, staff publish assignments, students submit work, and approved submissions award their group.
 
 ## Monorepo layout
 
@@ -31,14 +33,24 @@ It tracks permanent `points` for leaderboards, separate spendable `currency` for
 - Discord ledger command with paging for recent transactions
 - Group transfers and donations
 - Custom shop with spendable currency
+- Marketplace listings with optional Discord channel posting
 - Role capability matrix
+- Discord OAuth dashboard for staff configuration and review
 - Configurable channels and role mappings
+- Assignment, participant, and submission tracking
+- Submission review with automatic `SUBMISSION_REWARD` ledger entries
+- Optional Cloudflare R2 image storage with Discord attachment fallback
 
 ## Phase 1 command set
 
 - Staff roles such as admins or alumni: `/award`, `/deduct`
 - Students: `/balance`, `/leaderboard`, `/ledger`
 
+## Submission command set
+
+- Students: `/register`, `/submit`
+- Staff roles: `/submissions`, `/missing`, `/review_submission`
+
 The admin dashboard uses Discord sign-in. Users can access it if they are guild admins or hold a Discord role with `canManageDashboard` enabled in the capability matrix.
 
-After signing into the dashboard, use the built-in Phase 1 walkthrough in the control room to configure role powers, map groups, and smoke test the commands in Discord.
+After signing into the dashboard, use the built-in walkthrough in the control room to configure role powers, map groups, create assignments, and smoke test the commands in Discord.

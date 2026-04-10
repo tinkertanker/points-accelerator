@@ -1,4 +1,6 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
+
+type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
 
 export class AuditService {
   public constructor(private readonly prisma: PrismaClient) {}
@@ -11,8 +13,11 @@ export class AuditService {
     entityType: string;
     entityId?: string;
     payload?: unknown;
+    executor?: PrismaExecutor;
   }) {
-    return this.prisma.auditLog.create({
+    const executor = params.executor ?? this.prisma;
+
+    return executor.auditLog.create({
       data: {
         guildId: params.guildId,
         actorUserId: params.actorUserId,
@@ -25,4 +30,3 @@ export class AuditService {
     });
   }
 }
-

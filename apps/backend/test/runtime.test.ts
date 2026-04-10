@@ -28,14 +28,33 @@ function createRuntimeFixture() {
       getLedger: vi.fn().mockResolvedValue([]),
       rewardPassiveMessage: vi.fn().mockResolvedValue({ id: "entry-1" }),
     },
+    roleCapabilityService: {
+      listForRoleIds: vi.fn().mockResolvedValue([]),
+    },
     shopService: {
       list: vi.fn().mockResolvedValue([]),
     },
+    participantService: {
+      findByDiscordUser: vi.fn(),
+    },
+    submissionService: {
+      create: vi.fn(),
+      list: vi.fn().mockResolvedValue([]),
+      getCompletionSummary: vi.fn().mockResolvedValue([]),
+      resolveIdentifier: vi.fn(),
+      review: vi.fn(),
+    },
+    assignmentService: {
+      listActive: vi.fn().mockResolvedValue([]),
+    },
+  };
+  const storageService = {
+    isConfigured: false,
   };
 
   return {
     config,
-    runtime: new BotRuntime(env, services as never),
+    runtime: new BotRuntime(env, services as never, storageService as never),
     services,
   };
 }
@@ -213,5 +232,145 @@ describe("bot runtime", () => {
     const [{ content }] = reply.mock.calls[0] as [{ content: string }];
     expect(content.length).toBeLessThanOrEqual(2000);
     expect(content).toContain("...");
+  });
+
+  it("rejects /submissions for non-staff members", async () => {
+    const { runtime } = createRuntimeFixture();
+
+    await expect(
+      (runtime as any).handleCommand({
+        commandName: "submissions",
+        guild: {
+          members: {
+            fetch: vi.fn().mockResolvedValue({
+              roles: { cache: new Map([["student-role", {}]]) },
+              permissions: { has: vi.fn().mockReturnValue(false) },
+            }),
+          },
+        },
+        options: {
+          getString: vi.fn().mockReturnValue(null),
+        },
+        reply: vi.fn(),
+        user: {
+          id: "user-1",
+          username: "Alice",
+        },
+      }),
+    ).rejects.toThrow(/configured staff roles/i);
+  });
+
+  it("reviews a submission from Discord using a short identifier", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.roleCapabilityService.listForRoleIds.mockResolvedValue([
+      {
+        canManageDashboard: true,
+        canAward: false,
+        maxAward: null,
+        canDeduct: false,
+        canMultiAward: false,
+        canSell: false,
+      },
+    ]);
+    services.submissionService.resolveIdentifier.mockResolvedValue({
+      id: "submission-12345678",
+      assignment: { title: "Reflection 1" },
+      participant: { indexId: "S001", discordUsername: "student1" },
+    });
+    services.submissionService.review.mockResolvedValue({
+      id: "submission-12345678",
+      status: "APPROVED",
+      assignment: { title: "Reflection 1" },
+      participant: { indexId: "S001", discordUsername: "student1" },
+    });
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "review_submission",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue({
+            roles: { cache: new Map([["staff-role", {}]]) },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          }),
+        },
+      },
+      options: {
+        getString: vi.fn((name: string) => {
+          if (name === "submission_id") return "submissi";
+          if (name === "decision") return "APPROVED";
+          if (name === "note") return "Nicely done";
+          return null;
+        }),
+      },
+      reply,
+      user: {
+        id: "staff-1",
+        username: "Mentor",
+      },
+    });
+
+    expect(services.submissionService.resolveIdentifier).toHaveBeenCalledWith("guild-test", "submissi");
+    expect(services.submissionService.review).toHaveBeenCalledWith({
+      guildId: "guild-test",
+      submissionId: "submission-12345678",
+      status: "APPROVED",
+      reviewNote: "Nicely done",
+      reviewedByUserId: "staff-1",
+      reviewedByUsername: "Mentor",
+    });
+    expect(reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("APPROVED"),
+      }),
+    );
+  });
+
+  it("rejects ambiguous /submit assignment titles and asks for an assignment id", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.participantService.findByDiscordUser.mockResolvedValue({
+      id: "participant-1",
+      indexId: "S001",
+      groupId: "group-1",
+    });
+    services.assignmentService.listActive.mockResolvedValue([
+      { id: "assign-11111111", title: "Reflection 1" },
+      { id: "assign-22222222", title: "Reflection 1" },
+    ]);
+
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "submit",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue(null),
+        },
+      },
+      options: {
+        getString: vi.fn((name: string) => {
+          if (name === "assignment") return "Reflection 1";
+          if (name === "text") return "Here is my work";
+          return null;
+        }),
+        getAttachment: vi.fn().mockReturnValue(null),
+      },
+      deferReply,
+      editReply,
+      user: {
+        id: "user-1",
+        username: "Alice",
+      },
+    });
+
+    expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(services.submissionService.create).not.toHaveBeenCalled();
+    expect(editReply).toHaveBeenCalledWith(
+      expect.stringContaining('Multiple active assignments match "Reflection 1"'),
+    );
+    expect(editReply).toHaveBeenCalledWith(
+      expect.stringContaining("assign-11111111"),
+    );
   });
 });

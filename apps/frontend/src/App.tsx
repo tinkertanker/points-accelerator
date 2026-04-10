@@ -4,6 +4,7 @@ import ThemeToggle from "./components/ThemeToggle";
 import { isDesignPreview } from "./designPreview";
 import { api } from "./services/api";
 import type {
+  AssignmentDraft,
   AuthUser,
   BootstrapPayload,
   Group,
@@ -12,7 +13,9 @@ import type {
   Settings,
   ShopItem,
   ShopItemDraft,
+  Submission,
 } from "./types";
+import { fromDateTimeLocalInputValue, toDateTimeLocalInputValue } from "./utils/datetime-local";
 import "./styles/app.css";
 
 type CapabilityToggleKey = keyof Pick<
@@ -98,6 +101,49 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
   };
 }
 
+function toAssignmentDraft(assignment?: { id: string; title: string; description: string; baseCurrencyReward: number; basePointsReward: number; bonusCurrencyReward: number; bonusPointsReward: number; deadline: string | null; active: boolean; sortOrder: number }): AssignmentDraft {
+  if (!assignment) {
+    return {
+      title: "",
+      description: "",
+      baseCurrencyReward: 0,
+      basePointsReward: 0,
+      bonusCurrencyReward: 0,
+      bonusPointsReward: 0,
+      deadline: null,
+      active: true,
+      sortOrder: 0,
+    };
+  }
+
+  return {
+    id: assignment.id,
+    title: assignment.title,
+    description: assignment.description,
+    baseCurrencyReward: assignment.baseCurrencyReward,
+    basePointsReward: assignment.basePointsReward,
+    bonusCurrencyReward: assignment.bonusCurrencyReward,
+    bonusPointsReward: assignment.bonusPointsReward,
+    deadline: assignment.deadline,
+    active: assignment.active,
+    sortOrder: assignment.sortOrder,
+  };
+}
+
+const STATUS_LABELS: Record<Submission["status"], string> = {
+  PENDING: "Pending",
+  APPROVED: "Approved",
+  OUTSTANDING: "Outstanding",
+  REJECTED: "Rejected",
+};
+
+const STATUS_CLASSES: Record<Submission["status"], string> = {
+  PENDING: "badge--pending",
+  APPROVED: "badge--approved",
+  OUTSTANDING: "badge--outstanding",
+  REJECTED: "badge--rejected",
+};
+
 export default function App() {
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(null);
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
@@ -105,6 +151,9 @@ export default function App() {
   const [roleDrafts, setRoleDrafts] = useState<RoleCapability[]>([]);
   const [groupDrafts, setGroupDrafts] = useState<GroupDraft[]>([]);
   const [shopDrafts, setShopDrafts] = useState<ShopItemDraft[]>([]);
+  const [assignmentDrafts, setAssignmentDrafts] = useState<AssignmentDraft[]>([]);
+  const [submissionFilter, setSubmissionFilter] = useState<{ assignmentId: string; status: string }>({ assignmentId: "", status: "" });
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [status, setStatus] = useState(getInitialStatus);
   const [isBusy, setIsBusy] = useState(false);
 
@@ -121,6 +170,7 @@ export default function App() {
         setRoleDrafts(payload.capabilities);
         setGroupDrafts([...payload.groups.map((group) => toGroupDraft(group)), toGroupDraft()]);
         setShopDrafts([...payload.shopItems.map((item) => toShopItemDraft(item)), toShopItemDraft()]);
+        setAssignmentDrafts([...payload.assignments.map((a) => toAssignmentDraft(a)), toAssignmentDraft()]);
       });
       setStatus("Dashboard synced.");
     } catch (error) {
@@ -266,16 +316,20 @@ export default function App() {
           <dd>{bootstrap.groups.length}</dd>
         </div>
         <div className="stat-item">
-          <dt>Role Rules</dt>
-          <dd>{bootstrap.capabilities.length}</dd>
+          <dt>Participants</dt>
+          <dd>{bootstrap.participants.length}</dd>
+        </div>
+        <div className="stat-item">
+          <dt>Assignments</dt>
+          <dd>{bootstrap.assignments.length}</dd>
+        </div>
+        <div className="stat-item">
+          <dt>Submissions</dt>
+          <dd>{bootstrap.submissions.length}</dd>
         </div>
         <div className="stat-item">
           <dt>Shop Items</dt>
           <dd>{bootstrap.shopItems.length}</dd>
-        </div>
-        <div className="stat-item">
-          <dt>Listings</dt>
-          <dd>{bootstrap.listings.length}</dd>
         </div>
       </dl>
 
@@ -290,8 +344,9 @@ export default function App() {
           <li>
             <h3>Give staff roles their powers</h3>
             <p>
-              In <strong>Capability matrix</strong>, add your admin and alumni roles, then turn on <strong>award</strong>{" "}
-              and <strong>deduct</strong>. Set a max award if you want a hard cap per command.
+              In <strong>Capability matrix</strong>, add your admin, mentor, and alumni roles, then turn on the powers
+              each role should have. Leave <strong>max award</strong> blank for no cap, or set a number if you want a
+              hard limit per command.
             </p>
           </li>
           <li>
@@ -937,6 +992,373 @@ export default function App() {
             </div>
           </div>
         </article>
+      </section>
+
+      <section className="two-col">
+        <article className="section">
+          <header className="section-header">
+            <hgroup>
+              <p className="section-label">Assignments</p>
+              <h2>Submission prompts</h2>
+            </hgroup>
+          </header>
+          <p className="section-help">
+            Create assignments that students can submit work for via <code>/submit</code> in Discord.
+            Set base and bonus rewards; bonus rewards are given when a submission is marked as outstanding.
+          </p>
+          <div className="matrix-scroll">
+            <table className="matrix-table assignment-table">
+              <thead>
+                <tr>
+                  <th scope="col" className="col-title">Title</th>
+                  <th scope="col" className="col-description">Description</th>
+                  <th scope="col" className="col-pts">Base Pts</th>
+                  <th scope="col" className="col-cur">Base Cur</th>
+                  <th scope="col" className="col-pts">Bonus Pts</th>
+                  <th scope="col" className="col-cur">Bonus Cur</th>
+                  <th scope="col" className="col-deadline">Deadline</th>
+                  <th scope="col" className="matrix-table__th--center col-active">Active</th>
+                  <th scope="col" className="matrix-table__th--actions col-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assignmentDrafts.map((assignment, index) => (
+                  <tr key={`${assignment.id ?? "new"}-${index}`}>
+                    <td className="col-title">
+                      <input
+                        value={assignment.title}
+                        aria-label="Title"
+                        onChange={(event) => {
+                          const next = [...assignmentDrafts];
+                          next[index] = { ...assignment, title: event.target.value };
+                          setAssignmentDrafts(next);
+                        }}
+                        placeholder="Assignment title"
+                      />
+                    </td>
+                    <td className="col-description">
+                      <input
+                        value={assignment.description}
+                        aria-label="Description"
+                        onChange={(event) => {
+                          const next = [...assignmentDrafts];
+                          next[index] = { ...assignment, description: event.target.value };
+                          setAssignmentDrafts(next);
+                        }}
+                        placeholder="Instructions"
+                      />
+                    </td>
+                    <td className="col-pts">
+                      <input
+                        type="number"
+                        value={assignment.basePointsReward}
+                        aria-label="Base points"
+                        onChange={(event) => {
+                          const next = [...assignmentDrafts];
+                          next[index] = { ...assignment, basePointsReward: Number(event.target.value) };
+                          setAssignmentDrafts(next);
+                        }}
+                      />
+                    </td>
+                    <td className="col-cur">
+                      <input
+                        type="number"
+                        value={assignment.baseCurrencyReward}
+                        aria-label="Base currency"
+                        onChange={(event) => {
+                          const next = [...assignmentDrafts];
+                          next[index] = { ...assignment, baseCurrencyReward: Number(event.target.value) };
+                          setAssignmentDrafts(next);
+                        }}
+                      />
+                    </td>
+                    <td className="col-pts">
+                      <input
+                        type="number"
+                        value={assignment.bonusPointsReward}
+                        aria-label="Bonus points"
+                        onChange={(event) => {
+                          const next = [...assignmentDrafts];
+                          next[index] = { ...assignment, bonusPointsReward: Number(event.target.value) };
+                          setAssignmentDrafts(next);
+                        }}
+                      />
+                    </td>
+                    <td className="col-cur">
+                      <input
+                        type="number"
+                        value={assignment.bonusCurrencyReward}
+                        aria-label="Bonus currency"
+                        onChange={(event) => {
+                          const next = [...assignmentDrafts];
+                          next[index] = { ...assignment, bonusCurrencyReward: Number(event.target.value) };
+                          setAssignmentDrafts(next);
+                        }}
+                      />
+                    </td>
+                    <td className="col-deadline">
+                      <input
+                        type="datetime-local"
+                        value={toDateTimeLocalInputValue(assignment.deadline)}
+                        aria-label="Deadline"
+                        onChange={(event) => {
+                          const next = [...assignmentDrafts];
+                          next[index] = {
+                            ...assignment,
+                            deadline: fromDateTimeLocalInputValue(event.target.value),
+                          };
+                          setAssignmentDrafts(next);
+                        }}
+                      />
+                    </td>
+                    <td className="col-active">
+                      <input
+                        type="checkbox"
+                        checked={assignment.active}
+                        aria-label="Active"
+                        onChange={(event) => {
+                          const next = [...assignmentDrafts];
+                          next[index] = { ...assignment, active: event.target.checked };
+                          setAssignmentDrafts(next);
+                        }}
+                      />
+                    </td>
+                    <td className="col-actions">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setIsBusy(true);
+                          try {
+                            await api.saveAssignment(assignment);
+                            await loadBootstrap();
+                            setStatus(`Saved assignment "${assignment.title || "untitled"}".`);
+                          } catch (error) {
+                            setStatus(error instanceof Error ? error.message : "Failed to save assignment.");
+                          } finally {
+                            setIsBusy(false);
+                          }
+                        }}
+                        disabled={!assignment.title}
+                      >
+                        Save
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article className="section">
+          <header className="section-header">
+            <hgroup>
+              <p className="section-label">Participants</p>
+              <h2>Registered students</h2>
+            </hgroup>
+          </header>
+          <p className="section-help">
+            Students register via <code>/register index_id:&lt;id&gt; group:&lt;name&gt;</code> in Discord.
+            Once registered, they can use <code>/submit</code> to submit work.
+          </p>
+          <div className="matrix-scroll">
+            <table className="matrix-table participant-table">
+              <thead>
+                <tr>
+                  <th scope="col">Index ID</th>
+                  <th scope="col">Discord user</th>
+                  <th scope="col">Group</th>
+                  <th scope="col">Registered</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bootstrap.participants.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="empty-cell">No participants registered yet.</td>
+                  </tr>
+                ) : (
+                  bootstrap.participants.map((participant) => (
+                    <tr key={participant.id}>
+                      <td>{participant.indexId}</td>
+                      <td>{participant.discordUsername ?? participant.discordUserId}</td>
+                      <td>{participant.group.displayName}</td>
+                      <td>
+                        <time dateTime={participant.createdAt}>{new Date(participant.createdAt).toLocaleDateString()}</time>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section className="section submissions-section">
+        <header className="section-header">
+          <hgroup>
+            <p className="section-label">Review</p>
+            <h2>Submissions</h2>
+          </hgroup>
+          <div className="submission-filters">
+            <select
+              value={submissionFilter.assignmentId}
+              onChange={(event) => setSubmissionFilter({ ...submissionFilter, assignmentId: event.target.value })}
+              aria-label="Filter by assignment"
+            >
+              <option value="">All assignments</option>
+              {bootstrap.assignments.map((a) => (
+                <option key={a.id} value={a.id}>{a.title}</option>
+              ))}
+            </select>
+            <select
+              value={submissionFilter.status}
+              onChange={(event) => setSubmissionFilter({ ...submissionFilter, status: event.target.value })}
+              aria-label="Filter by status"
+            >
+              <option value="">All statuses</option>
+              <option value="PENDING">Pending</option>
+              <option value="APPROVED">Approved</option>
+              <option value="OUTSTANDING">Outstanding</option>
+              <option value="REJECTED">Rejected</option>
+            </select>
+          </div>
+        </header>
+
+        <div className="matrix-scroll">
+          <table className="matrix-table submissions-table">
+            <thead>
+              <tr>
+                <th scope="col">Assignment</th>
+                <th scope="col">Student</th>
+                <th scope="col">Group</th>
+                <th scope="col">Text</th>
+                <th scope="col">Image</th>
+                <th scope="col">Status</th>
+                <th scope="col">Submitted</th>
+                <th scope="col" className="matrix-table__th--actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const filtered = bootstrap.submissions.filter((sub) => {
+                  if (submissionFilter.assignmentId && sub.assignmentId !== submissionFilter.assignmentId) return false;
+                  if (submissionFilter.status && sub.status !== submissionFilter.status) return false;
+                  return true;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan={8} className="empty-cell">No submissions match the current filters.</td>
+                    </tr>
+                  );
+                }
+
+                return filtered.map((sub) => (
+                  <tr key={sub.id}>
+                    <td>{sub.assignment.title}</td>
+                    <td>{sub.participant.discordUsername ?? sub.participant.indexId}</td>
+                    <td>{sub.participant.group.displayName}</td>
+                    <td className="submission-text-cell" title={sub.text}>
+                      {sub.text.length > 80 ? `${sub.text.slice(0, 80)}...` : sub.text || "\u2014"}
+                    </td>
+                    <td>
+                      {sub.imageUrl ? (
+                        <a href={sub.imageUrl} target="_blank" rel="noopener noreferrer" className="submission-image-link">
+                          <img src={sub.imageUrl} alt="Submission" className="submission-thumbnail" />
+                        </a>
+                      ) : (
+                        "\u2014"
+                      )}
+                    </td>
+                    <td>
+                      <span className={`badge ${STATUS_CLASSES[sub.status]}`}>{STATUS_LABELS[sub.status]}</span>
+                    </td>
+                    <td>
+                      <time dateTime={sub.createdAt}>{new Date(sub.createdAt).toLocaleDateString()}</time>
+                    </td>
+                    <td className="col-actions submission-actions">
+                      {sub.status === "PENDING" ? (
+                        reviewingId === sub.id ? (
+                          <div className="review-buttons">
+                            <button
+                              className="btn-approve"
+                              onClick={async () => {
+                                setIsBusy(true);
+                                try {
+                                  await api.reviewSubmission(sub.id, { status: "APPROVED" });
+                                  setReviewingId(null);
+                                  await loadBootstrap();
+                                  setStatus(`Approved submission from ${sub.participant.discordUsername ?? sub.participant.indexId}.`);
+                                } catch (error) {
+                                  setStatus(error instanceof Error ? error.message : "Failed to approve.");
+                                } finally {
+                                  setIsBusy(false);
+                                }
+                              }}
+                              disabled={isBusy}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              className="btn-outstanding"
+                              onClick={async () => {
+                                setIsBusy(true);
+                                try {
+                                  await api.reviewSubmission(sub.id, { status: "OUTSTANDING" });
+                                  setReviewingId(null);
+                                  await loadBootstrap();
+                                  setStatus(`Marked outstanding: ${sub.participant.discordUsername ?? sub.participant.indexId}.`);
+                                } catch (error) {
+                                  setStatus(error instanceof Error ? error.message : "Failed to mark outstanding.");
+                                } finally {
+                                  setIsBusy(false);
+                                }
+                              }}
+                              disabled={isBusy}
+                            >
+                              Outstanding
+                            </button>
+                            <button
+                              className="btn-reject"
+                              onClick={async () => {
+                                setIsBusy(true);
+                                try {
+                                  await api.reviewSubmission(sub.id, { status: "REJECTED" });
+                                  setReviewingId(null);
+                                  await loadBootstrap();
+                                  setStatus(`Rejected submission from ${sub.participant.discordUsername ?? sub.participant.indexId}.`);
+                                } catch (error) {
+                                  setStatus(error instanceof Error ? error.message : "Failed to reject.");
+                                } finally {
+                                  setIsBusy(false);
+                                }
+                              }}
+                              disabled={isBusy}
+                            >
+                              Reject
+                            </button>
+                            <button onClick={() => setReviewingId(null)}>Cancel</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => setReviewingId(sub.id)}>Review</button>
+                        )
+                      ) : (
+                        <span className="review-done">
+                          {sub.reviewedByUsername ? `by ${sub.reviewedByUsername}` : "Reviewed"}
+                          {sub.pointsAwarded || sub.currencyAwarded
+                            ? ` (+${sub.pointsAwarded ?? 0}pts, +${sub.currencyAwarded ?? 0}cur)`
+                            : ""}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="section leaderboard-section">

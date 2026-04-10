@@ -8,12 +8,14 @@ import {
   isDesignPreview,
 } from "../designPreview";
 import type {
+  AssignmentDraft,
   AuthSession,
   BootstrapPayload,
   GroupDraft,
   RoleCapability,
   Settings,
   ShopItemDraft,
+  Submission,
 } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
@@ -131,6 +133,24 @@ export const api = {
       return Promise.resolve(designPreviewSaveShopItem(payload));
     }
     return request("/api/shop-items", {
+      method: "POST",
+      body: payload,
+    });
+  },
+  saveAssignment(payload: AssignmentDraft) {
+    if (isDesignPreview()) {
+      return Promise.resolve(payload);
+    }
+    return request("/api/assignments", {
+      method: "POST",
+      body: payload,
+    });
+  },
+  reviewSubmission(submissionId: string, payload: { status: "APPROVED" | "OUTSTANDING" | "REJECTED"; reviewNote?: string }) {
+    if (isDesignPreview()) {
+      return Promise.resolve({} as Submission);
+    }
+    return request<Submission>(`/api/submissions/${submissionId}/review`, {
       method: "POST",
       body: payload,
     });

@@ -48,6 +48,9 @@ test("authenticated Discord manager can see the control room", async ({ page }) 
         listings: [],
         leaderboard: [],
         ledger: [],
+        assignments: [],
+        participants: [],
+        submissions: [],
         discord: {
           roles: [{ id: "role-1", name: "Admin" }],
           channels: [{ id: "channel-1", name: "general" }],

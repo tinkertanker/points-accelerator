@@ -48,6 +48,9 @@ export async function createTestApp(
 }
 
 export async function resetDatabase(prisma: ReturnType<typeof createPrismaClient>) {
+  await prisma.submission.deleteMany();
+  await prisma.assignment.deleteMany();
+  await prisma.participant.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.marketplaceListing.deleteMany();
   await prisma.shopRedemption.deleteMany();

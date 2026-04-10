@@ -153,6 +153,55 @@ function createInitialBootstrap(): BootstrapPayload {
         { id: "ch-listings", name: "listings" },
       ],
     },
+    assignments: [
+      {
+        id: "assign-1",
+        title: "Week 1 Reflection",
+        description: "Write a short reflection on what you learnt this week.",
+        baseCurrencyReward: 5,
+        basePointsReward: 5,
+        bonusCurrencyReward: 3,
+        bonusPointsReward: 3,
+        deadline: null,
+        active: true,
+        sortOrder: 0,
+        submissionCount: 1,
+      },
+    ],
+    participants: [
+      {
+        id: "participant-1",
+        discordUserId: "user-1",
+        discordUsername: "alice",
+        indexId: "S001",
+        groupId: "group-1",
+        group: { id: "group-1", displayName: "Team Alpha", slug: "team-alpha" },
+        createdAt: new Date().toISOString(),
+      },
+    ],
+    submissions: [
+      {
+        id: "sub-1",
+        assignmentId: "assign-1",
+        participantId: "participant-1",
+        text: "This week I learnt about teamwork and collaboration.",
+        imageUrl: null,
+        status: "PENDING",
+        reviewedByUsername: null,
+        reviewNote: null,
+        currencyAwarded: null,
+        pointsAwarded: null,
+        createdAt: new Date().toISOString(),
+        assignment: { id: "assign-1", title: "Week 1 Reflection" },
+        participant: {
+          id: "participant-1",
+          indexId: "S001",
+          discordUserId: "user-1",
+          discordUsername: "alice",
+          group: { id: "group-1", displayName: "Team Alpha" },
+        },
+      },
+    ],
   };
 }
 

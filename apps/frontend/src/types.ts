@@ -127,4 +127,76 @@ export type BootstrapPayload = {
     roles: DiscordOption[];
     channels: DiscordOption[];
   };
+  assignments: Assignment[];
+  participants: Participant[];
+  submissions: Submission[];
+};
+
+export type Assignment = {
+  id: string;
+  title: string;
+  description: string;
+  baseCurrencyReward: number;
+  basePointsReward: number;
+  bonusCurrencyReward: number;
+  bonusPointsReward: number;
+  deadline: string | null;
+  active: boolean;
+  sortOrder: number;
+  submissionCount: number;
+};
+
+export type AssignmentDraft = {
+  id?: string;
+  title: string;
+  description: string;
+  baseCurrencyReward: number;
+  basePointsReward: number;
+  bonusCurrencyReward: number;
+  bonusPointsReward: number;
+  deadline: string | null;
+  active: boolean;
+  sortOrder: number;
+};
+
+export type Participant = {
+  id: string;
+  discordUserId: string;
+  discordUsername: string | null;
+  indexId: string;
+  groupId: string;
+  group: {
+    id: string;
+    displayName: string;
+    slug: string;
+  };
+  createdAt: string;
+};
+
+export type Submission = {
+  id: string;
+  assignmentId: string;
+  participantId: string;
+  text: string;
+  imageUrl: string | null;
+  status: "PENDING" | "APPROVED" | "OUTSTANDING" | "REJECTED";
+  reviewedByUsername: string | null;
+  reviewNote: string | null;
+  currencyAwarded: number | null;
+  pointsAwarded: number | null;
+  createdAt: string;
+  assignment: {
+    id: string;
+    title: string;
+  };
+  participant: {
+    id: string;
+    indexId: string;
+    discordUserId: string;
+    discordUsername: string | null;
+    group: {
+      id: string;
+      displayName: string;
+    };
+  };
 };

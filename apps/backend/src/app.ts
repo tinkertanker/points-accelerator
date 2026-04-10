@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 
@@ -9,6 +10,7 @@ import type { AppEnv } from "./config/env.js";
 import type { DiscordOAuthClient } from "./auth/discord-oauth.js";
 import type { BotRuntimeApi } from "./bot/runtime.js";
 import type { AppServices } from "./services/app-services.js";
+import type { StorageService } from "./services/storage-service.js";
 import { resolveCapabilities } from "./domain/permissions.js";
 import { AppError } from "./utils/app-error.js";
 import { decimalToNumber } from "./utils/decimal.js";
@@ -119,11 +121,37 @@ const redeemSchema = z.object({
   quantity: z.number().int().positive().optional(),
 });
 
+const assignmentSchema = z.object({
+  id: z.string().optional(),
+  title: z.string().min(1),
+  description: z.string().default(""),
+  baseCurrencyReward: z.number().nonnegative(),
+  basePointsReward: z.number().nonnegative(),
+  bonusCurrencyReward: z.number().nonnegative(),
+  bonusPointsReward: z.number().nonnegative(),
+  deadline: z.string().nullable().optional(),
+  active: z.boolean(),
+  sortOrder: z.number().int().optional(),
+});
+
+const submissionReviewSchema = z.object({
+  status: z.enum(["APPROVED", "OUTSTANDING", "REJECTED"]),
+  reviewNote: z.string().optional(),
+});
+
+const participantRegisterSchema = z.object({
+  discordUserId: z.string().min(1),
+  discordUsername: z.string().optional(),
+  indexId: z.string().min(1),
+  groupId: z.string().min(1),
+});
+
 export function createApp(params: {
   env: AppEnv;
   services: AppServices;
   botRuntime: BotRuntimeApi | null;
   discordOAuthClient?: DiscordOAuthClient | null;
+  storageService?: StorageService | null;
 }) {
   const app = Fastify({ logger: true, trustProxy: true });
   const { services } = params;
@@ -280,6 +308,12 @@ export function createApp(params: {
     credentials: true,
   });
   app.register(cookie);
+  app.register(multipart, {
+    limits: {
+      fileSize: 10 * 1024 * 1024, // 10 MB
+      files: 1,
+    },
+  });
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof AppError) {
@@ -405,7 +439,7 @@ export function createApp(params: {
   });
 
   app.get("/api/bootstrap", { preHandler: requireAdmin }, async () => {
-    const [settings, capabilities, groups, shopItems, listings, leaderboard, ledger, roles, channels] = await Promise.all([
+    const [settings, capabilities, groups, shopItems, listings, leaderboard, ledger, roles, channels, assignments, participants, submissions] = await Promise.all([
       services.configService.getOrCreate(params.env.GUILD_ID),
       services.roleCapabilityService.list(params.env.GUILD_ID),
       services.groupService.list(params.env.GUILD_ID),
@@ -415,6 +449,9 @@ export function createApp(params: {
       services.economyService.getLedger(params.env.GUILD_ID, 25),
       params.botRuntime?.getRoles() ?? [],
       params.botRuntime?.getTextChannels() ?? [],
+      services.assignmentService.list(params.env.GUILD_ID),
+      services.participantService.list(params.env.GUILD_ID),
+      services.submissionService.list(params.env.GUILD_ID),
     ]);
 
     return {
@@ -439,6 +476,9 @@ export function createApp(params: {
         roles,
         channels,
       },
+      assignments,
+      participants,
+      submissions,
     };
   });
 
@@ -594,6 +634,93 @@ export function createApp(params: {
       requestedByUsername: payload.requestedByUsername,
       quantity: payload.quantity,
     });
+  });
+
+  // --- Participants ---
+
+  app.get("/api/participants", { preHandler: requireAdmin }, async () => {
+    return services.participantService.list(params.env.GUILD_ID);
+  });
+
+  app.post("/api/participants", { preHandler: requireAdmin }, async (request) => {
+    const payload = participantRegisterSchema.parse(request.body);
+    return services.participantService.register({
+      guildId: params.env.GUILD_ID,
+      ...payload,
+    });
+  });
+
+  app.delete("/api/participants/:id", { preHandler: requireAdmin }, async (request) => {
+    const { id } = request.params as { id: string };
+    return services.participantService.delete(params.env.GUILD_ID, id);
+  });
+
+  // --- Assignments ---
+
+  app.get("/api/assignments", { preHandler: requireAdmin }, async () => {
+    return services.assignmentService.list(params.env.GUILD_ID);
+  });
+
+  app.post("/api/assignments", { preHandler: requireAdmin }, async (request) => {
+    const payload = assignmentSchema.parse(request.body);
+    return services.assignmentService.upsert(params.env.GUILD_ID, payload);
+  });
+
+  // --- Submissions ---
+
+  app.get("/api/submissions", { preHandler: requireAdmin }, async (request) => {
+    const query = request.query as { assignmentId?: string; status?: string; participantId?: string };
+    const status = query.status as "PENDING" | "APPROVED" | "OUTSTANDING" | "REJECTED" | undefined;
+    return services.submissionService.list(params.env.GUILD_ID, {
+      assignmentId: query.assignmentId,
+      status,
+      participantId: query.participantId,
+    });
+  });
+
+  app.post("/api/submissions/:id/review", { preHandler: requireAdmin }, async (request) => {
+    const { id } = request.params as { id: string };
+    const payload = submissionReviewSchema.parse(request.body);
+    const session = await resolveDashboardSession(request);
+    return services.submissionService.review({
+      guildId: params.env.GUILD_ID,
+      submissionId: id,
+      status: payload.status,
+      reviewNote: payload.reviewNote,
+      reviewedByUserId: session.userId,
+      reviewedByUsername: session.username,
+    });
+  });
+
+  app.get("/api/submissions/completion", { preHandler: requireAdmin }, async () => {
+    return services.submissionService.getCompletionSummary(params.env.GUILD_ID);
+  });
+
+  // --- Image upload (for submissions via the dashboard) ---
+
+  app.post("/api/upload/image", { preHandler: requireAdmin }, async (request) => {
+    if (!params.storageService?.isConfigured) {
+      throw new AppError("Image storage is not configured. Set R2 environment variables.", 503);
+    }
+
+    const file = await request.file();
+    if (!file) {
+      throw new AppError("No file uploaded.", 400);
+    }
+
+    if (!file.mimetype.startsWith("image/")) {
+      throw new AppError("Only image files are accepted.", 400);
+    }
+
+    const buffer = await file.toBuffer();
+    const result = await params.storageService.upload({
+      buffer,
+      contentType: file.mimetype,
+      folder: `submissions/${params.env.GUILD_ID}`,
+      originalFilename: file.filename,
+    });
+
+    return result;
   });
 
   return app;
