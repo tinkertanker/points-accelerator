@@ -26,6 +26,13 @@ It also includes a Discord OAuth dashboard, marketplace listings, and a submissi
 - Frontend unit: `npm run test:frontend`
 - Browser E2E: `npm run e2e`
 
+## Deployment notes
+
+- The app is designed to run with PostgreSQL and can be deployed on a single Docker host with the provided Compose stack.
+- Apply schema changes with `docker compose exec backend npx prisma migrate deploy` after each deploy.
+- Current dashboard sessions and passive reward cooldowns live in backend memory, so the backend should be treated as a single-instance service unless that state is moved into shared storage.
+- The bundled Postgres volume provides persistence, but you still need proper backups.
+
 ## Feature focus
 
 - Group-based passive message rewards

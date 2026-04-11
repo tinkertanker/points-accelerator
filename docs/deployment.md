@@ -31,6 +31,16 @@ Set these in your `.env` file before deploying:
 5. In the Discord Developer Portal OAuth2 settings, add `${APP_PUBLIC_URL}/api/auth/discord/callback` as a redirect URI unless you set `DISCORD_OAUTH_REDIRECT_URI` explicitly.
 6. Visit the public app URL and sign in with Discord.
 
+## Database and runtime notes
+
+- The production stack is designed to run against PostgreSQL in Docker and is suitable for a single-host deployment.
+- Prisma migrations are the supported way to evolve the schema. After pulling a new release, run `docker compose exec backend npx prisma migrate deploy` before relying on the new code path.
+- The backend now adds explicit indexes for ledger history, passive reward dedupe, submissions, audit logs, and common dashboard list views. This improves behaviour once the ledger and submission tables grow.
+- Dashboard sessions are currently stored in backend process memory, so signing users out on backend restart is expected.
+- Passive message reward cooldowns are also stored in backend process memory, so cooldown state resets on backend restart.
+- Because sessions and cooldowns are in memory, the current deployment model should be treated as single-instance. Do not scale the backend horizontally unless you first move that state into shared storage such as Redis or Postgres.
+- The bundled `postgres` service uses a Docker volume for persistence. That is convenient, but it is not a backup strategy; schedule regular `pg_dump` or volume snapshots if the data matters.
+
 ## First-run checklist
 
 1. Configure role capability rules.

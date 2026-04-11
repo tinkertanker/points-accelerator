@@ -85,6 +85,7 @@ model Group {
 
   @@unique([guildId, slug])
   @@unique([guildId, roleId])
+  @@index([guildId, active, displayName])
 }
 
 model GroupAlias {
@@ -128,6 +129,9 @@ model LedgerEntry {
   createdAt         DateTime        @default(now())
   guild             GuildConfig     @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   splits            LedgerSplit[]
+
+  @@index([guildId, createdAt(sort: Desc)])
+  @@index([guildId, externalRef])
 }
 
 model LedgerSplit {
@@ -139,6 +143,9 @@ model LedgerSplit {
   createdAt      DateTime    @default(now())
   entry          LedgerEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
   group          Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, createdAt(sort: Desc)])
+  @@index([entryId])
 }
 
 model ShopItem {
@@ -154,6 +161,8 @@ model ShopItem {
   updatedAt              DateTime          @updatedAt
   guild                  GuildConfig       @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   redemptions            ShopRedemption[]
+
+  @@index([guildId, enabled, name])
 }
 
 model ShopRedemption {
@@ -172,6 +181,10 @@ model ShopRedemption {
   guild             GuildConfig      @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   shopItem          ShopItem         @relation(fields: [shopItemId], references: [id], onDelete: Cascade)
   group             Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, createdAt(sort: Desc)])
+  @@index([groupId, createdAt(sort: Desc)])
+  @@index([shopItemId, createdAt(sort: Desc)])
 }
 
 model MarketplaceListing {
@@ -188,6 +201,8 @@ model MarketplaceListing {
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
   guild             GuildConfig @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@index([guildId, active, createdAt(sort: Desc)])
 }
 
 model AuditLog {
@@ -201,6 +216,9 @@ model AuditLog {
   payload           Json?
   createdAt         DateTime    @default(now())
   guild             GuildConfig @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@index([guildId, createdAt(sort: Desc)])
+  @@index([guildId, action, createdAt(sort: Desc)])
 }
 
 model Participant {
@@ -218,6 +236,8 @@ model Participant {
 
   @@unique([guildId, discordUserId])
   @@unique([guildId, indexId])
+  @@index([guildId, groupId])
+  @@index([guildId, createdAt(sort: Desc)])
 }
 
 model Assignment {
@@ -236,6 +256,8 @@ model Assignment {
   updatedAt           DateTime     @updatedAt
   guild               GuildConfig  @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   submissions         Submission[]
+
+  @@index([guildId, active, sortOrder, createdAt])
 }
 
 model Submission {
@@ -260,4 +282,8 @@ model Submission {
   participant         Participant      @relation(fields: [participantId], references: [id], onDelete: Cascade)
 
   @@unique([guildId, assignmentId, participantId])
+  @@index([guildId, createdAt(sort: Desc)])
+  @@index([guildId, status, createdAt(sort: Desc)])
+  @@index([guildId, assignmentId, createdAt(sort: Desc)])
+  @@index([guildId, participantId, createdAt(sort: Desc)])
 }
