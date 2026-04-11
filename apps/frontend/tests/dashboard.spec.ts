@@ -63,7 +63,7 @@ test("authenticated Discord manager can see the control room", async ({ page }) 
 
   await expect(page.getByRole("heading", { name: /points accelerator/i })).toBeVisible();
   await expect(page.getByRole("tab", { name: /overview/i })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("heading", { name: /class launch walkthrough/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /class launch checklist/i })).toBeVisible();
   await expect(page.getByText(/dashboard synced/i)).toBeVisible();
   await expect(page.getByText("/ledger page:2")).toBeVisible();
 
@@ -71,5 +71,5 @@ test("authenticated Discord manager can see the control room", async ({ page }) 
   await expect(page.getByRole("button", { name: /save settings/i })).toBeVisible();
 
   await page.getByRole("tab", { name: /activity/i }).click();
-  await expect(page.getByRole("heading", { name: /leaderboard and activity/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /track the leaderboard and ledger/i })).toBeVisible();
 });

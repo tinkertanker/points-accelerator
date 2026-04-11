@@ -2,39 +2,39 @@
 
 :root {
   color-scheme: light;
-  --bg: #f4f4f5;
-  --bg-elevated: #ffffff;
-  --bg-input: #ffffff;
-  --border: #e4e4e7;
-  --border-focus: #a1a1aa;
-  --text: #18181b;
-  --text-muted: #52525b;
-  --text-dim: #71717a;
-  --accent: #f4f4f5;
-  --accent-hover: #e4e4e7;
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --danger: #dc2626;
-  --success: #16a34a;
+  --bg: #fdf8f1;
+  --bg-elevated: #fffdf8;
+  --bg-input: #fffefb;
+  --border: #edc98a;
+  --border-focus: #f08a14;
+  --text: #171717;
+  --text-muted: #4b5563;
+  --text-dim: #6b7280;
+  --accent: #f8ead1;
+  --accent-hover: #f4d7a5;
+  --primary: #f59e0b;
+  --primary-hover: #dd7a07;
+  --danger: #b45309;
+  --success: #ca8a04;
   --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #09090b;
-  --bg-elevated: #18181b;
-  --bg-input: #18181b;
-  --border: #27272a;
-  --border-focus: #52525b;
+  --bg: #070504;
+  --bg-elevated: #110d09;
+  --bg-input: #17110c;
+  --border: #463019;
+  --border-focus: #ffb020;
   --text: #fafafa;
-  --text-muted: #a1a1aa;
-  --text-dim: #71717a;
-  --accent: #27272a;
-  --accent-hover: #3f3f46;
-  --primary: #3b82f6;
-  --primary-hover: #60a5fa;
-  --danger: #f87171;
-  --success: #4ade80;
+  --text-muted: #d1d5db;
+  --text-dim: #9ca3af;
+  --accent: #1f1710;
+  --accent-hover: #2d2011;
+  --primary: #ffb300;
+  --primary-hover: #ffc940;
+  --danger: #f97316;
+  --success: #fbbf24;
 }
 
 * {
@@ -43,9 +43,20 @@ html[data-theme="dark"] {
   padding: 0;
 }
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
   font-family: var(--font);
   background: var(--bg);
+  background-image:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--primary) 10%, transparent), transparent 30%),
+    radial-gradient(circle at top right, color-mix(in srgb, #ffb300 8%, transparent), transparent 34%),
+    radial-gradient(circle at bottom center, color-mix(in srgb, #ff8c1a 5%, transparent), transparent 40%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg) 94%, #ffffff 6%), var(--bg));
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -148,6 +159,7 @@ label input[type="checkbox"] {
 .shell {
   margin: 0 auto;
   max-width: 1280px;
+  min-height: 100vh;
   padding: 0 1.5rem 4rem;
 }
 
@@ -268,33 +280,41 @@ html[data-theme="dark"] .theme-toggle {
 }
 
 .tab-bar__scroller {
+  background: color-mix(in srgb, var(--bg-elevated) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 18px;
   display: flex;
   gap: 0.75rem;
   overflow-x: auto;
-  padding-bottom: 0.2rem;
+  padding: 0.45rem;
   scrollbar-width: thin;
 }
 
 button.tab-bar__tab {
   align-items: flex-start;
-  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--accent) 12%);
-  border-radius: 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  color: var(--text);
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
   min-width: 11.5rem;
-  padding: 0.85rem 1rem;
+  padding: 0.7rem 0.85rem;
   text-align: left;
 }
 
 button.tab-bar__tab:hover {
-  background: color-mix(in srgb, var(--bg-elevated) 60%, var(--accent-hover) 40%);
+  background: color-mix(in srgb, var(--accent) 68%, transparent);
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
 }
 
 button.tab-bar__tab[aria-selected="true"] {
-  background: color-mix(in srgb, var(--primary) 11%, var(--bg-elevated) 89%);
-  border-color: color-mix(in srgb, var(--primary) 55%, var(--border) 45%);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent);
+  background: color-mix(in srgb, var(--primary) 14%, var(--bg-elevated) 86%);
+  border-color: color-mix(in srgb, var(--primary) 60%, var(--border) 40%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--primary) 15%, transparent);
 }
 
 button.tab-bar__tab:focus-visible {
@@ -304,15 +324,16 @@ button.tab-bar__tab:focus-visible {
 
 .tab-bar__label {
   color: var(--text);
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
 .tab-bar__description {
   color: var(--text-dim);
-  font-size: 0.75rem;
-  line-height: 1.45;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  max-width: 18ch;
 }
 
 .dashboard-panel-view {
@@ -512,9 +533,10 @@ dl.stats-row {
 .walkthrough li {
   counter-increment: walkthrough-step;
   padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-elevated);
+  border: none;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-input) 82%, var(--accent) 18%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 28%, transparent);
 }
 
 .walkthrough li::before {
@@ -525,8 +547,8 @@ dl.stats-row {
   width: 1.5rem;
   height: 1.5rem;
   border-radius: 4px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 84%, var(--accent) 16%);
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
@@ -560,8 +582,8 @@ dl.stats-row {
 .walkthrough-commands code {
   font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
   font-size: 0.75rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-input) 76%, var(--accent) 24%);
+  border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
   border-radius: 4px;
   padding: 0.3rem 0.6rem;
   color: var(--text-muted);
