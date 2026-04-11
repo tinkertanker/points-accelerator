@@ -985,19 +985,19 @@ export class BotRuntime {
         .setDescription("Award one or more groups.")
         .addStringOption((option) => option.setName("targets").setDescription("Comma-separated aliases or role mentions").setRequired(true))
         .addNumberOption((option) => option.setName("points").setDescription("Points delta").setRequired(true))
+        .addStringOption((option) => option.setName("reason").setDescription("Award reason").setRequired(true))
         .addNumberOption((option) =>
           option.setName("currency").setDescription("Currency delta; defaults to points amount").setRequired(false),
-        )
-        .addStringOption((option) => option.setName("reason").setDescription("Award reason").setRequired(true)),
+        ),
       new SlashCommandBuilder()
         .setName("deduct")
         .setDescription("Deduct from one or more groups.")
         .addStringOption((option) => option.setName("targets").setDescription("Comma-separated aliases or role mentions").setRequired(true))
         .addNumberOption((option) => option.setName("points").setDescription("Points delta").setRequired(true))
+        .addStringOption((option) => option.setName("reason").setDescription("Deduction reason").setRequired(true))
         .addNumberOption((option) =>
           option.setName("currency").setDescription("Currency delta; defaults to points amount").setRequired(false),
-        )
-        .addStringOption((option) => option.setName("reason").setDescription("Deduction reason").setRequired(true)),
+        ),
       new SlashCommandBuilder()
         .setName("store")
         .setDescription("Browse the custom shop."),
