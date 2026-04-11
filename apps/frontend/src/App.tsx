@@ -11,6 +11,7 @@ import ThemeToggle from "./components/ThemeToggle";
 import { isDesignPreview } from "./designPreview";
 import { api } from "./services/api";
 import type {
+  Assignment,
   AssignmentDraft,
   AuthUser,
   BootstrapPayload,
@@ -95,7 +96,7 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
   };
 }
 
-function toAssignmentDraft(assignment?: { id: string; title: string; description: string; baseCurrencyReward: number; basePointsReward: number; bonusCurrencyReward: number; bonusPointsReward: number; deadline: string | null; active: boolean; sortOrder: number }): AssignmentDraft {
+function toAssignmentDraft(assignment?: Assignment): AssignmentDraft {
   if (!assignment) {
     return {
       title: "",
@@ -151,6 +152,7 @@ export default function App() {
 
   const clearDashboardData = () => {
     startTransition(() => {
+      setActiveTab("overview");
       setBootstrap(null);
       setSettingsDraft(null);
       setRoleDrafts([]);
@@ -184,6 +186,25 @@ export default function App() {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to load dashboard data.");
       throw error;
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const withMutation = async (
+    persist: () => Promise<unknown>,
+    successMessage: string,
+    fallbackErrorMessage: string,
+  ) => {
+    setIsBusy(true);
+    try {
+      await persist();
+      await refreshBootstrap();
+      setStatus(successMessage);
+      return true;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : fallbackErrorMessage);
+      return false;
     } finally {
       setIsBusy(false);
     }
@@ -242,7 +263,6 @@ export default function App() {
   const handleLogout = async () => {
     await api.logout().catch(() => undefined);
     setSessionUser(null);
-    setActiveTab("overview");
     clearDashboardData();
     setStatus("Signed out.");
   };
@@ -250,110 +270,72 @@ export default function App() {
   const handleSaveSettings = async () => {
     if (!settingsDraft) return;
 
-    setIsBusy(true);
-    try {
-      await api.saveSettings(settingsDraft);
-      await refreshBootstrap();
-      setStatus("Settings saved.");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to save settings.");
-    } finally {
-      setIsBusy(false);
-    }
+    await withMutation(() => api.saveSettings(settingsDraft), "Settings saved.", "Failed to save settings.");
   };
 
   const handleSaveRoles = async () => {
-    setIsBusy(true);
-    try {
-      await api.saveCapabilities(
-        roleDrafts.filter((role) => role.roleId.trim().length > 0 && role.roleName.trim().length > 0),
-      );
-      await refreshBootstrap();
-      setStatus("Role capabilities saved.");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to save role capabilities.");
-    } finally {
-      setIsBusy(false);
-    }
+    const validRoles = roleDrafts.filter((role) => role.roleId.trim().length > 0 && role.roleName.trim().length > 0);
+    await withMutation(() => api.saveCapabilities(validRoles), "Role capabilities saved.", "Failed to save role capabilities.");
   };
 
   const handleSaveGroups = async () => {
-    setIsBusy(true);
-    try {
-      const validGroups = groupDrafts.filter(
-        (group) => group.displayName.trim().length > 0 && group.roleId.trim().length > 0,
-      );
-      await Promise.all(validGroups.map((group) => api.saveGroup(group)));
-      await refreshBootstrap();
-      setStatus(`Saved ${validGroups.length} group${validGroups.length === 1 ? "" : "s"}.`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to save groups.");
-    } finally {
-      setIsBusy(false);
-    }
+    const validGroups = groupDrafts.filter(
+      (group) => group.displayName.trim().length > 0 && group.roleId.trim().length > 0,
+    );
+    await withMutation(
+      () => Promise.all(validGroups.map((group) => api.saveGroup(group))),
+      `Saved ${validGroups.length} group${validGroups.length === 1 ? "" : "s"}.`,
+      "Failed to save groups.",
+    );
   };
 
   const handleSaveShop = async () => {
-    setIsBusy(true);
-    try {
-      const validItems = shopDrafts.filter(
-        (item) => item.name.trim().length > 0 && item.description.trim().length > 0,
-      );
-      await Promise.all(validItems.map((item) => api.saveShopItem(item)));
-      await refreshBootstrap();
-      setStatus(`Saved ${validItems.length} shop item${validItems.length === 1 ? "" : "s"}.`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to save shop items.");
-    } finally {
-      setIsBusy(false);
-    }
+    const validItems = shopDrafts.filter(
+      (item) => item.name.trim().length > 0 && item.description.trim().length > 0,
+    );
+    await withMutation(
+      () => Promise.all(validItems.map((item) => api.saveShopItem(item))),
+      `Saved ${validItems.length} shop item${validItems.length === 1 ? "" : "s"}.`,
+      "Failed to save shop items.",
+    );
   };
 
   const handleSaveAssignments = async () => {
-    setIsBusy(true);
-    try {
-      const validAssignments = assignmentDrafts.filter((assignment) => assignment.title.trim().length > 0);
-      await Promise.all(validAssignments.map((assignment) => api.saveAssignment(assignment)));
-      await refreshBootstrap();
-      setStatus(`Saved ${validAssignments.length} assignment${validAssignments.length === 1 ? "" : "s"}.`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to save assignments.");
-    } finally {
-      setIsBusy(false);
-    }
+    const validAssignments = assignmentDrafts.filter((assignment) => assignment.title.trim().length > 0);
+    await withMutation(
+      () => Promise.all(validAssignments.map((assignment) => api.saveAssignment(assignment))),
+      `Saved ${validAssignments.length} assignment${validAssignments.length === 1 ? "" : "s"}.`,
+      "Failed to save assignments.",
+    );
   };
 
   const handleReviewSubmission = async (
     submission: Submission,
     nextStatus: Exclude<Submission["status"], "PENDING">,
   ) => {
-    let succeeded = false;
+    const submitter = submission.participant.discordUsername ?? submission.participant.indexId;
 
-    setIsBusy(true);
-    try {
-      await api.reviewSubmission(submission.id, { status: nextStatus });
-      await refreshBootstrap();
-      if (nextStatus === "APPROVED") {
-        setStatus(`Approved submission from ${submission.participant.discordUsername ?? submission.participant.indexId}.`);
-      } else if (nextStatus === "OUTSTANDING") {
-        setStatus(`Marked outstanding: ${submission.participant.discordUsername ?? submission.participant.indexId}.`);
-      } else {
-        setStatus(`Rejected submission from ${submission.participant.discordUsername ?? submission.participant.indexId}.`);
-      }
-      succeeded = true;
-    } catch (error) {
-      if (nextStatus === "APPROVED") {
-        setStatus(error instanceof Error ? error.message : "Failed to approve.");
-      } else if (nextStatus === "OUTSTANDING") {
-        setStatus(error instanceof Error ? error.message : "Failed to mark outstanding.");
-      } else {
-        setStatus(error instanceof Error ? error.message : "Failed to reject.");
-      }
-    } finally {
-      setIsBusy(false);
+    if (nextStatus === "APPROVED") {
+      return withMutation(
+        () => api.reviewSubmission(submission.id, { status: nextStatus }),
+        `Approved submission from ${submitter}.`,
+        "Failed to approve.",
+      );
     }
 
-    return succeeded;
+    if (nextStatus === "OUTSTANDING") {
+      return withMutation(
+        () => api.reviewSubmission(submission.id, { status: nextStatus }),
+        `Marked outstanding: ${submitter}.`,
+        "Failed to mark outstanding.",
+      );
+    }
+
+    return withMutation(
+      () => api.reviewSubmission(submission.id, { status: nextStatus }),
+      `Rejected submission from ${submitter}.`,
+      "Failed to reject.",
+    );
   };
 
   const activePanel = bootstrap && settingsDraft
