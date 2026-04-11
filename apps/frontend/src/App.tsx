@@ -143,8 +143,8 @@ export default function App() {
   const [shopDrafts, setShopDrafts] = useState<ShopItemDraft[]>([]);
   const [assignmentDrafts, setAssignmentDrafts] = useState<AssignmentDraft[]>([]);
   const [status, setStatus] = useState(getInitialStatus);
-  const [isBusy, setIsBusy] = useState(false);
   const [isInitialising, setIsInitialising] = useState(true);
+  const [isMutating, setIsMutating] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
 
   const discordRoles = bootstrap?.discord.roles ?? [];
@@ -179,7 +179,7 @@ export default function App() {
   };
 
   const loadBootstrap = async () => {
-    setIsBusy(true);
+    setIsMutating(true);
     try {
       await refreshBootstrap();
       setStatus("Dashboard synced.");
@@ -187,7 +187,7 @@ export default function App() {
       setStatus(error instanceof Error ? error.message : "Failed to load dashboard data.");
       throw error;
     } finally {
-      setIsBusy(false);
+      setIsMutating(false);
     }
   };
 
@@ -196,7 +196,7 @@ export default function App() {
     successMessage: string,
     fallbackErrorMessage: string,
   ) => {
-    setIsBusy(true);
+    setIsMutating(true);
     try {
       await persist();
       await refreshBootstrap();
@@ -206,7 +206,7 @@ export default function App() {
       setStatus(error instanceof Error ? error.message : fallbackErrorMessage);
       return false;
     } finally {
-      setIsBusy(false);
+      setIsMutating(false);
     }
   };
 
@@ -214,7 +214,6 @@ export default function App() {
     let cancelled = false;
 
     const bootstrapDashboard = async () => {
-      setIsBusy(true);
       try {
         const session = await api.session();
         if (!session.authenticated || !session.user) {
@@ -242,7 +241,6 @@ export default function App() {
         }
       } finally {
         if (!cancelled) {
-          setIsBusy(false);
           setIsInitialising(false);
         }
       }
@@ -258,6 +256,70 @@ export default function App() {
   const handleLogin = () => {
     setStatus("Redirecting to Discord...");
     api.beginDiscordLogin();
+  };
+
+  const renderActivePanel = () => {
+    if (!bootstrap || !settingsDraft) {
+      return null;
+    }
+
+    switch (activeTab) {
+      case "overview":
+        return <OverviewPanel bootstrap={bootstrap} settingsDraft={settingsDraft} />;
+      case "settings":
+        return (
+          <SettingsPanel
+            settingsDraft={settingsDraft}
+            roleDrafts={roleDrafts}
+            discordRoles={discordRoles}
+            discordChannels={discordChannels}
+            isBusy={isMutating}
+            onSettingsChange={setSettingsDraft}
+            onRoleDraftsChange={setRoleDrafts}
+            onSaveSettings={handleSaveSettings}
+            onSaveRoles={handleSaveRoles}
+          />
+        );
+      case "groups":
+        return (
+          <GroupsPanel
+            participants={bootstrap.participants}
+            groupDrafts={groupDrafts}
+            discordRoles={discordRoles}
+            isBusy={isMutating}
+            createGroupDraft={() => toGroupDraft()}
+            slugify={slugify}
+            onGroupDraftsChange={setGroupDrafts}
+            onSaveGroups={handleSaveGroups}
+          />
+        );
+      case "shop":
+        return (
+          <ShopPanel
+            shopDrafts={shopDrafts}
+            isBusy={isMutating}
+            createShopDraft={() => toShopItemDraft()}
+            onShopDraftsChange={setShopDrafts}
+            onSaveShop={handleSaveShop}
+          />
+        );
+      case "assignments":
+        return (
+          <AssignmentsPanel
+            bootstrap={bootstrap}
+            assignmentDrafts={assignmentDrafts}
+            isBusy={isMutating}
+            createAssignmentDraft={() => toAssignmentDraft()}
+            onAssignmentDraftsChange={setAssignmentDrafts}
+            onSaveAssignments={handleSaveAssignments}
+            onReviewSubmission={handleReviewSubmission}
+          />
+        );
+      case "activity":
+        return <ActivityPanel bootstrap={bootstrap} />;
+      default:
+        return null;
+    }
   };
 
   const handleLogout = async () => {
@@ -338,71 +400,12 @@ export default function App() {
     );
   };
 
-  const activePanel = bootstrap && settingsDraft
-    ? (() => {
-        switch (activeTab) {
-          case "overview":
-            return <OverviewPanel bootstrap={bootstrap} settingsDraft={settingsDraft} />;
-          case "settings":
-            return (
-              <SettingsPanel
-                settingsDraft={settingsDraft}
-                roleDrafts={roleDrafts}
-                discordRoles={discordRoles}
-                discordChannels={discordChannels}
-                isBusy={isBusy}
-                onSettingsChange={setSettingsDraft}
-                onRoleDraftsChange={setRoleDrafts}
-                onSaveSettings={handleSaveSettings}
-                onSaveRoles={handleSaveRoles}
-              />
-            );
-          case "groups":
-            return (
-              <GroupsPanel
-                participants={bootstrap.participants}
-                groupDrafts={groupDrafts}
-                discordRoles={discordRoles}
-                isBusy={isBusy}
-                createGroupDraft={() => toGroupDraft()}
-                slugify={slugify}
-                onGroupDraftsChange={setGroupDrafts}
-                onSaveGroups={handleSaveGroups}
-              />
-            );
-          case "shop":
-            return (
-              <ShopPanel
-                shopDrafts={shopDrafts}
-                isBusy={isBusy}
-                createShopDraft={() => toShopItemDraft()}
-                onShopDraftsChange={setShopDrafts}
-                onSaveShop={handleSaveShop}
-              />
-            );
-          case "assignments":
-            return (
-              <AssignmentsPanel
-                bootstrap={bootstrap}
-                assignmentDrafts={assignmentDrafts}
-                isBusy={isBusy}
-                createAssignmentDraft={() => toAssignmentDraft()}
-                onAssignmentDraftsChange={setAssignmentDrafts}
-                onSaveAssignments={handleSaveAssignments}
-                onReviewSubmission={handleReviewSubmission}
-              />
-            );
-          case "activity":
-            return <ActivityPanel bootstrap={bootstrap} />;
-          default:
-            return null;
-        }
-      })()
-    : null;
+  const activePanel = renderActivePanel();
 
   const showLoadingScreen = isInitialising && !bootstrap;
   const showLoginScreen = !showLoadingScreen && (!bootstrap || !settingsDraft);
   const showDashboard = !showLoadingScreen && !showLoginScreen && !!bootstrap && !!settingsDraft;
+  const isDashboardBusy = isInitialising || isMutating;
 
   return (
     <main className="shell">
@@ -432,9 +435,7 @@ export default function App() {
               Use your Discord account for the configured server. Dashboard access follows your current guild
               permissions and any roles marked with <strong>manage dashboard</strong>.
             </p>
-            <button onClick={handleLogin} disabled={isBusy}>
-              {isBusy ? "Redirecting..." : "Sign In with Discord"}
-            </button>
+            <button onClick={handleLogin}>Sign In with Discord</button>
             <p className="status-bar">{status}</p>
           </article>
         </section>
@@ -458,11 +459,11 @@ export default function App() {
                   <strong>{sessionUser.displayName}</strong>
                 </p>
               ) : null}
-              <button onClick={() => void loadBootstrap().catch(() => undefined)} disabled={isBusy}>
+              <button onClick={() => void loadBootstrap().catch(() => undefined)} disabled={isDashboardBusy}>
                 Refresh
               </button>
               {isDesignPreview() ? null : (
-                <button onClick={() => void handleLogout()} disabled={isBusy}>
+                <button onClick={() => void handleLogout()} disabled={isDashboardBusy}>
                   Sign Out
                 </button>
               )}
