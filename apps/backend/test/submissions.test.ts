@@ -833,5 +833,134 @@ describe("participants, assignments and submissions", () => {
       expect(ledger[0]!.splits[0]!.pointsDelta).toBe(7);
       expect(ledger[0]!.splits[0]!.currencyDelta).toBe(3);
     });
+
+    it("createOrReplace creates a new submission when none exists", async () => {
+      const group = await seedGroupWithCapability();
+
+      const participant = await ctx.services.participantService.register({
+        guildId: GUILD_ID,
+        discordUserId: "user-001",
+        discordUsername: "student1",
+        indexId: "S001",
+        groupId: group.id,
+      });
+
+      const assignment = await ctx.services.assignmentService.upsert(GUILD_ID, {
+        title: "Reply Task",
+        baseCurrencyReward: 5,
+        basePointsReward: 10,
+        bonusCurrencyReward: 0,
+        bonusPointsReward: 0,
+        active: true,
+      });
+
+      const result = await ctx.services.submissionService.createOrReplace({
+        guildId: GUILD_ID,
+        assignmentId: assignment.id,
+        participantId: participant.id,
+        text: "My work",
+        imageUrl: "https://example.com/image.png",
+      });
+
+      expect(result.replaced).toBe(false);
+      expect(result.submission.status).toBe("PENDING");
+      expect(result.submission.imageUrl).toBe("https://example.com/image.png");
+    });
+
+    it("createOrReplace replaces a PENDING submission", async () => {
+      const group = await seedGroupWithCapability();
+
+      const participant = await ctx.services.participantService.register({
+        guildId: GUILD_ID,
+        discordUserId: "user-001",
+        discordUsername: "student1",
+        indexId: "S001",
+        groupId: group.id,
+      });
+
+      const assignment = await ctx.services.assignmentService.upsert(GUILD_ID, {
+        title: "Reply Task",
+        baseCurrencyReward: 5,
+        basePointsReward: 10,
+        bonusCurrencyReward: 0,
+        bonusPointsReward: 0,
+        active: true,
+      });
+
+      await ctx.services.submissionService.create({
+        guildId: GUILD_ID,
+        assignmentId: assignment.id,
+        participantId: participant.id,
+        text: "First version",
+        imageUrl: "https://example.com/old-image.png",
+        imageKey: "submissions/guild-test/old-image.png",
+      });
+
+      const result = await ctx.services.submissionService.createOrReplace({
+        guildId: GUILD_ID,
+        assignmentId: assignment.id,
+        participantId: participant.id,
+        text: "Updated version",
+        imageUrl: "https://example.com/new-image.png",
+        imageKey: "submissions/guild-test/new-image.png",
+      });
+
+      expect(result.replaced).toBe(true);
+      expect(result.previousImageKey).toBe("submissions/guild-test/old-image.png");
+      expect(result.submission.text).toBe("Updated version");
+      expect(result.submission.imageUrl).toBe("https://example.com/new-image.png");
+
+      // Should still be only one submission total
+      const listResponse = await ctx.app.inject({
+        method: "GET",
+        url: "/api/submissions",
+        headers: AUTH_HEADER(),
+      });
+      expect((listResponse.json() as Array<unknown>)).toHaveLength(1);
+    });
+
+    it("createOrReplace refuses to replace an already-reviewed submission", async () => {
+      const group = await seedGroupWithCapability();
+
+      const participant = await ctx.services.participantService.register({
+        guildId: GUILD_ID,
+        discordUserId: "user-001",
+        discordUsername: "student1",
+        indexId: "S001",
+        groupId: group.id,
+      });
+
+      const assignment = await ctx.services.assignmentService.upsert(GUILD_ID, {
+        title: "Reply Task",
+        baseCurrencyReward: 5,
+        basePointsReward: 10,
+        bonusCurrencyReward: 0,
+        bonusPointsReward: 0,
+        active: true,
+      });
+
+      const submission = await ctx.services.submissionService.create({
+        guildId: GUILD_ID,
+        assignmentId: assignment.id,
+        participantId: participant.id,
+        text: "My work",
+      });
+
+      await ctx.services.submissionService.review({
+        guildId: GUILD_ID,
+        submissionId: submission.id,
+        status: "APPROVED",
+        reviewedByUserId: "admin-1",
+      });
+
+      await expect(
+        ctx.services.submissionService.createOrReplace({
+          guildId: GUILD_ID,
+          assignmentId: assignment.id,
+          participantId: participant.id,
+          text: "Trying to replace",
+        }),
+      ).rejects.toThrow(/already been reviewed/i);
+    });
   });
 });

@@ -39,6 +39,7 @@ function createRuntimeFixture() {
     },
     submissionService: {
       create: vi.fn(),
+      createOrReplace: vi.fn(),
       list: vi.fn().mockResolvedValue([]),
       getCompletionSummary: vi.fn().mockResolvedValue([]),
       resolveIdentifier: vi.fn(),
@@ -50,6 +51,8 @@ function createRuntimeFixture() {
   };
   const storageService = {
     isConfigured: false,
+    upload: vi.fn(),
+    delete: vi.fn(),
   };
 
   return {
@@ -371,6 +374,66 @@ describe("bot runtime", () => {
     );
     expect(editReply).toHaveBeenCalledWith(
       expect.stringContaining("assign-11111111"),
+    );
+  });
+
+  it("uses the original message as the submission payload and cleans up replaced images", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.participantService.findByDiscordUser.mockResolvedValue({
+      id: "participant-1",
+      indexId: "S001",
+      groupId: "group-1",
+    });
+    services.assignmentService.listActive.mockResolvedValue([
+      { id: "assign-1", title: "Reply Task" },
+    ]);
+    services.submissionService.createOrReplace.mockResolvedValue({
+      replaced: true,
+      previousImageKey: "submissions/guild-test/old-image.png",
+      submission: {
+        assignment: { title: "Reply Task" },
+      },
+    });
+
+    const deleteObject = vi.fn().mockResolvedValue(undefined);
+    (runtime as any).storageService = {
+      isConfigured: true,
+      upload: vi.fn(),
+      delete: deleteObject,
+    };
+    (runtime as any).client = {
+      user: { id: "bot-1" },
+    };
+
+    const reply = vi.fn().mockResolvedValue(undefined);
+    await (runtime as any).handleReplySubmission({
+      reference: { messageId: "message-original" },
+      channel: {
+        messages: {
+          fetch: vi.fn().mockResolvedValue({
+            author: { id: "user-1" },
+            content: "Original submission notes",
+            attachments: [],
+          }),
+        },
+      },
+      author: { id: "user-1" },
+      content: "<@bot-1> submit assign-1",
+      attachments: [],
+      reply,
+    });
+
+    expect(services.submissionService.createOrReplace).toHaveBeenCalledWith({
+      guildId: "guild-test",
+      assignmentId: "assign-1",
+      participantId: "participant-1",
+      text: "Original submission notes",
+      imageUrl: undefined,
+      imageKey: undefined,
+    });
+    expect(deleteObject).toHaveBeenCalledWith("submissions/guild-test/old-image.png");
+    expect(reply).toHaveBeenCalledWith(
+      "Submission updated for **Reply Task**! It will be reviewed by an admin.",
     );
   });
 });

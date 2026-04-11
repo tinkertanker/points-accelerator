@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { extname } from "node:path";
 
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 import type { AppEnv } from "../config/env.js";
 
@@ -61,6 +61,19 @@ export class StorageService {
     const url = this.publicUrl ? `${this.publicUrl}/${key}` : `https://${this.bucketName}.r2.dev/${key}`;
 
     return { key, url };
+  }
+
+  public async delete(key: string): Promise<void> {
+    if (!this.client || !this.bucketName) {
+      throw new Error("Storage is not configured. Set R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME.");
+    }
+
+    await this.client.send(
+      new DeleteObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+      }),
+    );
   }
 
   private extensionFromContentType(contentType: string): string {

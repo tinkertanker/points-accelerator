@@ -10,6 +10,7 @@ import {
   type ChatInputCommandInteraction,
   type GuildTextBasedChannel,
   type GuildMember,
+  type Message,
 } from "discord.js";
 
 import type { AppEnv } from "../config/env.js";
@@ -94,6 +95,16 @@ export class BotRuntime {
 
       const member = await message.member?.fetch().catch(() => null);
       if (!member) {
+        return;
+      }
+
+      // Reply-based submission: user replies to their own message and @mentions the bot
+      if (
+        message.reference?.messageId &&
+        this.client?.user &&
+        message.mentions.has(this.client.user)
+      ) {
+        await this.handleReplySubmission(message);
         return;
       }
 
@@ -323,6 +334,187 @@ export class BotRuntime {
 
     if (entry) {
       this.cooldowns.set(cooldownKey, { seenAt: now });
+    }
+  }
+
+  /**
+   * Handle a reply-based submission where the original message is the actual
+   * submission payload and the reply only tells the bot which assignment it is
+   * for.
+   *
+   * The original message provides the submission text and preferred image.
+   * The reply only needs to @mention the bot and include the assignment
+   * identifier, for example `@Bot submit reflection-1`.
+   */
+  private async handleReplySubmission(message: Message) {
+    const guildId = this.env.GUILD_ID;
+
+    try {
+      // --- 1. Fetch the referenced (original) message -----------------------
+      const referencedId = message.reference!.messageId!;
+      const channel = message.channel;
+      const original = await channel.messages.fetch(referencedId).catch(() => null);
+
+      if (!original) {
+        await message.reply("I couldn't find the message you replied to.");
+        return;
+      }
+
+      // Must be the student's own message
+      if (original.author.id !== message.author.id) {
+        await message.reply("You can only submit your own messages. Reply to a message you sent.");
+        return;
+      }
+
+      // --- 2. Extract the preferred submission image -------------------------
+      // Prefer an image on the original message. If the original is text-only,
+      // allow the reply to provide the image instead.
+      const imageAttachment = original.attachments.find((a) =>
+        a.contentType?.startsWith("image/"),
+      );
+
+      // Also consider images in the reply itself as a fallback
+      const replyImageAttachment = message.attachments.find((a) =>
+        a.contentType?.startsWith("image/"),
+      );
+
+      const attachment = imageAttachment ?? replyImageAttachment;
+
+      // Strip the bot mention from the reply so only the assignment selector remains.
+      const botMentionPattern = this.client?.user
+        ? new RegExp(`<@!?${this.client.user.id}>`, "g")
+        : null;
+
+      let commandText = message.content;
+      if (botMentionPattern) {
+        commandText = commandText.replace(botMentionPattern, "").trim();
+      }
+
+      // --- 3. Parse assignment identifier from the reply text ----------------
+      // Supported formats:
+      //   @Bot submit <assignment>
+      //   @Bot <assignment>
+      const submitPrefixMatch = commandText.match(/^submit\s+/i);
+      const assignmentIdentifier = submitPrefixMatch
+        ? commandText.slice(submitPrefixMatch[0].length).trim()
+        : commandText.trim();
+
+      if (!assignmentIdentifier) {
+        const activeAssignments = await this.services.assignmentService.listActive(guildId);
+        await message.reply(
+          `Please include the assignment name or ID. Available assignments: ${this.formatAssignmentChoices(activeAssignments)}`,
+        );
+        return;
+      }
+
+      // --- 4. Look up participant -------------------------------------------
+      const participant = await this.services.participantService.findByDiscordUser(
+        guildId,
+        message.author.id,
+      );
+
+      if (!participant) {
+        await message.reply(
+          "You need to register first. Use `/register` with your index ID and group.",
+        );
+        return;
+      }
+
+      // --- 5. Resolve assignment --------------------------------------------
+      const activeAssignments = await this.services.assignmentService.listActive(guildId);
+      const assignmentLookup = this.resolveActiveAssignment(activeAssignments, assignmentIdentifier);
+
+      if (assignmentLookup.kind === "missing") {
+        await message.reply(
+          `Assignment not found. Available assignments: ${this.formatAssignmentChoices(activeAssignments)}`,
+        );
+        return;
+      }
+
+      if (assignmentLookup.kind === "ambiguous") {
+        await message.reply(
+          `Multiple assignments match "${assignmentIdentifier}". Use the assignment ID instead: ${this.formatAssignmentChoices(assignmentLookup.matches)}`,
+        );
+        return;
+      }
+
+      const assignment = assignmentLookup.assignment;
+
+      // --- 6. Collect submission content ------------------------------------
+      // The submission content lives on the original message being replied to.
+      const originalText = original.content.trim();
+      const submissionText = originalText;
+
+      if (!submissionText && !attachment) {
+        await message.reply(
+          "The message you replied to has no image and no text. There is nothing to submit.",
+        );
+        return;
+      }
+
+      // --- 7. Upload image if present ---------------------------------------
+      let imageUrl: string | undefined;
+      let imageKey: string | undefined;
+
+      if (attachment) {
+        if (attachment.size > 10 * 1024 * 1024) {
+          await message.reply("Image must be under 10 MB.");
+          return;
+        }
+
+        if (this.storageService.isConfigured) {
+          try {
+            const response = await fetch(attachment.url);
+            if (!response.ok) {
+              await message.reply("Failed to download the image. It may have expired — try re-uploading it.");
+              return;
+            }
+            const buffer = Buffer.from(await response.arrayBuffer());
+            const result = await this.storageService.upload({
+              buffer,
+              contentType: attachment.contentType ?? "image/png",
+              folder: `submissions/${guildId}`,
+              originalFilename: attachment.name ?? undefined,
+            });
+            imageUrl = result.url;
+            imageKey = result.key;
+          } catch {
+            await message.reply("Failed to upload image. Please try again or contact an admin.");
+            return;
+          }
+        } else {
+          imageUrl = attachment.url;
+        }
+      }
+
+      // --- 8. Create or replace submission ----------------------------------
+      const result = await this.services.submissionService.createOrReplace({
+        guildId,
+        assignmentId: assignment.id,
+        participantId: participant.id,
+        text: submissionText,
+        imageUrl,
+        imageKey,
+      });
+
+      if (
+        result.replaced &&
+        result.previousImageKey &&
+        result.previousImageKey !== imageKey &&
+        this.storageService.isConfigured
+      ) {
+        // Best-effort cleanup for replaced R2 objects. A cleanup failure should
+        // not make the submission itself fail.
+        await this.storageService.delete(result.previousImageKey).catch(() => {});
+      }
+
+      const verb = result.replaced ? "updated" : "received";
+      await message.reply(
+        `Submission ${verb} for **${result.submission.assignment.title}**! It will be reviewed by an admin.`,
+      );
+    } catch (error) {
+      const text = error instanceof AppError ? error.message : "Something went wrong with your submission.";
+      await message.reply(text).catch(() => {});
     }
   }
 

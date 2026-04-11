@@ -258,6 +258,109 @@ export class SubmissionService {
     });
   }
 
+  /**
+   * Create a submission, or replace an existing PENDING one for the same
+   * (guild, assignment, participant) triple.  Already-reviewed submissions
+   * cannot be replaced.
+   */
+  public async createOrReplace(params: {
+    guildId: string;
+    assignmentId: string;
+    participantId: string;
+    text: string;
+    imageUrl?: string;
+    imageKey?: string;
+  }) {
+    const text = params.text.trim();
+
+    if (text.length === 0 && !params.imageUrl) {
+      throw new AppError("Add some text or an image before submitting.", 400);
+    }
+
+    const assignment = await this.prisma.assignment.findFirst({
+      where: { id: params.assignmentId, guildId: params.guildId, active: true },
+    });
+
+    if (!assignment) {
+      throw new AppError("Assignment not found or is no longer active.", 404);
+    }
+
+    if (assignment.deadline && new Date() > assignment.deadline) {
+      throw new AppError("The deadline for this assignment has passed.", 409);
+    }
+
+    const existing = await this.prisma.submission.findFirst({
+      where: {
+        guildId: params.guildId,
+        assignmentId: params.assignmentId,
+        participantId: params.participantId,
+      },
+    });
+
+    if (existing && existing.status !== "PENDING") {
+      throw new AppError(
+        `Your submission has already been reviewed (${existing.status}). Contact an admin if you need to resubmit.`,
+        409,
+      );
+    }
+
+    const data = {
+      guildId: params.guildId,
+      assignmentId: params.assignmentId,
+      participantId: params.participantId,
+      text,
+      imageUrl: params.imageUrl ?? null,
+      imageKey: params.imageKey ?? null,
+    };
+
+    const include = {
+      assignment: { select: { id: true, title: true } },
+      participant: {
+        select: {
+          id: true,
+          indexId: true,
+          discordUserId: true,
+          discordUsername: true,
+          group: { select: { id: true, displayName: true } },
+        },
+      },
+    } as const;
+
+    if (existing) {
+      const previousImageKey = existing.imageKey;
+      const updated = await this.prisma.submission.update({
+        where: { id: existing.id },
+        data: { text, imageUrl: data.imageUrl, imageKey: data.imageKey },
+        include,
+      });
+      return {
+        submission: this.toSubmissionResponse(updated),
+        replaced: true,
+        previousImageKey,
+      };
+    }
+
+    try {
+      const created = await this.prisma.submission.create({ data, include });
+      return {
+        submission: this.toSubmissionResponse(created),
+        replaced: false,
+        previousImageKey: null,
+      };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new AppError(
+          "You have already submitted for this assignment. Contact an admin if you need to resubmit.",
+          409,
+        );
+      }
+      throw error;
+    }
+  }
+
   public async resolveIdentifier(guildId: string, identifier: string) {
     const value = identifier.trim();
     if (!value) {
