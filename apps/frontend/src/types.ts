@@ -132,6 +132,14 @@ export type BootstrapPayload = {
   submissions: Submission[];
 };
 
+export type TabId =
+  | "overview"
+  | "settings"
+  | "groups"
+  | "shop"
+  | "assignments"
+  | "activity";
+
 export type Assignment = {
   id: string;
   title: string;
