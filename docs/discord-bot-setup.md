@@ -3,7 +3,7 @@
 ## 1. Create the Discord application
 
 1. Open the Discord Developer Portal.
-2. Create a new application called `economy rice`.
+2. Create a new application called `points accelerator`.
 3. Under **Bot**, add a bot user.
 4. Enable these privileged intents:
    - Server Members Intent
@@ -56,7 +56,7 @@ If your deployment uses a dedicated OAuth callback override, set and register `D
 
 After deployment:
 
-1. Sign in at `https://economyrice.tk.sg` with Discord.
+1. Sign in at `https://points-accelerator.tk.sg` with Discord.
 2. Follow the **Phase 1 walkthrough** shown in the control room.
 3. Create role capability rules for admin and alumni roles, and mark trusted staff roles with `canManageDashboard`.
 4. Map each student group role to a group entry.

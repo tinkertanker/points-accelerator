@@ -11,18 +11,18 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_DB: economyrice
-          POSTGRES_USER: economyrice
-          POSTGRES_PASSWORD: economyrice
+          POSTGRES_DB: pointsaccelerator
+          POSTGRES_USER: pointsaccelerator
+          POSTGRES_PASSWORD: pointsaccelerator
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U economyrice"
+          --health-cmd "pg_isready -U pointsaccelerator"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql://economyrice:economyrice@localhost:5432/economyrice
+      DATABASE_URL: postgresql://pointsaccelerator:pointsaccelerator@localhost:5432/pointsaccelerator
       ADMIN_TOKEN: ci-admin-token
       GUILD_ID: ci-guild
       VITE_API_BASE_URL: http://127.0.0.1:4173
@@ -37,4 +37,3 @@ jobs:
       - run: npm --workspace apps/backend run prisma:migrate
       - run: npm run build
       - run: npm run test
-

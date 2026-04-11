@@ -12,8 +12,8 @@ describe("resolveApiUrl", () => {
   });
 
   it("handles an absolute base that already ends in /api", () => {
-    expect(resolveApiUrl("https://economyrice.tk.sg/api/", "/api/bootstrap")).toBe(
-      "https://economyrice.tk.sg/api/bootstrap",
+    expect(resolveApiUrl("https://points-accelerator.tk.sg/api/", "/api/bootstrap")).toBe(
+      "https://points-accelerator.tk.sg/api/bootstrap",
     );
   });
 });

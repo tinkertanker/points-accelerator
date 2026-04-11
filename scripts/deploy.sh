@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REMOTE_HOST="${REMOTE_HOST:-tinkertanker@dev.tk.sg}"
+# Keep the existing checkout defaults for the first in-place rename rollout.
 REMOTE_PATH="${REMOTE_PATH:-/home/tinkertanker-server/Docker/economy-rice}"
 REPO_URL="${REPO_URL:-https://github.com/tinkertanker/economy-rice.git}"
 BRANCH="${BRANCH:-main}"

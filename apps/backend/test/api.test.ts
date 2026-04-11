@@ -6,7 +6,7 @@ import { ensureTestDatabase } from "./helpers/test-database.js";
 let cleanupDatabase = () => undefined;
 let ctx: Awaited<ReturnType<typeof createTestApp>>;
 
-describe("economy rice API", () => {
+describe("points accelerator API", () => {
   beforeAll(async () => {
     const managed = ensureTestDatabase();
     cleanupDatabase = managed.cleanup;
@@ -31,7 +31,7 @@ describe("economy rice API", () => {
       url: "/api/settings",
       headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
       payload: {
-        appName: "economy rice",
+        appName: "points accelerator",
         pointsName: "beans",
         currencyName: "rice",
         passivePointsReward: 2,

@@ -32,7 +32,7 @@ export function ensureTestDatabase(): ManagedDatabase {
     }
   }
 
-  const baseDir = mkdtempSync(join(tmpdir(), "economy-rice-pg-"));
+  const baseDir = mkdtempSync(join(tmpdir(), "points-accelerator-pg-"));
   const dataDir = join(baseDir, "data");
   const socketDir = join(baseDir, "socket");
   const logFile = join(baseDir, "postgres.log");
@@ -60,11 +60,11 @@ export function ensureTestDatabase(): ManagedDatabase {
     }
   }
 
-  execFileSync("createdb", ["-h", "127.0.0.1", "-p", port, "-U", "postgres", "economy_rice_test"], {
+  execFileSync("createdb", ["-h", "127.0.0.1", "-p", port, "-U", "postgres", "points_accelerator_test"], {
     stdio: "ignore",
   });
 
-  const url = `postgresql://postgres@127.0.0.1:${port}/economy_rice_test?schema=public`;
+  const url = `postgresql://postgres@127.0.0.1:${port}/points_accelerator_test?schema=public`;
   process.env.DATABASE_URL = url;
 
   execFileSync(

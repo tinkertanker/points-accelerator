@@ -1,6 +1,6 @@
-# economy rice
+# points accelerator
 
-`economy rice` is a group-first Discord economy bot for class communities.
+`points accelerator` is a group-first Discord economy bot for class communities.
 
 It tracks permanent `points` for leaderboards, separate spendable `currency` for the shop and transfers, and a role-driven capability system so each Discord role can be configured for what it can award, deduct, sell, or receive.
 

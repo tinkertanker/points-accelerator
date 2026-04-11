@@ -5,7 +5,7 @@ import { loadEnv } from "../src/config/env.js";
 
 function createRuntimeFixture() {
   const env = loadEnv({
-    DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/economy_rice_test",
+    DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/points_accelerator_test",
     GUILD_ID: "guild-test",
     ADMIN_TOKEN: "test-admin-token",
     PORT: 1,

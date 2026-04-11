@@ -28,7 +28,7 @@ test("authenticated Discord manager can see the control room", async ({ page }) 
       contentType: "application/json",
       body: JSON.stringify({
         settings: {
-          appName: "economy rice",
+          appName: "points accelerator",
           pointsName: "beans",
           currencyName: "rice",
           passivePointsReward: 1,
@@ -61,7 +61,7 @@ test("authenticated Discord manager can see the control room", async ({ page }) 
 
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: /economy rice/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /points accelerator/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /class launch walkthrough/i })).toBeVisible();
   await expect(page.getByText(/dashboard synced/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /save settings/i })).toBeVisible();

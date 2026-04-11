@@ -13,6 +13,7 @@ Set these in your `.env` file before deploying:
 - `DISCORD_GUILD_ID`
 - `APP_DOMAIN`
 - `DISCORD_OAUTH_REDIRECT_URI` if your OAuth callback does not live at `${APP_PUBLIC_URL}/api/auth/discord/callback`
+- `POSTGRES_VOLUME_NAME` if you need to keep using a legacy Docker volume name during a rename cutover
 
 ## Local verification
 
@@ -40,6 +41,7 @@ Set these in your `.env` file before deploying:
 - Passive message reward cooldowns are also stored in backend process memory, so cooldown state resets on backend restart.
 - Because sessions and cooldowns are in memory, the current deployment model should be treated as single-instance. Do not scale the backend horizontally unless you first move that state into shared storage such as Redis or Postgres.
 - The bundled `postgres` service uses a Docker volume for persistence. That is convenient, but it is not a backup strategy; schedule regular `pg_dump` or volume snapshots if the data matters.
+- If you are renaming an existing `economy-rice` deployment in place, either keep `POSTGRES_VOLUME_NAME` pointed at the existing Docker volume for the first rollout or migrate the volume contents before switching names. If you reuse that existing Postgres data directory, keep `DATABASE_URL`, `POSTGRES_DB`, and `POSTGRES_USER` aligned with the legacy database and role until you perform an explicit database/user rename.
 
 ## First-run checklist
 

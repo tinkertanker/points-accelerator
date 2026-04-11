@@ -5,8 +5,8 @@ services:
       dockerfile: apps/frontend/Dockerfile.prod
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
-    image: economy-rice-frontend:latest
-    container_name: economy-rice-frontend
+    image: points-accelerator-frontend:latest
+    container_name: points-accelerator-frontend
     expose:
       - "80"
     environment:
@@ -31,8 +31,8 @@ services:
     build:
       context: .
       dockerfile: apps/backend/Dockerfile
-    image: economy-rice-backend:latest
-    container_name: economy-rice-backend
+    image: points-accelerator-backend:latest
+    container_name: points-accelerator-backend
     environment:
       NODE_ENV: production
       PORT: 3001
@@ -59,13 +59,13 @@ services:
 
   postgres:
     image: postgres:15-alpine
-    container_name: economy-rice-postgres
+    container_name: points-accelerator-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - economy-rice-postgres:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
@@ -74,7 +74,8 @@ services:
       retries: 5
 
 volumes:
-  economy-rice-postgres:
+  postgres-data:
+    name: ${POSTGRES_VOLUME_NAME:-points-accelerator-postgres}
 
 networks:
   devtksg:

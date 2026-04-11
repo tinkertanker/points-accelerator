@@ -2,7 +2,7 @@
 
 ## Scope
 
-This repository is `economy rice`, a group-first Discord economy bot.
+This repository is `points accelerator`, a group-first Discord economy bot.
 
 It is a monorepo with:
 
@@ -62,8 +62,7 @@ Useful backend commands:
 - Production deploys use `docker-compose.prod.yml`.
 - The helper script is `scripts/deploy.sh`.
 - Docker or build stages that run `npm install` must copy `apps/backend/prisma` before install because backend `postinstall` runs Prisma generate.
-- Current production target is `tinkertanker@dev.tk.sg:/home/tinkertanker-server/Docker/economy-rice`.
-- Current public domain is `https://economyrice.tk.sg`.
+- Rename-sensitive deployment defaults live in `scripts/deploy.sh` and `.env.production.example`; migrate any legacy `economy-rice` server paths, volumes, or domains explicitly.
 - Production configuration lives in `.env.production` on the server.
 
 ## Relevant docs

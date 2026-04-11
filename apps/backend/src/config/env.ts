@@ -23,7 +23,7 @@ const envSchema = z.object({
   DISCORD_GUILD_ID: optionalNonEmptyString(),
   DISCORD_OAUTH_REDIRECT_URI: optionalUrlString(),
   ADMIN_TOKEN: z.preprocess((value) => (value === "" ? undefined : value), z.string().min(8).optional()),
-  PUBLIC_APP_NAME: z.string().default("economy rice"),
+  PUBLIC_APP_NAME: z.string().default("points accelerator"),
   MESSAGE_REWARD_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(60),
   R2_ENDPOINT: optionalUrlString(),
   R2_ACCESS_KEY_ID: optionalNonEmptyString(),

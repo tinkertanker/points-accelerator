@@ -40,7 +40,7 @@ enum RedemptionStatus {
 model GuildConfig {
   id                           String                @id @default(cuid())
   guildId                      String                @unique
-  appName                      String                @default("economy rice")
+  appName                      String                @default("points accelerator")
   pointsName                   String                @default("points")
   currencyName                 String                @default("rice")
   passivePointsReward          Decimal               @default(1) @db.Decimal(18, 6)

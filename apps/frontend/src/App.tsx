@@ -261,7 +261,7 @@ export default function App() {
       {!bootstrap || !settingsDraft ? (
           <section className="login-page">
             <header className="login-hero">
-              <h1>economy rice</h1>
+              <h1>points accelerator</h1>
               <p className="lede">
                 Group rewards, transfers, shop pricing, role capabilities, and passive chat earn rates all live here.
               </p>

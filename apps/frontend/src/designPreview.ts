@@ -16,7 +16,7 @@ export function isDesignPreview(): boolean {
 function createInitialBootstrap(): BootstrapPayload {
   return {
     settings: {
-      appName: "economy rice",
+      appName: "points accelerator",
       pointsName: "beans",
       currencyName: "rice",
       passivePointsReward: 1,

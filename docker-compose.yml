@@ -9,7 +9,7 @@ services:
       - "80"
     environment:
       VIRTUAL_PORT: 80
-      VIRTUAL_HOST: ${FRONTEND_DOMAIN:-economy-rice.local}
+      VIRTUAL_HOST: ${FRONTEND_DOMAIN:-points-accelerator.local}
     depends_on:
       backend:
         condition: service_healthy
@@ -36,7 +36,7 @@ services:
       DISCORD_OAUTH_REDIRECT_URI: ${DISCORD_OAUTH_REDIRECT_URI}
       ADMIN_TOKEN: ${ADMIN_TOKEN}
       VIRTUAL_PORT: 3001
-      VIRTUAL_HOST: ${BACKEND_DOMAIN:-economy-rice-api.local}
+      VIRTUAL_HOST: ${BACKEND_DOMAIN:-points-accelerator-api.local}
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,13 +52,13 @@ services:
   postgres:
     image: postgres:15-alpine
     environment:
-      POSTGRES_DB: economyrice
-      POSTGRES_USER: economyrice
-      POSTGRES_PASSWORD: economyrice
+      POSTGRES_DB: pointsaccelerator
+      POSTGRES_USER: pointsaccelerator
+      POSTGRES_PASSWORD: pointsaccelerator
     volumes:
-      - economyrice-postgres:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U economyrice"]
+      test: ["CMD-SHELL", "pg_isready -U pointsaccelerator"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -67,7 +67,8 @@ services:
     restart: unless-stopped
 
 volumes:
-  economyrice-postgres:
+  postgres-data:
+    name: ${POSTGRES_VOLUME_NAME:-points-accelerator-postgres}
 
 networks:
   devtksg:
