@@ -857,6 +857,13 @@ export default function App() {
                 </tbody>
               </table>
             </div>
+            <button
+              type="button"
+              className="matrix-add-row"
+              onClick={() => setGroupDrafts([...groupDrafts, toGroupDraft()])}
+            >
+              + Add group
+            </button>
           </div>
         </article>
 
@@ -866,6 +873,28 @@ export default function App() {
               <p className="section-label">Shop</p>
               <h2>Catalog</h2>
             </hgroup>
+            <button
+              className="primary-action"
+              onClick={async () => {
+                setIsBusy(true);
+                try {
+                  const validItems = shopDrafts.filter(
+                    (item) => item.name.trim().length > 0 && item.description.trim().length > 0,
+                  );
+                  for (const item of validItems) {
+                    await api.saveShopItem(item);
+                  }
+                  await loadBootstrap();
+                  setStatus(`Saved ${validItems.length} shop item${validItems.length === 1 ? "" : "s"}.`);
+                } catch (error) {
+                  setStatus(error instanceof Error ? error.message : "Failed to save shop items.");
+                } finally {
+                  setIsBusy(false);
+                }
+              }}
+            >
+              Save Shop
+            </button>
           </header>
           <div className="shop-catalog-matrix">
             <div className="matrix-scroll">
@@ -972,31 +1001,18 @@ export default function App() {
                           }}
                         />
                       </td>
-                      <td className="col-actions">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            setIsBusy(true);
-                            try {
-                              await api.saveShopItem(item);
-                              await loadBootstrap();
-                              setStatus(`Saved ${item.name || "shop item"}.`);
-                            } catch (error) {
-                              setStatus(error instanceof Error ? error.message : "Failed to save shop item.");
-                            } finally {
-                              setIsBusy(false);
-                            }
-                          }}
-                          disabled={!item.name || !item.description}
-                        >
-                          Save
-                        </button>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            <button
+              type="button"
+              className="matrix-add-row"
+              onClick={() => setShopDrafts([...shopDrafts, toShopItemDraft()])}
+            >
+              + Add shop item
+            </button>
           </div>
         </article>
       </section>
@@ -1005,8 +1021,8 @@ export default function App() {
         <article className="section">
           <header className="section-header">
             <hgroup>
-              <p className="section-label">Assignments</p>
-              <h2>Submission prompts</h2>
+              <p className="section-label">Submission prompts</p>
+              <h2>Assignments</h2>
             </hgroup>
           </header>
           <p className="section-help">
