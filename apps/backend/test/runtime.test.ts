@@ -436,4 +436,23 @@ describe("bot runtime", () => {
       "Submission updated for **Reply Task**! It will be reviewed by an admin.",
     );
   });
+
+  it("replies with a default message for direct bot mentions outside submission handling", async () => {
+    const { runtime } = createRuntimeFixture();
+    (runtime as any).client = {
+      user: { id: "bot-1" },
+    };
+
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const handled = await (runtime as any).handleBotMention({
+      reference: null,
+      mentions: {
+        has: vi.fn().mockReturnValue(true),
+      },
+      reply,
+    });
+
+    expect(handled).toBe(true);
+    expect(reply).toHaveBeenCalledWith("I am a helpful points bot.");
+  });
 });

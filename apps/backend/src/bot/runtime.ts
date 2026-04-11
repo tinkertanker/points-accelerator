@@ -98,13 +98,7 @@ export class BotRuntime {
         return;
       }
 
-      // Reply-based submission: user replies to their own message and @mentions the bot
-      if (
-        message.reference?.messageId &&
-        this.client?.user &&
-        message.mentions.has(this.client.user)
-      ) {
-        await this.handleReplySubmission(message);
+      if (await this.handleBotMention(message)) {
         return;
       }
 
@@ -137,6 +131,20 @@ export class BotRuntime {
     });
 
     await this.client.login(this.env.DISCORD_BOT_TOKEN);
+  }
+
+  private async handleBotMention(message: Message) {
+    if (!this.client?.user || !message.mentions.has(this.client.user)) {
+      return false;
+    }
+
+    if (message.reference?.messageId) {
+      await this.handleReplySubmission(message);
+      return true;
+    }
+
+    await message.reply("I am a helpful points bot.").catch(() => {});
+    return true;
   }
 
   public async stop() {
