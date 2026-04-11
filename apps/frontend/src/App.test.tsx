@@ -1,9 +1,20 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 
 const fetchMock = vi.fn<typeof fetch>();
+
+function deferredResponse() {
+  let resolve: (value: Response) => void;
+  let reject: (reason?: unknown) => void;
+  const promise = new Promise<Response>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve: resolve!, reject: reject! };
+}
 
 const authenticatedSession = {
   authenticated: true,
@@ -57,6 +68,7 @@ describe("App", () => {
   });
 
   afterEach(() => {
+    cleanup();
     fetchMock.mockReset();
     vi.unstubAllGlobals();
   });
@@ -74,6 +86,25 @@ describe("App", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(screen.getByText(/group rewards, transfers, shop pricing/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign in with discord/i })).toBeInTheDocument();
+  });
+
+  it("keeps the login prompt hidden while the initial session check is still loading", async () => {
+    const sessionRequest = deferredResponse();
+    fetchMock.mockReturnValueOnce(sessionRequest.promise);
+
+    render(<App />);
+
+    expect(screen.getByText(/loading your dashboard/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /sign in with discord/i })).not.toBeInTheDocument();
+
+    sessionRequest.resolve(
+      new Response(JSON.stringify({ authenticated: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    expect(await screen.findByRole("button", { name: /sign in with discord/i })).toBeInTheDocument();
   });
 
   it("shows dashboard tabs and swaps panels for an authenticated manager", async () => {

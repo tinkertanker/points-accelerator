@@ -143,6 +143,7 @@ export default function App() {
   const [assignmentDrafts, setAssignmentDrafts] = useState<AssignmentDraft[]>([]);
   const [status, setStatus] = useState(getInitialStatus);
   const [isBusy, setIsBusy] = useState(false);
+  const [isInitialising, setIsInitialising] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
 
   const discordRoles = bootstrap?.discord.roles ?? [];
@@ -221,6 +222,7 @@ export default function App() {
       } finally {
         if (!cancelled) {
           setIsBusy(false);
+          setIsInitialising(false);
         }
       }
     };
@@ -416,12 +418,24 @@ export default function App() {
       })()
     : null;
 
+  const showLoadingScreen = isInitialising && !bootstrap;
+  const showLoginScreen = !showLoadingScreen && (!bootstrap || !settingsDraft);
+  const showDashboard = !showLoadingScreen && !showLoginScreen && !!bootstrap && !!settingsDraft;
+
   return (
     <main className="shell">
       <div className="shell-toolbar">
         <ThemeToggle />
       </div>
-      {!bootstrap || !settingsDraft ? (
+      {showLoadingScreen ? (
+        <section className="app-loading" aria-live="polite">
+          <div className="app-loading__panel">
+            <p className="app-loading__eyebrow">points accelerator</p>
+            <h1>Loading your dashboard...</h1>
+            <p className="app-loading__copy">Checking your Discord session and syncing the latest admin data.</p>
+          </div>
+        </section>
+      ) : showLoginScreen ? (
         <section className="login-page">
           <header className="login-hero">
             <h1>points accelerator</h1>
@@ -442,7 +456,7 @@ export default function App() {
             <p className="status-bar">{status}</p>
           </article>
         </section>
-      ) : (
+      ) : showDashboard ? (
         <>
           {isDesignPreview() ? (
             <p className="design-preview-banner" role="status">
@@ -486,7 +500,7 @@ export default function App() {
 
           <footer className="status-bar">{status}</footer>
         </>
-      )}
+      ) : null}
     </main>
   );
 }
