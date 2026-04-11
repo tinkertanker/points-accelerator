@@ -597,6 +597,66 @@ dl.stats-row {
   background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
+/* Capability matrix help */
+.capability-help {
+  background: color-mix(in srgb, var(--bg-panel) 60%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.capability-help summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.875rem;
+  list-style: none;
+  position: relative;
+  padding-left: 1.25rem;
+}
+
+.capability-help summary::before {
+  content: "▸";
+  position: absolute;
+  left: 0;
+  top: 3px;
+  color: var(--primary);
+  font-size: 1.5rem;
+  line-height: 0.875rem;
+  transition: transform 0.15s ease;
+}
+
+.capability-help[open] summary::before {
+  content: "▾";
+  top: 3px;
+  font-size: 1.5rem;
+  line-height: 0.875rem;
+}
+
+.capability-help summary:hover {
+  color: var(--text-primary);
+}
+
+.capability-help dl {
+  display: grid;
+  gap: 0.25rem 1rem;
+  grid-template-columns: auto 1fr;
+  margin: 0.75rem 0 0;
+  padding: 0;
+}
+
+.capability-help dt {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.capability-help dd {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
 /* Capability matrix (table: headers once, aligned toggles) */
 .capability-matrix {
   display: flex;
@@ -669,28 +729,20 @@ dl.stats-row {
 }
 
 .group-table .col-display input {
-  min-width: 7rem;
-}
-
-.group-table .col-slug input {
-  min-width: 5rem;
+  min-width: 4.5rem;
 }
 
 .group-table .col-role select {
-  min-width: 9rem;
-}
-
-.group-table .col-mentor input {
   min-width: 6rem;
 }
 
 .group-table .col-aliases input {
-  min-width: 10rem;
+  min-width: 6.5rem;
 }
 
 .group-table .col-active {
   text-align: center;
-  width: 3.5rem;
+  width: 2.5rem;
 }
 
 .group-table .col-active input[type="checkbox"] {
