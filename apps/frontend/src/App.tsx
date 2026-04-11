@@ -55,6 +55,14 @@ function getInitialStatus() {
   return authError;
 }
 
+function slugify(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 function toGroupDraft(group?: Group): GroupDraft {
   if (!group) {
     return {
@@ -592,6 +600,28 @@ export default function App() {
             </button>
           </header>
 
+          <details className="capability-help">
+            <summary>What do these columns mean?</summary>
+            <dl>
+              <dt>Dash</dt>
+              <dd>Can access and manage this dashboard.</dd>
+              <dt>Award</dt>
+              <dd>Can give points/currency to groups.</dd>
+              <dt>Max award</dt>
+              <dd>Upper limit per award (blank = unlimited).</dd>
+              <dt>Deduct</dt>
+              <dd>Can subtract points/currency from groups.</dd>
+              <dt>Multi</dt>
+              <dd>Can award multiple groups at once.</dd>
+              <dt>Sell</dt>
+              <dd>Can create marketplace listings.</dd>
+              <dt>Recv</dt>
+              <dd>Groups with this role can receive awards.</dd>
+              <dt>Group</dt>
+              <dd>Marks a Discord role as a student group.</dd>
+            </dl>
+          </details>
+
           <div className="capability-matrix">
             <div className="matrix-scroll">
               <table className="matrix-table capability-table">
@@ -719,23 +749,39 @@ export default function App() {
               <p className="section-label">Groups</p>
               <h2>Role mapping</h2>
             </hgroup>
+            <button
+              className="primary-action"
+              onClick={async () => {
+                setIsBusy(true);
+                try {
+                  const validGroups = groupDrafts.filter(
+                    (group) => group.displayName.trim().length > 0 && group.roleId.trim().length > 0,
+                  );
+                  for (const group of validGroups) {
+                    await api.saveGroup(group);
+                  }
+                  await loadBootstrap();
+                  setStatus(`Saved ${validGroups.length} group${validGroups.length === 1 ? "" : "s"}.`);
+                } catch (error) {
+                  setStatus(error instanceof Error ? error.message : "Failed to save groups.");
+                } finally {
+                  setIsBusy(false);
+                }
+              }}
+            >
+              Save Groups
+            </button>
           </header>
           <div className="group-mapping-matrix">
             <div className="matrix-scroll">
               <table className="matrix-table group-table">
                 <thead>
                   <tr>
-                    <th scope="col" className="col-display">
-                      Display name
-                    </th>
-                    <th scope="col" className="col-slug">
-                      Slug
-                    </th>
                     <th scope="col" className="col-role">
                       Discord role
                     </th>
-                    <th scope="col" className="col-mentor">
-                      Mentor
+                    <th scope="col" className="col-display">
+                      Display name
                     </th>
                     <th scope="col" className="col-aliases">
                       Aliases
@@ -743,14 +789,33 @@ export default function App() {
                     <th scope="col" className="matrix-table__th--center col-active">
                       Active
                     </th>
-                    <th scope="col" className="matrix-table__th--actions col-actions">
-                      Actions
-                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {groupDrafts.map((group, index) => (
                     <tr key={`${group.id ?? "new"}-${index}`}>
+                      <td className="col-role">
+                        <select
+                          value={group.roleId}
+                          aria-label="Discord role"
+                          onChange={(event) => {
+                            const selected = discordRoles.find((candidate) => candidate.id === event.target.value);
+                            const next = [...groupDrafts];
+                            const displayName = selected?.name ?? group.displayName;
+                            const slug = group.slug || slugify(displayName);
+                            next[index] = {
+                              ...group,
+                              roleId: event.target.value,
+                              displayName,
+                              slug,
+                            };
+                            setGroupDrafts(next);
+                          }}
+                        >
+                          <option value="">Select role</option>
+                          {roleOptions}
+                        </select>
+                      </td>
                       <td className="col-display">
                         <input
                           value={group.displayName}
@@ -761,44 +826,6 @@ export default function App() {
                             setGroupDrafts(next);
                           }}
                           placeholder="Team name"
-                        />
-                      </td>
-                      <td className="col-slug">
-                        <input
-                          value={group.slug ?? ""}
-                          aria-label="Slug"
-                          onChange={(event) => {
-                            const next = [...groupDrafts];
-                            next[index] = { ...group, slug: event.target.value };
-                            setGroupDrafts(next);
-                          }}
-                          placeholder="team-slug"
-                        />
-                      </td>
-                      <td className="col-role">
-                        <select
-                          value={group.roleId}
-                          aria-label="Discord role"
-                          onChange={(event) => {
-                            const next = [...groupDrafts];
-                            next[index] = { ...group, roleId: event.target.value };
-                            setGroupDrafts(next);
-                          }}
-                        >
-                          <option value="">Select role</option>
-                          {roleOptions}
-                        </select>
-                      </td>
-                      <td className="col-mentor">
-                        <input
-                          value={group.mentorName ?? ""}
-                          aria-label="Mentor"
-                          onChange={(event) => {
-                            const next = [...groupDrafts];
-                            next[index] = { ...group, mentorName: event.target.value };
-                            setGroupDrafts(next);
-                          }}
-                          placeholder="Optional"
                         />
                       </td>
                       <td className="col-aliases">
@@ -824,26 +851,6 @@ export default function App() {
                             setGroupDrafts(next);
                           }}
                         />
-                      </td>
-                      <td className="col-actions">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            setIsBusy(true);
-                            try {
-                              await api.saveGroup(group);
-                              await loadBootstrap();
-                              setStatus(`Saved ${group.displayName || "group"}.`);
-                            } catch (error) {
-                              setStatus(error instanceof Error ? error.message : "Failed to save group.");
-                            } finally {
-                              setIsBusy(false);
-                            }
-                          }}
-                          disabled={!group.displayName || !group.roleId}
-                        >
-                          Save
-                        </button>
                       </td>
                     </tr>
                   ))}
