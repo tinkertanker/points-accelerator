@@ -62,6 +62,7 @@ After deployment:
 4. Map each student group role to a group entry.
 5. Set listing, redemption, and log channels.
 6. Add shop items if you want the shop enabled during phase 1.
+7. Set `Bet win chance (%)` in the dashboard if you want betting enabled for test users.
 
 ## 6. Test commands
 
@@ -74,8 +75,13 @@ Run these in the test server before production rollout:
 - `/ledger`
 - `/transfer`
 - `/donate`
+- `/bet`
+- `/betstats`
+- `/exclusion`
 - `/store`
 - `/buyforme`
 - `/buyforgroup`
 - `/approve_purchase`
 - `/sell`
+
+For `/exclusion`, verify that two different members of the same group can exclude a teammate for one week, and that a vote from another group does not finalise the pending exclusion.

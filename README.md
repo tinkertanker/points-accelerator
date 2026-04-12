@@ -6,6 +6,8 @@ It tracks group `points` that drive the leaderboard and also fund shared group p
 
 It also includes a Discord OAuth dashboard, marketplace listings, and a submission workflow for class use: students are auto-provisioned from their Discord identity and active group role, staff publish assignments, students submit work, and approved submissions award group points plus personal currency.
 
+The bot also supports group-based betting: students can place double-or-nothing bets against their group's currency balance, view personal betting stats, and use a two-person teammate vote to exclude a member from betting for one week.
+
 ## Monorepo layout
 
 - `apps/backend`: Fastify API, Discord bot, Prisma schema, domain services, and tests
@@ -41,6 +43,7 @@ It also includes a Discord OAuth dashboard, marketplace listings, and a submissi
 - Discord-login leaderboard view for any guild member
 - Participant wallet transfers plus wallet-to-group point donations
 - Custom shop with personal purchases and majority-approved group purchases
+- Participant wallet betting with configurable win chance and teammate exclusions
 - Marketplace listings with optional Discord channel posting
 - Role capability matrix
 - Discord OAuth dashboard for staff configuration and review
@@ -53,6 +56,7 @@ It also includes a Discord OAuth dashboard, marketplace listings, and a submissi
 
 - Staff roles such as admins or alumni: `/award`, `/deduct`
 - Students: `/balance`, `/leaderboard`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`
+- Students: `/balance`, `/leaderboard`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`, `/bet`, `/betstats`, `/exclusion`
 
 ## Submission command set
 
@@ -66,3 +70,5 @@ The dashboard uses Discord sign-in with three access tiers:
 - Guild admins and roles with `canManageDashboard` enabled keep full access to settings and groups.
 
 After signing into the dashboard, use the built-in walkthrough in the control room to configure role powers, map groups, create assignments, and smoke test the commands in Discord.
+
+For betting, configure `Bet win chance (%)` in the dashboard settings before testing `/bet`. `/exclusion` requires two distinct teammates from the same group, and pending votes stay scoped to that group even if role mappings change later.
