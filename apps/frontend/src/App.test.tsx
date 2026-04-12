@@ -20,14 +20,62 @@ const authenticatedSession = {
   authenticated: true,
   user: {
     userId: "user-1",
-    username: "mentor",
-    displayName: "Mentor",
+    username: "admin",
+    displayName: "Admin",
     avatarUrl: null,
     roleIds: ["role-1"],
     isGuildOwner: false,
     hasAdministrator: false,
     hasManageGuild: true,
+    dashboardAccessLevel: "admin" as const,
     canManageDashboard: true,
+    canManageSettings: true,
+    canManageGroups: true,
+    canManageShop: true,
+    canManageAssignments: true,
+    canViewLeaderboard: true,
+  },
+};
+
+const mentorSession = {
+  authenticated: true,
+  user: {
+    userId: "user-2",
+    username: "mentor",
+    displayName: "Mentor",
+    avatarUrl: null,
+    roleIds: ["role-mentor"],
+    isGuildOwner: false,
+    hasAdministrator: false,
+    hasManageGuild: false,
+    dashboardAccessLevel: "mentor" as const,
+    canManageDashboard: true,
+    canManageSettings: false,
+    canManageGroups: false,
+    canManageShop: true,
+    canManageAssignments: true,
+    canViewLeaderboard: true,
+  },
+};
+
+const viewerSession = {
+  authenticated: true,
+  user: {
+    userId: "user-3",
+    username: "viewer",
+    displayName: "Viewer",
+    avatarUrl: null,
+    roleIds: ["role-member"],
+    isGuildOwner: false,
+    hasAdministrator: false,
+    hasManageGuild: false,
+    dashboardAccessLevel: "viewer" as const,
+    canManageDashboard: false,
+    canManageSettings: false,
+    canManageGroups: false,
+    canManageShop: false,
+    canManageAssignments: false,
+    canViewLeaderboard: true,
   },
 };
 
@@ -36,6 +84,7 @@ const bootstrapPayload = {
     appName: "points accelerator",
     pointsName: "beans",
     currencyName: "rice",
+    mentorRoleIds: ["role-mentor"],
     passivePointsReward: 1,
     passiveCurrencyReward: 1,
     passiveCooldownSeconds: 60,
@@ -51,9 +100,15 @@ const bootstrapPayload = {
   groups: [],
   shopItems: [],
   listings: [],
-  leaderboard: [],
+  leaderboard: [
+    {
+      id: "group-1",
+      displayName: "Alpha",
+      pointsBalance: 99,
+      currencyBalance: 500,
+    },
+  ],
   ledger: [],
-  publicLeaderboardUrl: "https://points-accelerator.example/l/share-token",
   assignments: [],
   participants: [],
   submissions: [],
@@ -108,7 +163,7 @@ describe("App", () => {
     expect(await screen.findByRole("button", { name: /sign in with discord/i })).toBeInTheDocument();
   });
 
-  it("shows dashboard tabs and swaps panels for an authenticated manager", async () => {
+  it("shows admin tabs and swaps panels for an authenticated admin", async () => {
     fetchMock
       .mockResolvedValueOnce(
         new Response(JSON.stringify(authenticatedSession), {
@@ -132,5 +187,58 @@ describe("App", () => {
 
     expect(await screen.findByRole("button", { name: /save settings/i })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /class launch checklist/i })).not.toBeInTheDocument();
+  });
+
+  it("shows only mentor tabs for an authenticated mentor", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(mentorSession), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(bootstrapPayload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    render(<App />);
+
+    expect(await screen.findByRole("tab", { name: /shop/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /assignments/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /leaderboard/i })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /settings/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /groups/i })).not.toBeInTheDocument();
+  });
+
+  it("shows only the leaderboard tab for a guild viewer", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(viewerSession), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(bootstrapPayload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    render(<App />);
+
+    expect(await screen.findByRole("tab", { name: /leaderboard/i })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /shop/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /settings/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /view the leaderboard/i })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /points/i })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /currency/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Alpha")).toBeInTheDocument();
+    expect(screen.getByText("99")).toBeInTheDocument();
+    expect(screen.queryByText("500")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /ledger/i })).not.toBeInTheDocument();
   });
 });

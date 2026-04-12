@@ -2,6 +2,7 @@ export type Settings = {
   appName: string;
   pointsName: string;
   currencyName: string;
+  mentorRoleIds: string[];
   passivePointsReward: number;
   passiveCurrencyReward: number;
   passiveCooldownSeconds: number;
@@ -79,8 +80,6 @@ export type LeaderboardEntry = {
   currencyBalance: number;
 };
 
-export type PublicLeaderboardEntry = Pick<LeaderboardEntry, "id" | "displayName" | "pointsBalance">;
-
 export type LedgerEntry = {
   id: string;
   type: string;
@@ -100,6 +99,8 @@ export type DiscordOption = {
   name: string;
 };
 
+export type DashboardAccessLevel = "viewer" | "mentor" | "admin";
+
 export type AuthUser = {
   userId: string;
   username: string;
@@ -109,18 +110,18 @@ export type AuthUser = {
   isGuildOwner: boolean;
   hasAdministrator: boolean;
   hasManageGuild: boolean;
+  dashboardAccessLevel: DashboardAccessLevel;
   canManageDashboard: boolean;
+  canManageSettings: boolean;
+  canManageGroups: boolean;
+  canManageShop: boolean;
+  canManageAssignments: boolean;
+  canViewLeaderboard: boolean;
 };
 
 export type AuthSession = {
   authenticated: boolean;
   user?: AuthUser;
-};
-
-export type PublicLeaderboardPayload = {
-  appName: string;
-  pointsName: string;
-  leaderboard: PublicLeaderboardEntry[];
 };
 
 export type BootstrapPayload = {
@@ -131,7 +132,6 @@ export type BootstrapPayload = {
   listings: Listing[];
   leaderboard: LeaderboardEntry[];
   ledger: LedgerEntry[];
-  publicLeaderboardUrl: string | null;
   discord: {
     roles: DiscordOption[];
     channels: DiscordOption[];

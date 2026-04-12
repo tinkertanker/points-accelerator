@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto";
-
 import type { PrismaClient } from "@prisma/client";
 
 import { decimal } from "../utils/decimal.js";
@@ -8,6 +6,7 @@ export type GuildConfigUpdateInput = {
   appName?: string;
   pointsName?: string;
   currencyName?: string;
+  mentorRoleIds?: string[];
   passivePointsReward?: number;
   passiveCurrencyReward?: number;
   passiveCooldownSeconds?: number;
@@ -24,33 +23,14 @@ export class ConfigService {
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async getOrCreate(guildId: string) {
-    const config = await this.prisma.guildConfig.upsert({
+    return this.prisma.guildConfig.upsert({
       where: { guildId },
       create: {
         guildId,
-        publicLeaderboardToken: this.createPublicLeaderboardToken(),
         passivePointsReward: decimal(1),
         passiveCurrencyReward: decimal(1),
       },
       update: {},
-    });
-
-    if (config.publicLeaderboardToken) {
-      return config;
-    }
-
-    await this.prisma.guildConfig.updateMany({
-      where: {
-        guildId,
-        publicLeaderboardToken: null,
-      },
-      data: {
-        publicLeaderboardToken: this.createPublicLeaderboardToken(),
-      },
-    });
-
-    return this.prisma.guildConfig.findUniqueOrThrow({
-      where: { guildId },
     });
   }
 
@@ -63,6 +43,7 @@ export class ConfigService {
         appName: input.appName,
         pointsName: input.pointsName,
         currencyName: input.currencyName,
+        mentorRoleIds: input.mentorRoleIds,
         passivePointsReward: input.passivePointsReward === undefined ? undefined : decimal(input.passivePointsReward),
         passiveCurrencyReward:
           input.passiveCurrencyReward === undefined ? undefined : decimal(input.passiveCurrencyReward),
@@ -76,9 +57,5 @@ export class ConfigService {
         economyMode: input.economyMode,
       },
     });
-  }
-
-  private createPublicLeaderboardToken() {
-    return randomBytes(18).toString("base64url");
   }
 }

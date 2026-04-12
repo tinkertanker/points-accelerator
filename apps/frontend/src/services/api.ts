@@ -12,7 +12,6 @@ import type {
   AuthSession,
   BootstrapPayload,
   GroupDraft,
-  PublicLeaderboardPayload,
   RoleCapability,
   Settings,
   ShopItemDraft,
@@ -93,21 +92,6 @@ export const api = {
       return Promise.resolve(getDesignPreviewBootstrap());
     }
     return request<BootstrapPayload>("/api/bootstrap");
-  },
-  publicLeaderboard(token: string) {
-    if (isDesignPreview()) {
-      const bootstrap = getDesignPreviewBootstrap();
-      return Promise.resolve({
-        appName: bootstrap.settings.appName,
-        pointsName: bootstrap.settings.pointsName,
-        leaderboard: bootstrap.leaderboard.map((group) => ({
-          id: group.id,
-          displayName: group.displayName,
-          pointsBalance: group.pointsBalance,
-        })),
-      } satisfies PublicLeaderboardPayload);
-    }
-    return request<PublicLeaderboardPayload>(`/api/public/leaderboard/${encodeURIComponent(token)}`);
   },
   saveSettings(payload: Settings) {
     if (isDesignPreview()) {

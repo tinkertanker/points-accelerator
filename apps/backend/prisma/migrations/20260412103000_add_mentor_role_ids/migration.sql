@@ -1,0 +1,2 @@
+ALTER TABLE "GuildConfig"
+ADD COLUMN "mentorRoleIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

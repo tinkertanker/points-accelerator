@@ -39,9 +39,10 @@ export default function OverviewPanel({ bootstrap, settingsDraft }: OverviewPane
           <li>
             <h3>Give staff roles their powers</h3>
             <p>
-              In <strong>Capability matrix</strong>, add your admin, mentor, and alumni roles, then turn on the powers
-              each role should have. Leave <strong>max award</strong> blank for no cap, or set a number if you want a
-              hard limit per command.
+              In <strong>Economy shape</strong>, choose which Discord roles count as mentors. In{" "}
+              <strong>Capability matrix</strong>, add your admin and economy roles, then turn on the powers each role
+              should have. Leave <strong>max award</strong> blank for no cap, or set a number if you want a hard limit
+              per command.
             </p>
           </li>
           <li>

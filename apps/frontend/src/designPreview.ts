@@ -19,6 +19,7 @@ function createInitialBootstrap(): BootstrapPayload {
       appName: "points accelerator",
       pointsName: "beans",
       currencyName: "rice",
+      mentorRoleIds: ["role-staff"],
       passivePointsReward: 1,
       passiveCurrencyReward: 1,
       passiveCooldownSeconds: 60,
@@ -108,7 +109,6 @@ function createInitialBootstrap(): BootstrapPayload {
       { id: "group-1", displayName: "Team Alpha", pointsBalance: 128, currencyBalance: 24 },
       { id: "group-2", displayName: "Team Beta", pointsBalance: 96, currencyBalance: 18 },
     ],
-    publicLeaderboardUrl: "https://points-accelerator.example/l/design-preview-board",
     ledger: [
       {
         id: "ledger-1",
@@ -220,7 +220,13 @@ export function getDesignPreviewSession(): AuthSession {
       isGuildOwner: false,
       hasAdministrator: false,
       hasManageGuild: true,
+      dashboardAccessLevel: "admin",
       canManageDashboard: true,
+      canManageSettings: true,
+      canManageGroups: true,
+      canManageShop: true,
+      canManageAssignments: true,
+      canViewLeaderboard: true,
     },
   };
 }

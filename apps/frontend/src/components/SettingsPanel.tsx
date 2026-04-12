@@ -12,7 +12,7 @@ type CapabilityToggleKey = keyof Pick<
 >;
 
 const CAPABILITY_COLUMNS: Array<{ key: CapabilityToggleKey; header: string; abbr: string }> = [
-  { key: "canManageDashboard", header: "Manage dashboard", abbr: "Dash" },
+  { key: "canManageDashboard", header: "Dashboard admin", abbr: "Admin" },
   { key: "canAward", header: "Award", abbr: "Award" },
   { key: "canDeduct", header: "Deduct", abbr: "Deduct" },
   { key: "canMultiAward", header: "Multi-target award", abbr: "Multi" },
@@ -90,6 +90,35 @@ export default function SettingsPanel({
                 onChange={(event) => onSettingsChange({ ...settingsDraft, currencyName: event.target.value })}
               />
             </label>
+            <fieldset className="span-3 role-checklist">
+              <legend>Mentor roles</legend>
+              <p className="role-checklist__help">
+                These roles can manage the shop, assignments, and submission reviews without getting access to
+                settings or groups.
+              </p>
+              <div className="role-checklist__options">
+                {discordRoles.map((role) => {
+                  const isChecked = settingsDraft.mentorRoleIds.includes(role.id);
+                  return (
+                    <label key={role.id} className="role-checklist__option">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(event) =>
+                          onSettingsChange({
+                            ...settingsDraft,
+                            mentorRoleIds: event.target.checked
+                              ? [...settingsDraft.mentorRoleIds, role.id]
+                              : settingsDraft.mentorRoleIds.filter((candidate) => candidate !== role.id),
+                          })
+                        }
+                      />
+                      <span>{role.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
             <label>
               Message points reward
               <input
@@ -248,8 +277,8 @@ export default function SettingsPanel({
           <details className="capability-help">
             <summary>What do these columns mean?</summary>
             <dl>
-              <dt>Dash</dt>
-              <dd>Can access and manage this dashboard.</dd>
+              <dt>Admin</dt>
+              <dd>Full dashboard access, including settings and groups.</dd>
               <dt>Award</dt>
               <dd>Can give points/currency to groups.</dd>
               <dt>Max award</dt>

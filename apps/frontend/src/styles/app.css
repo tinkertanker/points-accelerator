@@ -556,6 +556,48 @@ dl.stats-row {
   grid-column: span 3;
 }
 
+.role-checklist {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  min-width: 0;
+  padding: 1rem;
+}
+
+.role-checklist legend {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0 0.35rem;
+}
+
+.role-checklist__help {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.role-checklist__options {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.role-checklist__option {
+  align-items: center;
+  display: flex;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.role-checklist__option input[type="checkbox"] {
+  accent-color: var(--primary);
+  margin: 0;
+}
+
 /* Walkthrough */
 .walkthrough {
   counter-reset: walkthrough-step;
@@ -986,41 +1028,6 @@ dl.stats-row {
   grid-column: 1 / -1;
 }
 
-.leaderboard-share {
-  display: grid;
-  gap: 0.85rem;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-elevated) 92%, var(--accent) 8%);
-}
-
-.leaderboard-share h3 {
-  font-size: 0.9rem;
-  font-weight: 600;
-  margin: 0;
-}
-
-.leaderboard-share p {
-  color: var(--text-muted);
-  font-size: 0.82rem;
-}
-
-.leaderboard-share__controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.75rem;
-}
-
-.leaderboard-share__controls input {
-  font-size: 0.8rem;
-}
-
-.leaderboard-share__note {
-  color: var(--text-dim);
-  font-size: 0.75rem;
-}
-
 .leaderboard-panel,
 .ledger-panel {
   margin: 0;
@@ -1070,40 +1077,6 @@ dl.stats-row {
   color: var(--text-muted);
   font-size: 0.8rem;
   word-break: break-word;
-}
-
-.public-leaderboard {
-  display: grid;
-  gap: 1.5rem;
-  padding-top: clamp(1rem, 3vw, 2.5rem);
-}
-
-.public-leaderboard__hero {
-  display: grid;
-  gap: 0.75rem;
-  max-width: 40rem;
-}
-
-.public-leaderboard__eyebrow {
-  color: var(--text-dim);
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.public-leaderboard__hero h1 {
-  font-size: clamp(1.9rem, 4vw, 3rem);
-  line-height: 1.05;
-}
-
-.public-leaderboard__copy {
-  color: var(--text-muted);
-  max-width: 38ch;
-}
-
-.public-leaderboard__panel {
-  margin: 0;
 }
 
 /* Status bar */

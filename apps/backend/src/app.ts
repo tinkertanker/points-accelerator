@@ -21,10 +21,6 @@ const authCallbackSchema = z.object({
   error: z.string().optional(),
 });
 
-const publicLeaderboardParamsSchema = z.object({
-  token: z.string().min(1),
-});
-
 const SESSION_COOKIE_NAME = "dashboard_session";
 const OAUTH_STATE_COOKIE_NAME = "discord_oauth_state";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
@@ -34,6 +30,7 @@ const settingsSchema = z.object({
   appName: z.string().min(1),
   pointsName: z.string().min(1),
   currencyName: z.string().min(1),
+  mentorRoleIds: z.array(z.string()),
   passivePointsReward: z.number().nonnegative(),
   passiveCurrencyReward: z.number().nonnegative(),
   passiveCooldownSeconds: z.number().int().positive(),
@@ -198,26 +195,6 @@ export function createApp(params: {
     return baseUrl.startsWith("http") ? url.toString() : `${url.pathname}${url.search}`;
   };
 
-  const buildAppUrlFromRequest = (request: FastifyRequest, path: string) => {
-    const configuredUrl = buildAppUrl(path);
-    if (configuredUrl.startsWith("http")) {
-      return configuredUrl;
-    }
-
-    const protocolHeader = request.headers["x-forwarded-proto"];
-    const hostHeader = request.headers["x-forwarded-host"] ?? request.headers.host;
-    const protocol = typeof protocolHeader === "string" ? protocolHeader.split(",")[0] : request.protocol;
-    const host = Array.isArray(hostHeader) ? hostHeader[0] : hostHeader;
-
-    if (!host) {
-      return path;
-    }
-
-    return `${protocol}://${host}${path}`;
-  };
-
-  const buildPublicLeaderboardPath = (token: string) => `/l/${token}`;
-
   const shouldUseSecureCookies = (request: FastifyRequest) => {
     const configuredUrl =
       params.env.APP_PUBLIC_URL ??
@@ -273,6 +250,30 @@ export function createApp(params: {
     return session;
   };
 
+  const buildDashboardAccess = (params: {
+    isGuildOwner: boolean;
+    hasAdministrator: boolean;
+    hasManageGuild: boolean;
+    canManageDashboardRole: boolean;
+    roleIds: string[];
+    mentorRoleIds: string[];
+  }) => {
+    const isAdmin =
+      params.canManageDashboardRole || params.isGuildOwner || params.hasAdministrator || params.hasManageGuild;
+    const isMentor = isAdmin || params.roleIds.some((roleId) => params.mentorRoleIds.includes(roleId));
+    const dashboardAccessLevel = isAdmin ? "admin" : isMentor ? "mentor" : "viewer";
+
+    return {
+      dashboardAccessLevel,
+      canManageDashboard: isAdmin || isMentor,
+      canManageSettings: isAdmin,
+      canManageGroups: isAdmin,
+      canManageShop: isMentor,
+      canManageAssignments: isMentor,
+      canViewLeaderboard: true,
+    };
+  };
+
   const resolveDashboardSession = async (request: FastifyRequest) => {
     if (params.env.NODE_ENV === "test") {
       const headerToken = typeof request.headers["x-admin-token"] === "string" ? request.headers["x-admin-token"] : undefined;
@@ -286,7 +287,14 @@ export function createApp(params: {
           isGuildOwner: false,
           hasAdministrator: true,
           hasManageGuild: true,
-          canManageDashboard: true,
+          ...buildDashboardAccess({
+            isGuildOwner: false,
+            hasAdministrator: true,
+            hasManageGuild: true,
+            canManageDashboardRole: true,
+            roleIds: [],
+            mentorRoleIds: [],
+          }),
         };
       }
     }
@@ -303,14 +311,17 @@ export function createApp(params: {
       throw new AppError("You must be a member of the configured Discord server to use the dashboard.", 401);
     }
 
+    const settings = await services.configService.getOrCreate(params.env.GUILD_ID);
     const capabilities = await services.roleCapabilityService.listForRoleIds(params.env.GUILD_ID, member.roleIds);
     const resolved = resolveCapabilities(capabilities);
-    const canManageDashboard =
-      resolved.canManageDashboard || member.isGuildOwner || member.hasAdministrator || member.hasManageGuild;
-
-    if (!canManageDashboard) {
-      throw new AppError("Your Discord account does not have dashboard access.", 403);
-    }
+    const access = buildDashboardAccess({
+      isGuildOwner: member.isGuildOwner,
+      hasAdministrator: member.hasAdministrator,
+      hasManageGuild: member.hasManageGuild,
+      canManageDashboardRole: resolved.canManageDashboard,
+      roleIds: member.roleIds,
+      mentorRoleIds: settings.mentorRoleIds,
+    });
 
     dashboardSessions.set(sessionId!, {
       userId: session.userId,
@@ -319,18 +330,33 @@ export function createApp(params: {
 
     return {
       ...member,
-      canManageDashboard,
+      ...access,
     };
   };
 
-  const requireAdmin = async (request: FastifyRequest) => {
+  const requireDashboardMember = async (request: FastifyRequest) => {
     await resolveDashboardSession(request);
+  };
+
+  const requireAdmin = async (request: FastifyRequest) => {
+    const session = await resolveDashboardSession(request);
+    if (!session.canManageSettings) {
+      throw new AppError("Only dashboard admins can manage settings and groups.", 403);
+    }
+  };
+
+  const requireMentor = async (request: FastifyRequest) => {
+    const session = await resolveDashboardSession(request);
+    if (!session.canManageShop || !session.canManageAssignments) {
+      throw new AppError("Only mentors and dashboard admins can manage the shop and assignments.", 403);
+    }
   };
 
   const serialiseSettings = (settings: Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>) => ({
     appName: settings.appName,
     pointsName: settings.pointsName,
     currencyName: settings.currencyName,
+    mentorRoleIds: settings.mentorRoleIds,
     passivePointsReward: decimalToNumber(settings.passivePointsReward),
     passiveCurrencyReward: decimalToNumber(settings.passiveCurrencyReward),
     passiveCooldownSeconds: settings.passiveCooldownSeconds,
@@ -430,16 +456,6 @@ export function createApp(params: {
         return reply.redirect(buildAuthRedirectUrl("Join the configured Discord server before signing in."));
       }
 
-      const capabilities = await services.roleCapabilityService.listForRoleIds(params.env.GUILD_ID, member.roleIds);
-      const resolved = resolveCapabilities(capabilities);
-      const canManageDashboard =
-        resolved.canManageDashboard || member.isGuildOwner || member.hasAdministrator || member.hasManageGuild;
-
-      if (!canManageDashboard) {
-        clearDashboardSession(request, reply);
-        return reply.redirect(buildAuthRedirectUrl("Your Discord account does not have dashboard access."));
-      }
-
       const sessionId = createDashboardSession(identity.id);
       reply.setCookie(SESSION_COOKIE_NAME, sessionId, {
         path: "/",
@@ -478,45 +494,26 @@ export function createApp(params: {
     }
   });
 
-  app.get("/api/public/leaderboard/:token", async (request, reply) => {
-    const { token } = publicLeaderboardParamsSchema.parse(request.params);
-    const config = await services.prisma.guildConfig.findUnique({
-      where: { publicLeaderboardToken: token },
-    });
+  app.get("/api/bootstrap", { preHandler: requireDashboardMember }, async (request) => {
+    const session = await resolveDashboardSession(request);
+    const canManageAdminPages = session.canManageSettings || session.canManageGroups;
+    const canManageMentorPages = session.canManageShop || session.canManageAssignments;
 
-    if (!config) {
-      throw new AppError("Leaderboard not found.", 404);
-    }
-
-    const leaderboard = await services.economyService.getLeaderboard(config.guildId);
-    reply.header("X-Robots-Tag", "noindex, nofollow");
-
-    return {
-      appName: config.appName,
-      pointsName: config.pointsName,
-      leaderboard: leaderboard.map((group) => ({
-        id: group.id,
-        displayName: group.displayName,
-        pointsBalance: group.pointsBalance,
-      })),
-    };
-  });
-
-  app.get("/api/bootstrap", { preHandler: requireAdmin }, async (request) => {
-    const [settings, capabilities, groups, shopItems, listings, leaderboard, ledger, roles, channels, assignments, participants, submissions] = await Promise.all([
-      services.configService.getOrCreate(params.env.GUILD_ID),
-      services.roleCapabilityService.list(params.env.GUILD_ID),
-      services.groupService.list(params.env.GUILD_ID),
-      services.shopService.list(params.env.GUILD_ID),
-      services.listingService.list(params.env.GUILD_ID),
-      services.economyService.getLeaderboard(params.env.GUILD_ID),
-      services.economyService.getLedger(params.env.GUILD_ID, 25),
-      params.botRuntime?.getRoles() ?? [],
-      params.botRuntime?.getTextChannels() ?? [],
-      services.assignmentService.list(params.env.GUILD_ID),
-      services.participantService.list(params.env.GUILD_ID),
-      services.submissionService.list(params.env.GUILD_ID),
-    ]);
+    const [settings, leaderboard, capabilities, groups, shopItems, listings, ledger, roles, channels, assignments, participants, submissions] =
+      await Promise.all([
+        services.configService.getOrCreate(params.env.GUILD_ID),
+        services.economyService.getLeaderboard(params.env.GUILD_ID),
+        canManageAdminPages ? services.roleCapabilityService.list(params.env.GUILD_ID) : Promise.resolve([]),
+        canManageAdminPages ? services.groupService.list(params.env.GUILD_ID) : Promise.resolve([]),
+        canManageMentorPages ? services.shopService.list(params.env.GUILD_ID) : Promise.resolve([]),
+        canManageAdminPages ? services.listingService.list(params.env.GUILD_ID) : Promise.resolve([]),
+        canManageAdminPages ? services.economyService.getLedger(params.env.GUILD_ID, 25) : Promise.resolve([]),
+        canManageAdminPages ? params.botRuntime?.getRoles() ?? [] : Promise.resolve([]),
+        canManageAdminPages ? params.botRuntime?.getTextChannels() ?? [] : Promise.resolve([]),
+        canManageMentorPages ? services.assignmentService.list(params.env.GUILD_ID) : Promise.resolve([]),
+        canManageAdminPages ? services.participantService.list(params.env.GUILD_ID) : Promise.resolve([]),
+        canManageMentorPages ? services.submissionService.list(params.env.GUILD_ID) : Promise.resolve([]),
+      ]);
 
     return {
       settings: serialiseSettings(settings),
@@ -532,9 +529,6 @@ export function createApp(params: {
       listings,
       leaderboard,
       ledger,
-      publicLeaderboardUrl: settings.publicLeaderboardToken
-        ? buildAppUrlFromRequest(request, buildPublicLeaderboardPath(settings.publicLeaderboardToken))
-        : null,
       discord: {
         roles,
         channels,
@@ -580,14 +574,16 @@ export function createApp(params: {
     return group;
   });
 
-  app.get("/api/leaderboard", { preHandler: requireAdmin }, async () => services.economyService.getLeaderboard(params.env.GUILD_ID));
+  app.get("/api/leaderboard", { preHandler: requireDashboardMember }, async () => {
+    return services.economyService.getLeaderboard(params.env.GUILD_ID);
+  });
 
   app.get("/api/ledger", { preHandler: requireAdmin }, async (request) => {
     const limit = z.coerce.number().int().positive().max(100).default(25).parse((request.query as { limit?: string }).limit);
     return services.economyService.getLedger(params.env.GUILD_ID, limit);
   });
 
-  app.get("/api/shop-items", { preHandler: requireAdmin }, async () => {
+  app.get("/api/shop-items", { preHandler: requireMentor }, async () => {
     const items = await services.shopService.list(params.env.GUILD_ID);
     return items.map((item) => ({
       ...item,
@@ -595,7 +591,7 @@ export function createApp(params: {
     }));
   });
 
-  app.post("/api/shop-items", { preHandler: requireAdmin }, async (request) => {
+  app.post("/api/shop-items", { preHandler: requireMentor }, async (request) => {
     const item = await services.shopService.upsert(params.env.GUILD_ID, shopItemSchema.parse(request.body));
     return {
       ...item,
@@ -712,18 +708,18 @@ export function createApp(params: {
 
   // --- Assignments ---
 
-  app.get("/api/assignments", { preHandler: requireAdmin }, async () => {
+  app.get("/api/assignments", { preHandler: requireMentor }, async () => {
     return services.assignmentService.list(params.env.GUILD_ID);
   });
 
-  app.post("/api/assignments", { preHandler: requireAdmin }, async (request) => {
+  app.post("/api/assignments", { preHandler: requireMentor }, async (request) => {
     const payload = assignmentSchema.parse(request.body);
     return services.assignmentService.upsert(params.env.GUILD_ID, payload);
   });
 
   // --- Submissions ---
 
-  app.get("/api/submissions", { preHandler: requireAdmin }, async (request) => {
+  app.get("/api/submissions", { preHandler: requireMentor }, async (request) => {
     const query = request.query as { assignmentId?: string; status?: string; participantId?: string };
     const status = query.status as "PENDING" | "APPROVED" | "OUTSTANDING" | "REJECTED" | undefined;
     return services.submissionService.list(params.env.GUILD_ID, {
@@ -733,7 +729,7 @@ export function createApp(params: {
     });
   });
 
-  app.post("/api/submissions/:id/review", { preHandler: requireAdmin }, async (request) => {
+  app.post("/api/submissions/:id/review", { preHandler: requireMentor }, async (request) => {
     const { id } = request.params as { id: string };
     const payload = submissionReviewSchema.parse(request.body);
     const session = await resolveDashboardSession(request);
@@ -747,7 +743,7 @@ export function createApp(params: {
     });
   });
 
-  app.get("/api/submissions/completion", { preHandler: requireAdmin }, async () => {
+  app.get("/api/submissions/completion", { preHandler: requireMentor }, async () => {
     return services.submissionService.getCompletionSummary(params.env.GUILD_ID);
   });
 

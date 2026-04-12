@@ -15,6 +15,7 @@ import type {
   AssignmentDraft,
   AuthUser,
   BootstrapPayload,
+  DashboardAccessLevel,
   Group,
   GroupDraft,
   RoleCapability,
@@ -134,6 +135,55 @@ const DASHBOARD_TABS: TabDefinition[] = [
   { id: "activity", label: "Activity", description: "Leaderboard and ledger feed" },
 ];
 
+const MENTOR_TABS: TabDefinition[] = [
+  DASHBOARD_TABS[3]!,
+  DASHBOARD_TABS[4]!,
+  { id: "activity", label: "Leaderboard", description: "Current standings" },
+];
+
+const VIEWER_TABS: TabDefinition[] = [{ id: "activity", label: "Leaderboard", description: "Current standings" }];
+
+function getAvailableTabs(sessionUser: AuthUser | null): TabDefinition[] {
+  if (!sessionUser) {
+    return [];
+  }
+
+  switch (sessionUser.dashboardAccessLevel) {
+    case "admin":
+      return DASHBOARD_TABS;
+    case "mentor":
+      return MENTOR_TABS;
+    case "viewer":
+      return VIEWER_TABS;
+    default:
+      return VIEWER_TABS;
+  }
+}
+
+function getDefaultTab(accessLevel?: DashboardAccessLevel): TabId {
+  if (accessLevel === "admin") {
+    return "overview";
+  }
+
+  if (accessLevel === "mentor") {
+    return "shop";
+  }
+
+  return "activity";
+}
+
+function getDashboardSubtitle(accessLevel?: DashboardAccessLevel): string {
+  if (accessLevel === "admin") {
+    return "Manage the class economy in focused sections instead of one endless dashboard.";
+  }
+
+  if (accessLevel === "mentor") {
+    return "Update the shop, assignments, and submission review queue for the class.";
+  }
+
+  return "Check the latest leaderboard standings for your Discord server.";
+}
+
 export default function App() {
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(null);
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
@@ -145,14 +195,15 @@ export default function App() {
   const [status, setStatus] = useState(getInitialStatus);
   const [isInitialising, setIsInitialising] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [activeTab, setActiveTab] = useState<TabId>(getDefaultTab());
 
   const discordRoles = bootstrap?.discord.roles ?? [];
   const discordChannels = bootstrap?.discord.channels ?? [];
+  const availableTabs = getAvailableTabs(sessionUser);
 
   const clearDashboardData = () => {
     startTransition(() => {
-      setActiveTab("overview");
+      setActiveTab(getDefaultTab());
       setBootstrap(null);
       setSettingsDraft(null);
       setRoleDrafts([]);
@@ -226,6 +277,7 @@ export default function App() {
 
         if (!cancelled) {
           setSessionUser(session.user);
+          setActiveTab(getDefaultTab(session.user.dashboardAccessLevel));
         }
 
         const payload = await api.bootstrap();
@@ -259,14 +311,20 @@ export default function App() {
   };
 
   const renderActivePanel = () => {
-    if (!bootstrap || !settingsDraft) {
+    if (!bootstrap || !sessionUser) {
       return null;
     }
 
     switch (activeTab) {
       case "overview":
+        if (!settingsDraft || !sessionUser.canManageSettings) {
+          return null;
+        }
         return <OverviewPanel bootstrap={bootstrap} settingsDraft={settingsDraft} />;
       case "settings":
+        if (!settingsDraft || !sessionUser.canManageSettings) {
+          return null;
+        }
         return (
           <SettingsPanel
             settingsDraft={settingsDraft}
@@ -281,6 +339,9 @@ export default function App() {
           />
         );
       case "groups":
+        if (!sessionUser.canManageGroups) {
+          return null;
+        }
         return (
           <GroupsPanel
             participants={bootstrap.participants}
@@ -294,6 +355,9 @@ export default function App() {
           />
         );
       case "shop":
+        if (!sessionUser.canManageShop) {
+          return null;
+        }
         return (
           <ShopPanel
             shopDrafts={shopDrafts}
@@ -304,6 +368,9 @@ export default function App() {
           />
         );
       case "assignments":
+        if (!sessionUser.canManageAssignments) {
+          return null;
+        }
         return (
           <AssignmentsPanel
             bootstrap={bootstrap}
@@ -316,7 +383,13 @@ export default function App() {
           />
         );
       case "activity":
-        return <ActivityPanel bootstrap={bootstrap} publicLeaderboardUrl={bootstrap.publicLeaderboardUrl} />;
+        return (
+          <ActivityPanel
+            bootstrap={bootstrap}
+            canViewLedger={sessionUser.canManageSettings}
+            showCurrencyBalances={sessionUser.dashboardAccessLevel !== "viewer"}
+          />
+        );
       default:
         return null;
     }
@@ -403,8 +476,8 @@ export default function App() {
   const activePanel = renderActivePanel();
 
   const showLoadingScreen = isInitialising && !bootstrap;
-  const showLoginScreen = !showLoadingScreen && (!bootstrap || !settingsDraft);
-  const showDashboard = !showLoadingScreen && !showLoginScreen && !!bootstrap && !!settingsDraft;
+  const showLoginScreen = !showLoadingScreen && !bootstrap;
+  const showDashboard = !showLoadingScreen && !!bootstrap;
   const isDashboardBusy = isInitialising || isMutating;
 
   return (
@@ -417,7 +490,7 @@ export default function App() {
           <div className="app-loading__panel">
             <p className="app-loading__eyebrow">points accelerator</p>
             <h1>Loading your dashboard...</h1>
-            <p className="app-loading__copy">Checking your Discord session and syncing the latest admin data.</p>
+            <p className="app-loading__copy">Checking your Discord session and syncing the latest dashboard data.</p>
           </div>
         </section>
       ) : showLoginScreen ? (
@@ -432,8 +505,8 @@ export default function App() {
           <article className="login-card">
             <h2>Discord Sign-In</h2>
             <p>
-              Use your Discord account for the configured server. Dashboard access follows your current guild
-              permissions and any roles marked with <strong>manage dashboard</strong>.
+              Use your Discord account for the configured server. Anyone in the guild can view the leaderboard, while
+              admin and mentor roles unlock extra sections.
             </p>
             <button onClick={handleLogin}>Sign In with Discord</button>
             <p className="status-bar">{status}</p>
@@ -449,8 +522,8 @@ export default function App() {
           ) : null}
           <header className="topbar">
             <hgroup className="topbar-brand">
-              <h1>{settingsDraft.appName.trim() || bootstrap.settings.appName}</h1>
-              <p>Manage the class economy in focused sections instead of one endless dashboard.</p>
+              <h1>{settingsDraft?.appName.trim() || bootstrap.settings.appName}</h1>
+              <p>{getDashboardSubtitle(sessionUser?.dashboardAccessLevel)}</p>
             </hgroup>
             <div className="topbar-right">
               {sessionUser ? (
@@ -470,7 +543,7 @@ export default function App() {
             </div>
           </header>
 
-          <TabBar tabs={DASHBOARD_TABS} activeTab={activeTab} onTabChange={setActiveTab} />
+          <TabBar tabs={availableTabs} activeTab={activeTab} onTabChange={setActiveTab} />
 
           <section
             id={`panel-${activeTab}`}

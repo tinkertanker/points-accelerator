@@ -8,10 +8,10 @@ import { ensureTestDatabase } from "./helpers/test-database.js";
 let cleanupDatabase = () => undefined;
 let ctx: Awaited<ReturnType<typeof createTestApp>>;
 
-const dashboardMember = {
+const defaultDashboardMember = {
   userId: "discord-user-1",
-  username: "mentor",
-  displayName: "Mentor One",
+  username: "admin",
+  displayName: "Admin One",
   avatarUrl: "https://cdn.discordapp.com/embed/avatars/0.png",
   roleIds: ["role-admin"],
   isGuildOwner: false,
@@ -19,21 +19,23 @@ const dashboardMember = {
   hasManageGuild: false,
 };
 
+let currentDashboardMember = { ...defaultDashboardMember };
+
 const botRuntime: BotRuntimeApi = {
   getRoles: vi.fn().mockResolvedValue([]),
   getTextChannels: vi.fn().mockResolvedValue([]),
-  getDashboardMember: vi.fn(async (userId: string) => (userId === dashboardMember.userId ? dashboardMember : null)),
+  getDashboardMember: vi.fn(async (userId: string) => (userId === currentDashboardMember.userId ? currentDashboardMember : null)),
   postListing: vi.fn().mockResolvedValue(null),
 };
 
 const discordOAuthClient: DiscordOAuthClient = {
   buildAuthorizeUrl: vi.fn(({ state, redirectUri }) => `https://discord.com/oauth2/authorize?state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}`),
-  exchangeCode: vi.fn().mockResolvedValue({
-    id: dashboardMember.userId,
-    username: dashboardMember.username,
-    globalName: dashboardMember.displayName,
-    avatarUrl: dashboardMember.avatarUrl,
-  }),
+  exchangeCode: vi.fn(async () => ({
+    id: currentDashboardMember.userId,
+    username: currentDashboardMember.username,
+    globalName: currentDashboardMember.displayName,
+    avatarUrl: currentDashboardMember.avatarUrl,
+  })),
 };
 
 function extractCookie(headers: string[] | undefined, name: string) {
@@ -63,8 +65,36 @@ async function seedDashboardCapability() {
   });
 }
 
-async function startDashboardSession() {
-  await seedDashboardCapability();
+async function seedSettings(overrides: Partial<{ mentorRoleIds: string[] }> = {}) {
+  await ctx.app.inject({
+    method: "PUT",
+    url: "/api/settings",
+    headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    payload: {
+      appName: "points accelerator",
+      pointsName: "points",
+      currencyName: "rice",
+      mentorRoleIds: overrides.mentorRoleIds ?? [],
+      passivePointsReward: 1,
+      passiveCurrencyReward: 1,
+      passiveCooldownSeconds: 60,
+      passiveMinimumCharacters: 4,
+      passiveAllowedChannelIds: [],
+      passiveDeniedChannelIds: [],
+      commandLogChannelId: null,
+      redemptionChannelId: null,
+      listingChannelId: null,
+      economyMode: "SIMPLE",
+    },
+  });
+}
+
+async function startDashboardSession(options?: { seedAdminCapability?: boolean; mentorRoleIds?: string[] }) {
+  if (options?.seedAdminCapability ?? true) {
+    await seedDashboardCapability();
+  }
+
+  await seedSettings({ mentorRoleIds: options?.mentorRoleIds });
 
   const startResponse = await ctx.app.inject({
     method: "GET",
@@ -97,6 +127,7 @@ describe("Discord dashboard auth", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     await resetDatabase(ctx.prisma);
+    currentDashboardMember = { ...defaultDashboardMember };
   });
 
   afterAll(async () => {
@@ -117,8 +148,9 @@ describe("Discord dashboard auth", () => {
     expect(response.json()).toEqual({ authenticated: false });
   });
 
-  it("creates a dashboard session from a Discord OAuth callback for a role with dashboard access", async () => {
+  it("creates an admin dashboard session for a role with dashboard access", async () => {
     await seedDashboardCapability();
+    await seedSettings();
 
     const startResponse = await ctx.app.inject({
       method: "GET",
@@ -154,12 +186,237 @@ describe("Discord dashboard auth", () => {
     expect(sessionResponse.json()).toMatchObject({
       authenticated: true,
       user: {
-        userId: dashboardMember.userId,
-        username: dashboardMember.username,
-        displayName: dashboardMember.displayName,
+        userId: currentDashboardMember.userId,
+        username: currentDashboardMember.username,
+        displayName: currentDashboardMember.displayName,
+        dashboardAccessLevel: "admin",
         canManageDashboard: true,
+        canManageSettings: true,
+        canManageGroups: true,
+        canManageShop: true,
+        canManageAssignments: true,
+        canViewLeaderboard: true,
       },
     });
+  });
+
+  it("creates a viewer dashboard session for a guild member without extra roles", async () => {
+    currentDashboardMember = {
+      ...defaultDashboardMember,
+      roleIds: ["role-member"],
+      username: "viewer",
+      displayName: "Viewer One",
+    };
+
+    const sessionCookie = await startDashboardSession({ seedAdminCapability: false });
+    expect(sessionCookie).toMatch(/^dashboard_session=/);
+
+    const sessionResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+      headers: {
+        cookie: sessionCookie ?? "",
+      },
+    });
+
+    expect(sessionResponse.statusCode).toBe(200);
+    expect(sessionResponse.json()).toMatchObject({
+      authenticated: true,
+      user: {
+        dashboardAccessLevel: "viewer",
+        canManageDashboard: false,
+        canManageSettings: false,
+        canManageGroups: false,
+        canManageShop: false,
+        canManageAssignments: false,
+        canViewLeaderboard: true,
+      },
+    });
+  });
+
+  it("creates a mentor dashboard session for a role listed in settings", async () => {
+    currentDashboardMember = {
+      ...defaultDashboardMember,
+      roleIds: ["role-mentor"],
+      username: "mentor",
+      displayName: "Mentor One",
+    };
+
+    const sessionCookie = await startDashboardSession({
+      seedAdminCapability: false,
+      mentorRoleIds: ["role-mentor"],
+    });
+    expect(sessionCookie).toMatch(/^dashboard_session=/);
+
+    const sessionResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+      headers: {
+        cookie: sessionCookie ?? "",
+      },
+    });
+
+    expect(sessionResponse.statusCode).toBe(200);
+    expect(sessionResponse.json()).toMatchObject({
+      authenticated: true,
+      user: {
+        dashboardAccessLevel: "mentor",
+        canManageDashboard: true,
+        canManageSettings: false,
+        canManageGroups: false,
+        canManageShop: true,
+        canManageAssignments: true,
+        canViewLeaderboard: true,
+      },
+    });
+  });
+
+  it("limits a viewer to leaderboard access", async () => {
+    currentDashboardMember = {
+      ...defaultDashboardMember,
+      roleIds: ["role-member"],
+      username: "viewer",
+      displayName: "Viewer One",
+    };
+
+    await ctx.app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        displayName: "Team Alpha",
+        slug: "team-alpha",
+        mentorName: null,
+        roleId: "role-alpha",
+        aliases: [],
+        active: true,
+      },
+    });
+
+    const viewerCookie = await startDashboardSession({ seedAdminCapability: false });
+    expect(viewerCookie).toMatch(/^dashboard_session=/);
+
+    const bootstrapResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/bootstrap",
+      headers: {
+        cookie: viewerCookie ?? "",
+      },
+    });
+
+    expect(bootstrapResponse.statusCode).toBe(200);
+    expect(bootstrapResponse.json()).toMatchObject({
+      groups: [],
+      shopItems: [],
+      assignments: [],
+      leaderboard: [expect.objectContaining({ displayName: "Team Alpha" })],
+      ledger: [],
+    });
+
+    const leaderboardResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/leaderboard",
+      headers: {
+        cookie: viewerCookie ?? "",
+      },
+    });
+    expect(leaderboardResponse.statusCode).toBe(200);
+
+    const settingsResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/settings",
+      headers: {
+        cookie: viewerCookie ?? "",
+      },
+    });
+    expect(settingsResponse.statusCode).toBe(403);
+  });
+
+  it("lets mentors manage shop and assignments without exposing admin pages", async () => {
+    currentDashboardMember = {
+      ...defaultDashboardMember,
+      roleIds: ["role-mentor"],
+      username: "mentor",
+      displayName: "Mentor One",
+    };
+
+    const mentorCookie = await startDashboardSession({
+      seedAdminCapability: false,
+      mentorRoleIds: ["role-mentor"],
+    });
+    expect(mentorCookie).toMatch(/^dashboard_session=/);
+
+    const shopResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/shop-items",
+      headers: {
+        cookie: mentorCookie ?? "",
+      },
+      payload: {
+        name: "Sticker pack",
+        description: "Reward stickers",
+        currencyCost: 10,
+        stock: 5,
+        enabled: true,
+        fulfillmentInstructions: null,
+      },
+    });
+    expect(shopResponse.statusCode).toBe(200);
+
+    const assignmentResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/assignments",
+      headers: {
+        cookie: mentorCookie ?? "",
+      },
+      payload: {
+        title: "Reflection 1",
+        description: "Write a short reflection.",
+        baseCurrencyReward: 5,
+        basePointsReward: 5,
+        bonusCurrencyReward: 2,
+        bonusPointsReward: 2,
+        deadline: null,
+        active: true,
+        sortOrder: 0,
+      },
+    });
+    expect(assignmentResponse.statusCode).toBe(200);
+
+    const bootstrapResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/bootstrap",
+      headers: {
+        cookie: mentorCookie ?? "",
+      },
+    });
+
+    expect(bootstrapResponse.statusCode).toBe(200);
+    expect(bootstrapResponse.json()).toMatchObject({
+      groups: [],
+      capabilities: [],
+      shopItems: [expect.objectContaining({ name: "Sticker pack" })],
+      assignments: [expect.objectContaining({ title: "Reflection 1" })],
+      ledger: [],
+    });
+
+    const settingsResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/settings",
+      headers: {
+        cookie: mentorCookie ?? "",
+      },
+    });
+    expect(settingsResponse.statusCode).toBe(403);
+
+    const groupsResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/groups",
+      headers: {
+        cookie: mentorCookie ?? "",
+      },
+    });
+    expect(groupsResponse.statusCode).toBe(403);
   });
 
   it("does not mark auth cookies as Secure when the public app URL is plain HTTP", async () => {
@@ -267,7 +524,7 @@ describe("Discord dashboard auth", () => {
     expect(sessionResponse.json()).toMatchObject({
       authenticated: true,
       user: {
-        userId: dashboardMember.userId,
+        userId: currentDashboardMember.userId,
       },
     });
   });
@@ -303,7 +560,7 @@ describe("Discord dashboard auth", () => {
     expect(recoveredSessionResponse.json()).toMatchObject({
       authenticated: true,
       user: {
-        userId: dashboardMember.userId,
+        userId: currentDashboardMember.userId,
       },
     });
   });

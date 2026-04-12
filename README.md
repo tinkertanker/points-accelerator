@@ -38,7 +38,7 @@ It also includes a Discord OAuth dashboard, marketplace listings, and a submissi
 - Group-based passive message rewards
 - Manual awards and deductions with per-role caps
 - Discord ledger command with paging for recent transactions
-- Unlisted public web leaderboard links for read-only points standings
+- Discord-login leaderboard view for any guild member
 - Group transfers and donations
 - Custom shop with spendable currency
 - Marketplace listings with optional Discord channel posting
@@ -59,8 +59,10 @@ It also includes a Discord OAuth dashboard, marketplace listings, and a submissi
 - Students: `/register`, `/submit`
 - Staff roles: `/submissions`, `/missing`, `/review_submission`
 
-The admin dashboard uses Discord sign-in. Users can access it if they are guild admins or hold a Discord role with `canManageDashboard` enabled in the capability matrix.
+The dashboard uses Discord sign-in with three access tiers:
 
-Staff can also copy an unlisted public leaderboard link from the dashboard activity tab. The shared page is read-only, shows points standings only, and is not linked from the main app.
+- Guild members can sign in to view the leaderboard.
+- Mentor roles chosen by admins can manage the shop, assignments, and submission review.
+- Guild admins and roles with `canManageDashboard` enabled keep full access to settings and groups.
 
 After signing into the dashboard, use the built-in walkthrough in the control room to configure role powers, map groups, create assignments, and smoke test the commands in Discord.

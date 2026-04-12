@@ -34,6 +34,7 @@ describe("points accelerator API", () => {
         appName: "points accelerator",
         pointsName: "beans",
         currencyName: "rice",
+        mentorRoleIds: [],
         passivePointsReward: 2,
         passiveCurrencyReward: 1,
         passiveCooldownSeconds: 45,
@@ -125,109 +126,6 @@ describe("points accelerator API", () => {
         currencyBalance: 4,
       }),
     ]);
-  });
-
-  it("serves an unlisted public leaderboard and exposes its share URL in bootstrap", async () => {
-    await ctx.app.inject({
-      method: "PUT",
-      url: "/api/capabilities",
-      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
-      payload: [
-        {
-          roleId: "role-admin",
-          roleName: "Admin",
-          canManageDashboard: true,
-          canAward: true,
-          maxAward: 1000,
-          canDeduct: true,
-          canMultiAward: true,
-          canSell: true,
-          canReceiveAwards: true,
-          isGroupRole: false,
-        },
-      ],
-    });
-
-    const groupResponse = await ctx.app.inject({
-      method: "POST",
-      url: "/api/groups",
-      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
-      payload: {
-        displayName: "Ravens",
-        slug: "ravens",
-        mentorName: null,
-        roleId: "role-ravens",
-        aliases: [],
-        active: true,
-      },
-    });
-    const group = groupResponse.json() as { id: string };
-
-    await ctx.app.inject({
-      method: "POST",
-      url: "/api/actions/award",
-      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
-      payload: {
-        actorUserId: "user-admin",
-        actorUsername: "Admin",
-        actorRoleIds: ["role-admin"],
-        targetGroupIds: [group.id],
-        pointsDelta: 12,
-        currencyDelta: 0,
-        description: "Public board seed",
-      },
-    });
-
-    const config = await ctx.services.configService.getOrCreate(ctx.env.GUILD_ID);
-    expect(config.publicLeaderboardToken).toBeTruthy();
-
-    const bootstrapResponse = await ctx.app.inject({
-      method: "GET",
-      url: "/api/bootstrap",
-      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
-    });
-
-    expect(bootstrapResponse.statusCode).toBe(200);
-    expect(bootstrapResponse.json()).toMatchObject({
-      publicLeaderboardUrl: `http://localhost:4173/l/${config.publicLeaderboardToken}`,
-    });
-
-    const publicResponse = await ctx.app.inject({
-      method: "GET",
-      url: `/api/public/leaderboard/${config.publicLeaderboardToken}`,
-    });
-
-    expect(publicResponse.statusCode).toBe(200);
-    expect(publicResponse.headers["x-robots-tag"]).toBe("noindex, nofollow");
-    expect(publicResponse.json()).toEqual({
-      appName: "points accelerator",
-      pointsName: "points",
-      leaderboard: [
-        {
-          id: group.id,
-          displayName: "Ravens",
-          pointsBalance: 12,
-        },
-      ],
-    });
-  });
-
-  it("keeps the same public leaderboard token across concurrent first reads", async () => {
-    await ctx.prisma.guildConfig.create({
-      data: {
-        guildId: ctx.env.GUILD_ID,
-      },
-    });
-
-    const configs = await Promise.all([
-      ctx.services.configService.getOrCreate(ctx.env.GUILD_ID),
-      ctx.services.configService.getOrCreate(ctx.env.GUILD_ID),
-      ctx.services.configService.getOrCreate(ctx.env.GUILD_ID),
-    ]);
-
-    const tokens = new Set(configs.map((config) => config.publicLeaderboardToken));
-    expect(tokens.size).toBe(1);
-    expect(configs[0].publicLeaderboardToken).toBeTruthy();
   });
 
   it("rejects awards above the configured role cap", async () => {
