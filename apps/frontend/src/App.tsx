@@ -8,7 +8,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import ShopPanel from "./components/ShopPanel";
 import TabBar, { type TabDefinition } from "./components/TabBar";
 import ThemeToggle from "./components/ThemeToggle";
-import { isDesignPreview } from "./designPreview";
+import { getDesignPreviewSession, isDesignPreview, setDesignPreviewAccessLevel } from "./designPreview";
 import { api } from "./services/api";
 import type {
   Assignment,
@@ -184,6 +184,18 @@ function getDashboardSubtitle(accessLevel?: DashboardAccessLevel): string {
   return "Check the latest leaderboard standings for your Discord server.";
 }
 
+function getPreviewAccessLabel(accessLevel?: DashboardAccessLevel): string {
+  if (accessLevel === "admin") {
+    return "Admin";
+  }
+
+  if (accessLevel === "mentor") {
+    return "Mentor";
+  }
+
+  return "Member";
+}
+
 export default function App() {
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(null);
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
@@ -308,6 +320,19 @@ export default function App() {
   const handleLogin = () => {
     setStatus("Redirecting to Discord...");
     api.beginDiscordLogin();
+  };
+
+  const handlePreviewAccessChange = (accessLevel: DashboardAccessLevel) => {
+    setDesignPreviewAccessLevel(accessLevel);
+    const nextSession = getDesignPreviewSession(accessLevel);
+
+    if (!nextSession.user) {
+      return;
+    }
+
+    setSessionUser(nextSession.user);
+    setActiveTab(getDefaultTab(accessLevel));
+    setStatus(`Previewing the ${getPreviewAccessLabel(accessLevel).toLowerCase()} dashboard.`);
   };
 
   const renderActivePanel = () => {
@@ -517,7 +542,7 @@ export default function App() {
           {isDesignPreview() ? (
             <p className="design-preview-banner" role="status">
               Design preview: local mock data only. No backend or Discord required; saves stay in this browser
-              session.
+              session. Use <strong>Preview as</strong> to switch between admin, mentor, and member layouts.
             </p>
           ) : null}
           <header className="topbar">
@@ -526,6 +551,19 @@ export default function App() {
               <p>{getDashboardSubtitle(sessionUser?.dashboardAccessLevel)}</p>
             </hgroup>
             <div className="topbar-right">
+              {isDesignPreview() && sessionUser ? (
+                <label className="preview-access-picker">
+                  <span>Preview as</span>
+                  <select
+                    value={sessionUser.dashboardAccessLevel}
+                    onChange={(event) => handlePreviewAccessChange(event.target.value as DashboardAccessLevel)}
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="mentor">Mentor</option>
+                    <option value="viewer">Member</option>
+                  </select>
+                </label>
+              ) : null}
               {sessionUser ? (
                 <p className="session-badge">
                   {sessionUser.avatarUrl ? <img src={sessionUser.avatarUrl} alt="" /> : null}

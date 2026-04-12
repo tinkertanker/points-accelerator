@@ -275,6 +275,23 @@ html[data-theme="dark"] .theme-toggle {
   gap: 0.75rem;
 }
 
+.preview-access-picker {
+  align-items: center;
+  color: var(--text-dim);
+  display: inline-flex;
+  gap: 0.55rem;
+  font-size: 0.8rem;
+}
+
+.preview-access-picker span {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.preview-access-picker select {
+  min-width: 8.5rem;
+}
+
 .tab-bar {
   margin-bottom: 1rem;
 }
@@ -1140,6 +1157,14 @@ dl.stats-row {
     align-self: stretch;
     flex-wrap: wrap;
     justify-content: flex-start;
+  }
+
+  .preview-access-picker {
+    width: 100%;
+  }
+
+  .preview-access-picker select {
+    flex: 1 1 auto;
   }
 
   button.tab-bar__tab {

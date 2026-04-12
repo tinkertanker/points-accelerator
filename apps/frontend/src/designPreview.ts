@@ -1,6 +1,7 @@
 import type {
   AuthSession,
   BootstrapPayload,
+  DashboardAccessLevel,
   Group,
   GroupDraft,
   RoleCapability,
@@ -11,6 +12,104 @@ import type {
 
 export function isDesignPreview(): boolean {
   return import.meta.env.VITE_DESIGN_PREVIEW === "true";
+}
+
+const DESIGN_PREVIEW_ACCESS_KEY = "points-accelerator:design-preview-access";
+
+function isDashboardAccessLevel(value: string | null): value is DashboardAccessLevel {
+  return value === "admin" || value === "mentor" || value === "viewer";
+}
+
+export function getDesignPreviewAccessLevel(): DashboardAccessLevel {
+  if (typeof window === "undefined") {
+    return "admin";
+  }
+
+  const url = new URL(window.location.href);
+  const queryValue = url.searchParams.get("previewAs");
+  if (isDashboardAccessLevel(queryValue)) {
+    window.localStorage.setItem(DESIGN_PREVIEW_ACCESS_KEY, queryValue);
+    return queryValue;
+  }
+
+  const storedValue = window.localStorage.getItem(DESIGN_PREVIEW_ACCESS_KEY);
+  if (isDashboardAccessLevel(storedValue)) {
+    return storedValue;
+  }
+
+  return "admin";
+}
+
+export function setDesignPreviewAccessLevel(accessLevel: DashboardAccessLevel) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(DESIGN_PREVIEW_ACCESS_KEY, accessLevel);
+
+  const url = new URL(window.location.href);
+  url.searchParams.set("previewAs", accessLevel);
+  window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+}
+
+function createPreviewUser(accessLevel: DashboardAccessLevel): AuthSession["user"] {
+  if (accessLevel === "admin") {
+    return {
+      userId: "preview-admin",
+      username: "preview-admin",
+      displayName: "Preview admin",
+      avatarUrl: null,
+      roleIds: ["role-staff"],
+      isGuildOwner: false,
+      hasAdministrator: false,
+      hasManageGuild: true,
+      dashboardAccessLevel: "admin",
+      canManageDashboard: true,
+      canManageSettings: true,
+      canManageGroups: true,
+      canManageShop: true,
+      canManageAssignments: true,
+      canViewLeaderboard: true,
+    };
+  }
+
+  if (accessLevel === "mentor") {
+    return {
+      userId: "preview-mentor",
+      username: "preview-mentor",
+      displayName: "Preview mentor",
+      avatarUrl: null,
+      roleIds: ["role-staff"],
+      isGuildOwner: false,
+      hasAdministrator: false,
+      hasManageGuild: false,
+      dashboardAccessLevel: "mentor",
+      canManageDashboard: true,
+      canManageSettings: false,
+      canManageGroups: false,
+      canManageShop: true,
+      canManageAssignments: true,
+      canViewLeaderboard: true,
+    };
+  }
+
+  return {
+    userId: "preview-viewer",
+    username: "preview-member",
+    displayName: "Preview member",
+    avatarUrl: null,
+    roleIds: ["role-member"],
+    isGuildOwner: false,
+    hasAdministrator: false,
+    hasManageGuild: false,
+    dashboardAccessLevel: "viewer",
+    canManageDashboard: false,
+    canManageSettings: false,
+    canManageGroups: false,
+    canManageShop: false,
+    canManageAssignments: false,
+    canViewLeaderboard: true,
+  };
 }
 
 function createInitialBootstrap(): BootstrapPayload {
@@ -208,26 +307,10 @@ function createInitialBootstrap(): BootstrapPayload {
 
 let mockBootstrap = createInitialBootstrap();
 
-export function getDesignPreviewSession(): AuthSession {
+export function getDesignPreviewSession(accessLevel = getDesignPreviewAccessLevel()): AuthSession {
   return {
     authenticated: true,
-    user: {
-      userId: "preview-user",
-      username: "preview",
-      displayName: "Design preview",
-      avatarUrl: null,
-      roleIds: ["role-staff"],
-      isGuildOwner: false,
-      hasAdministrator: false,
-      hasManageGuild: true,
-      dashboardAccessLevel: "admin",
-      canManageDashboard: true,
-      canManageSettings: true,
-      canManageGroups: true,
-      canManageShop: true,
-      canManageAssignments: true,
-      canViewLeaderboard: true,
-    },
+    user: createPreviewUser(accessLevel),
   };
 }
 
