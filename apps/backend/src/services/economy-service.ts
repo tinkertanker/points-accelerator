@@ -24,7 +24,9 @@ type LedgerEntryKind =
   | "DONATION"
   | "SHOP_REDEMPTION"
   | "ADJUSTMENT"
-  | "SUBMISSION_REWARD";
+  | "SUBMISSION_REWARD"
+  | "BET_WIN"
+  | "BET_LOSS";
 
 type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
 
