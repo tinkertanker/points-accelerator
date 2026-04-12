@@ -235,7 +235,7 @@ describe("betting system", () => {
       voterUsername: "bob",
       targetUserId: "user-1",
       targetUsername: "alice",
-      groupRoleIds: ["role-alpha"],
+      groupId: group.id,
     });
     expect(vote1.finalized).toBe(false);
     expect(vote1.expiresAt).toBeNull();
@@ -247,7 +247,7 @@ describe("betting system", () => {
       voterUsername: "carol",
       targetUserId: "user-1",
       targetUsername: "alice",
-      groupRoleIds: ["role-alpha"],
+      groupId: group.id,
     });
     expect(vote2.finalized).toBe(true);
     expect(vote2.expiresAt).not.toBeNull();
@@ -275,13 +275,13 @@ describe("betting system", () => {
         voterUsername: "alice",
         targetUserId: "user-1",
         targetUsername: "alice",
-        groupRoleIds: ["role-alpha"],
+        groupId: "group-alpha",
       }),
     ).rejects.toThrow(/cannot exclude yourself/i);
   });
 
   it("prevents duplicate votes from the same user", async () => {
-    await seedSettingsAndGroup();
+    const group = await seedSettingsAndGroup();
 
     await ctx.services.bettingService.voteExclusion({
       guildId: GUILD_ID,
@@ -289,7 +289,7 @@ describe("betting system", () => {
       voterUsername: "bob",
       targetUserId: "user-1",
       targetUsername: "alice",
-      groupRoleIds: ["role-alpha"],
+      groupId: group.id,
     });
 
     await expect(
@@ -299,9 +299,61 @@ describe("betting system", () => {
         voterUsername: "bob",
         targetUserId: "user-1",
         targetUsername: "alice",
-        groupRoleIds: ["role-alpha"],
+        groupId: group.id,
       }),
     ).rejects.toThrow(/already voted/i);
+  });
+
+  it("keeps pending exclusion votes scoped to a single group", async () => {
+    const groupAlpha = await seedSettingsAndGroup();
+    const groupBeta = await ctx.app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        displayName: "Team Beta",
+        slug: "team-beta",
+        mentorName: "Mentor",
+        roleId: "role-beta",
+        aliases: ["beta"],
+        active: true,
+      },
+    });
+
+    const beta = groupBeta.json() as { id: string };
+
+    const firstVote = await ctx.services.bettingService.voteExclusion({
+      guildId: GUILD_ID,
+      voterUserId: "user-2",
+      voterUsername: "bob",
+      targetUserId: "user-1",
+      targetUsername: "alice",
+      groupId: groupAlpha.id,
+    });
+
+    const secondVote = await ctx.services.bettingService.voteExclusion({
+      guildId: GUILD_ID,
+      voterUserId: "user-3",
+      voterUsername: "carol",
+      targetUserId: "user-1",
+      targetUsername: "alice",
+      groupId: beta.id,
+    });
+
+    expect(firstVote.finalized).toBe(false);
+    expect(secondVote.finalized).toBe(false);
+
+    const pendingVotes = await ctx.prisma.betExclusion.findMany({
+      where: {
+        guildId: GUILD_ID,
+        targetUserId: "user-1",
+        expiresAt: new Date(0),
+      },
+      orderBy: { groupId: "asc" },
+    });
+
+    expect(pendingVotes).toHaveLength(2);
+    expect(pendingVotes.map((vote) => vote.groupId)).toEqual([groupAlpha.id, beta.id].sort());
   });
 
   it("settings API includes betWinChance", async () => {

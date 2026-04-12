@@ -180,9 +180,13 @@ export default function SettingsPanel({
                 type="number"
                 min={0}
                 max={100}
+                step={1}
                 value={settingsDraft.betWinChance}
                 onChange={(event) =>
-                  onSettingsChange({ ...settingsDraft, betWinChance: Number(event.target.value) })
+                  onSettingsChange({
+                    ...settingsDraft,
+                    betWinChance: Math.min(100, Math.max(0, Math.round(Number(event.target.value)))),
+                  })
                 }
               />
             </label>
