@@ -71,7 +71,7 @@ export class BettingService {
       ? `${params.groupDisplayName} won a bet of ${params.amount}`
       : `${params.groupDisplayName} lost a bet of ${params.amount}`;
 
-    const entry = await this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // Lock the group row
       const lockedGroups = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT id
@@ -103,7 +103,7 @@ export class BettingService {
         );
       }
 
-      return tx.ledgerEntry.create({
+      const entry = await tx.ledgerEntry.create({
         data: {
           guildId: params.guildId,
           type,
@@ -120,18 +120,12 @@ export class BettingService {
         },
         include: { splits: true },
       });
-    });
 
-    // Compute new balance after the bet
-    const balanceAfter = await this.prisma.ledgerSplit.groupBy({
-      by: ["groupId"],
-      where: { groupId: params.groupId },
-      _sum: { currencyDelta: true },
+      return {
+        entry,
+        newBalance: currentBalance + currencyDelta,
+      };
     });
-
-    const newBalance = balanceAfter.length > 0
-      ? decimalToNumber(balanceAfter[0]._sum.currencyDelta)
-      : 0;
 
     await this.auditService.record({
       guildId: params.guildId,
@@ -139,7 +133,7 @@ export class BettingService {
       actorUsername: params.actor.username,
       action: won ? "bet.won" : "bet.lost",
       entityType: "LedgerEntry",
-      entityId: entry.id,
+      entityId: result.entry.id,
       payload: {
         amount: params.amount,
         groupId: params.groupId,
@@ -152,7 +146,7 @@ export class BettingService {
     return {
       won,
       amount: params.amount,
-      newCurrencyBalance: newBalance,
+      newCurrencyBalance: result.newBalance,
       groupDisplayName: params.groupDisplayName,
     };
   }
@@ -161,40 +155,50 @@ export class BettingService {
    * Get betting statistics for a specific user within a guild.
    */
   public async getStats(guildId: string, userId: string): Promise<BetStats> {
-    const wins = await this.prisma.ledgerEntry.findMany({
-      where: {
-        guildId,
-        type: "BET_WIN",
-        createdByUserId: userId,
-      },
-      include: { splits: true },
-    });
+    const [wins, losses, winTotals, lossTotals] = await Promise.all([
+      this.prisma.ledgerEntry.count({
+        where: {
+          guildId,
+          type: "BET_WIN",
+          createdByUserId: userId,
+        },
+      }),
+      this.prisma.ledgerEntry.count({
+        where: {
+          guildId,
+          type: "BET_LOSS",
+          createdByUserId: userId,
+        },
+      }),
+      this.prisma.ledgerSplit.aggregate({
+        where: {
+          entry: {
+            guildId,
+            type: "BET_WIN",
+            createdByUserId: userId,
+          },
+        },
+        _sum: { currencyDelta: true },
+      }),
+      this.prisma.ledgerSplit.aggregate({
+        where: {
+          entry: {
+            guildId,
+            type: "BET_LOSS",
+            createdByUserId: userId,
+          },
+        },
+        _sum: { currencyDelta: true },
+      }),
+    ]);
 
-    const losses = await this.prisma.ledgerEntry.findMany({
-      where: {
-        guildId,
-        type: "BET_LOSS",
-        createdByUserId: userId,
-      },
-      include: { splits: true },
-    });
-
-    const totalWon = wins.reduce(
-      (sum, entry) =>
-        sum + entry.splits.reduce((splitSum, split) => splitSum + decimalToNumber(split.currencyDelta), 0),
-      0,
-    );
-
-    const totalLost = losses.reduce(
-      (sum, entry) =>
-        sum + entry.splits.reduce((splitSum, split) => splitSum + Math.abs(decimalToNumber(split.currencyDelta)), 0),
-      0,
-    );
+    const totalWon = decimalToNumber(winTotals._sum?.currencyDelta ?? decimal(0));
+    const totalLost = Math.abs(decimalToNumber(lossTotals._sum?.currencyDelta ?? decimal(0)));
 
     return {
-      totalBets: wins.length + losses.length,
-      wins: wins.length,
-      losses: losses.length,
+      totalBets: wins + losses,
+      wins,
+      losses,
       totalWon,
       totalLost,
       netGain: totalWon - totalLost,
@@ -224,16 +228,10 @@ export class BettingService {
   }
 
   /**
-   * Vote to exclude a group member from betting. Requires two distinct voters
-   * from the same group to complete the exclusion.
-   *
-   * Uses a simple approach: if a pending exclusion vote already exists from a
-   * different group member, the exclusion is finalized. Otherwise, the vote is
-   * recorded as a pending exclusion.
-   *
-   * We store an unfinalized exclusion with expiresAt in the past (epoch 0)
-   * to mark a single vote. When a second vote arrives, we update expiresAt
-   * to one week from now, activating the exclusion.
+   * Vote to exclude a group member from betting. The command layer is
+   * responsible for validating that the target currently belongs to the same
+   * group as the voter. This service persists that group context so pending
+   * votes cannot be finalized across groups if membership changes later.
    */
   public async voteExclusion(params: {
     guildId: string;
@@ -241,95 +239,137 @@ export class BettingService {
     voterUsername?: string;
     targetUserId: string;
     targetUsername?: string;
-    groupRoleIds: string[];
+    groupId: string;
   }): Promise<{ finalized: boolean; expiresAt: Date | null }> {
     if (params.voterUserId === params.targetUserId) {
       throw new AppError("You cannot exclude yourself.", 400);
     }
 
-    // Check if target already has an active exclusion
-    const activeExclusion = await this.prisma.betExclusion.findFirst({
-      where: {
-        guildId: params.guildId,
-        targetUserId: params.targetUserId,
-        expiresAt: { gt: new Date() },
-      },
-    });
-
-    if (activeExclusion) {
-      const expiresTimestamp = Math.floor(activeExclusion.expiresAt.getTime() / 1000);
-      throw new AppError(
-        `This user is already excluded from betting until <t:${expiresTimestamp}:f>.`,
-      );
-    }
-
-    // Look for a pending vote (expiresAt at epoch 0 = pending single vote)
+    const maxTransactionRetries = 3;
     const pendingEpoch = new Date(0);
-    const pendingVote = await this.prisma.betExclusion.findFirst({
-      where: {
-        guildId: params.guildId,
-        targetUserId: params.targetUserId,
-        expiresAt: pendingEpoch,
-      },
-    });
+    let attempt = 0;
 
-    if (pendingVote) {
-      // A vote already exists
-      if (pendingVote.createdByUserId === params.voterUserId) {
-        throw new AppError("You have already voted to exclude this user. A second teammate must also vote.");
+    while (true) {
+      try {
+        const result = await this.prisma.$transaction(
+          async (tx) => {
+            const activeExclusion = await tx.betExclusion.findFirst({
+              where: {
+                guildId: params.guildId,
+                targetUserId: params.targetUserId,
+                expiresAt: { gt: new Date() },
+              },
+              orderBy: { expiresAt: "desc" },
+            });
+
+            if (activeExclusion) {
+              const expiresTimestamp = Math.floor(activeExclusion.expiresAt.getTime() / 1000);
+              throw new AppError(
+                `This user is already excluded from betting until <t:${expiresTimestamp}:f>.`,
+              );
+            }
+
+            const pendingVote = await tx.betExclusion.findUnique({
+              where: {
+                guildId_targetUserId_groupId_expiresAt: {
+                  guildId: params.guildId,
+                  targetUserId: params.targetUserId,
+                  groupId: params.groupId,
+                  expiresAt: pendingEpoch,
+                },
+              },
+            });
+
+            if (pendingVote) {
+              if (pendingVote.createdByUserId === params.voterUserId) {
+                throw new AppError("You have already voted to exclude this user. A second teammate must also vote.");
+              }
+
+              const expiresAt = new Date(Date.now() + BET_EXCLUSION_DURATION_MS);
+              const finalized = await tx.betExclusion.updateMany({
+                where: {
+                  id: pendingVote.id,
+                  expiresAt: pendingEpoch,
+                },
+                data: { expiresAt },
+              });
+
+              if (finalized.count !== 1) {
+                throw new AppError("This exclusion vote is no longer pending. Please try again.");
+              }
+
+              return {
+                finalized: true as const,
+                expiresAt,
+                audit: {
+                  action: "bet.exclusion.finalized" as const,
+                  entityId: pendingVote.id,
+                  payload: {
+                    targetUserId: params.targetUserId,
+                    targetUsername: params.targetUsername,
+                    groupId: params.groupId,
+                    firstVoterUserId: pendingVote.createdByUserId,
+                    secondVoterUserId: params.voterUserId,
+                    expiresAt: expiresAt.toISOString(),
+                  },
+                },
+              };
+            }
+
+            const vote = await tx.betExclusion.create({
+              data: {
+                guildId: params.guildId,
+                groupId: params.groupId,
+                targetUserId: params.targetUserId,
+                targetUsername: params.targetUsername,
+                createdByUserId: params.voterUserId,
+                createdByUsername: params.voterUsername,
+                expiresAt: pendingEpoch,
+              },
+            });
+
+            return {
+              finalized: false as const,
+              expiresAt: null,
+              audit: {
+                action: "bet.exclusion.voted" as const,
+                entityId: vote.id,
+                payload: {
+                  targetUserId: params.targetUserId,
+                  targetUsername: params.targetUsername,
+                  groupId: params.groupId,
+                },
+              },
+            };
+          },
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          },
+        );
+
+        await this.auditService.record({
+          guildId: params.guildId,
+          actorUserId: params.voterUserId,
+          actorUsername: params.voterUsername,
+          action: result.audit.action,
+          entityType: "BetExclusion",
+          entityId: result.audit.entityId,
+          payload: result.audit.payload,
+        });
+
+        return { finalized: result.finalized, expiresAt: result.expiresAt };
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError
+          && (error.code === "P2002" || error.code === "P2034")
+          && attempt < maxTransactionRetries
+        ) {
+          attempt += 1;
+          continue;
+        }
+
+        throw error;
       }
-
-      // Second distinct voter — finalize the exclusion
-      const expiresAt = new Date(Date.now() + BET_EXCLUSION_DURATION_MS);
-      await this.prisma.betExclusion.update({
-        where: { id: pendingVote.id },
-        data: { expiresAt },
-      });
-
-      await this.auditService.record({
-        guildId: params.guildId,
-        actorUserId: params.voterUserId,
-        actorUsername: params.voterUsername,
-        action: "bet.exclusion.finalized",
-        entityType: "BetExclusion",
-        entityId: pendingVote.id,
-        payload: {
-          targetUserId: params.targetUserId,
-          targetUsername: params.targetUsername,
-          firstVoterUserId: pendingVote.createdByUserId,
-          secondVoterUserId: params.voterUserId,
-          expiresAt: expiresAt.toISOString(),
-        },
-      });
-
-      return { finalized: true, expiresAt };
     }
-
-    // No pending vote — create one (with expiresAt = epoch 0 to mark it as pending)
-    const vote = await this.prisma.betExclusion.create({
-      data: {
-        guildId: params.guildId,
-        targetUserId: params.targetUserId,
-        targetUsername: params.targetUsername,
-        createdByUserId: params.voterUserId,
-        createdByUsername: params.voterUsername,
-        expiresAt: pendingEpoch,
-      },
-    });
-
-    await this.auditService.record({
-      guildId: params.guildId,
-      actorUserId: params.voterUserId,
-      actorUsername: params.voterUsername,
-      action: "bet.exclusion.voted",
-      entityType: "BetExclusion",
-      entityId: vote.id,
-      payload: {
-        targetUserId: params.targetUserId,
-        targetUsername: params.targetUsername,
-      },
-    });
-
-    return { finalized: false, expiresAt: null };
   }
 }

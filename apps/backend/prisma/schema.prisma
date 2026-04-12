@@ -113,6 +113,7 @@ model Group {
   shopRedemptions         ShopRedemption[]
   participants            Participant[]
   submissions             Submission[]
+  betExclusions   BetExclusion[]
 
   @@unique([guildId, slug])
   @@unique([guildId, roleId])
@@ -386,6 +387,7 @@ model Submission {
 model BetExclusion {
   id                  String      @id @default(cuid())
   guildId             String
+  groupId             String?
   targetUserId        String
   targetUsername       String?
   createdByUserId     String
@@ -393,6 +395,9 @@ model BetExclusion {
   expiresAt           DateTime
   createdAt           DateTime    @default(now())
   guild               GuildConfig @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  group               Group?      @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@index([guildId, targetUserId, expiresAt])
+  @@index([groupId, expiresAt])
+  @@unique([guildId, targetUserId, groupId, expiresAt])
 }

@@ -1264,7 +1264,7 @@ export class BotRuntime {
           voterUsername: interaction.user.username,
           targetUserId: targetUser.id,
           targetUsername: targetUser.username,
-          groupRoleIds: roleIds,
+          groupId: sourceGroup.id,
         });
 
         if (result.finalized) {
