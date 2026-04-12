@@ -95,6 +95,7 @@ const bootstrapPayload = {
     redemptionChannelId: null,
     listingChannelId: null,
     economyMode: "SIMPLE" as const,
+    betWinChance: 50,
   },
   capabilities: [],
   groups: [],

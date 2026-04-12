@@ -60,5 +60,6 @@ export async function resetDatabase(prisma: ReturnType<typeof createPrismaClient
   await prisma.groupAlias.deleteMany();
   await prisma.group.deleteMany();
   await prisma.discordRoleCapability.deleteMany();
+  await prisma.betExclusion.deleteMany();
   await prisma.guildConfig.deleteMany();
 }

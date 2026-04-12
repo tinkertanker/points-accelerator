@@ -13,6 +13,7 @@ export type Settings = {
   redemptionChannelId: string | null;
   listingChannelId: string | null;
   economyMode: "SIMPLE" | "ADVANCED";
+  betWinChance: number;
 };
 
 export type RoleCapability = {
