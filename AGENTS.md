@@ -21,6 +21,7 @@ It is a monorepo with:
 - Groups are the primary accounts.
 - The ledger is append-only in practice: corrections should be new entries, not mutation of past balances.
 - `points` and `currency` are separate balances. Shop, `/pay`, and `/donate` affect currency, not leaderboard points.
+- Betting also affects currency, not leaderboard points.
 - Role capability rules are first-class configuration. Avoid hardcoding role names or channel names.
 - Staff tiers are defined by Discord role capability rows. A blank `maxAward` means uncapped, not zero.
 - Admin auth uses Discord OAuth sessions backed by guild membership and dashboard-capable roles.
@@ -30,6 +31,7 @@ It is a monorepo with:
 - Approved and outstanding submissions create `SUBMISSION_REWARD` ledger entries for the student's group. Outstanding adds the bonus reward.
 - System-generated rewards must use explicit system paths instead of actor-role permission checks.
 - Submission images may be stored in Cloudflare R2, with Discord attachment URLs as fallback when object storage is not configured.
+- Betting exclusions require two distinct voters from the same group, and pending votes must stay scoped to that group until they expire or finalize.
 
 ## Common commands
 
@@ -55,6 +57,7 @@ Useful backend commands:
 - Backend Vitest currently uses one ephemeral Postgres per test file; do not enable file-level parallelism unless the harness is isolated per worker.
 - If `BootstrapPayload` changes, keep `apps/frontend/src/designPreview.ts` and Playwright bootstrap mocks in sync.
 - Prefer validating group economy flows end-to-end: passive rewards, awards/deductions, `/pay`, `/donate`, `/store`, `/buy`, `/sell`.
+- Include `/bet`, `/betstats`, and `/exclusion` when touching betting or currency flow behaviour.
 - Prefer validating submission flows end-to-end as well: `/register`, `/submit`, `/submissions`, `/missing`, `/review_submission`, and dashboard review.
 
 ## Deployment

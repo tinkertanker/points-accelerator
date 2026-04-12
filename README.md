@@ -6,6 +6,8 @@ It tracks permanent `points` for leaderboards, separate spendable `currency` for
 
 It also includes a Discord OAuth dashboard, marketplace listings, and a submission workflow for class use: students register once with an alphanumeric index ID and group, staff publish assignments, students submit work, and approved submissions award their group.
 
+The bot also supports group-based betting: students can place double-or-nothing bets against their group's currency balance, view personal betting stats, and use a two-person teammate vote to exclude a member from betting for one week.
+
 ## Monorepo layout
 
 - `apps/backend`: Fastify API, Discord bot, Prisma schema, domain services, and tests
@@ -40,6 +42,7 @@ It also includes a Discord OAuth dashboard, marketplace listings, and a submissi
 - Discord ledger command with paging for recent transactions
 - Discord-login leaderboard view for any guild member
 - Group transfers and donations
+- Group-based betting with configurable win chance
 - Custom shop with spendable currency
 - Marketplace listings with optional Discord channel posting
 - Role capability matrix
@@ -52,7 +55,7 @@ It also includes a Discord OAuth dashboard, marketplace listings, and a submissi
 ## Phase 1 command set
 
 - Staff roles such as admins or alumni: `/award`, `/deduct`
-- Students: `/balance`, `/leaderboard`, `/ledger`
+- Students: `/balance`, `/leaderboard`, `/ledger`, `/bet`, `/betstats`, `/exclusion`
 
 ## Submission command set
 
@@ -66,3 +69,5 @@ The dashboard uses Discord sign-in with three access tiers:
 - Guild admins and roles with `canManageDashboard` enabled keep full access to settings and groups.
 
 After signing into the dashboard, use the built-in walkthrough in the control room to configure role powers, map groups, create assignments, and smoke test the commands in Discord.
+
+For betting, configure `Bet win chance (%)` in the dashboard settings before testing `/bet`. `/exclusion` requires two distinct teammates from the same group, and pending votes stay scoped to that group even if role mappings change later.
