@@ -316,7 +316,7 @@ export default function App() {
           />
         );
       case "activity":
-        return <ActivityPanel bootstrap={bootstrap} />;
+        return <ActivityPanel bootstrap={bootstrap} publicLeaderboardUrl={bootstrap.publicLeaderboardUrl} />;
       default:
         return null;
     }

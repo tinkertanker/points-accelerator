@@ -53,6 +53,7 @@ const bootstrapPayload = {
   listings: [],
   leaderboard: [],
   ledger: [],
+  publicLeaderboardUrl: "https://points-accelerator.example/l/share-token",
   assignments: [],
   participants: [],
   submissions: [],

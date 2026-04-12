@@ -48,6 +48,7 @@ test("authenticated Discord manager can see the control room", async ({ page }) 
         listings: [],
         leaderboard: [],
         ledger: [],
+        publicLeaderboardUrl: "https://points-accelerator.example/l/share-token",
         assignments: [],
         participants: [],
         submissions: [],
@@ -72,4 +73,7 @@ test("authenticated Discord manager can see the control room", async ({ page }) 
 
   await page.getByRole("tab", { name: /activity/i }).click();
   await expect(page.getByRole("heading", { name: /track the leaderboard and ledger/i })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: /public leaderboard link/i })).toHaveValue(
+    "https://points-accelerator.example/l/share-token",
+  );
 });

@@ -21,6 +21,10 @@ const authCallbackSchema = z.object({
   error: z.string().optional(),
 });
 
+const publicLeaderboardParamsSchema = z.object({
+  token: z.string().min(1),
+});
+
 const SESSION_COOKIE_NAME = "dashboard_session";
 const OAUTH_STATE_COOKIE_NAME = "discord_oauth_state";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
@@ -194,6 +198,26 @@ export function createApp(params: {
     return baseUrl.startsWith("http") ? url.toString() : `${url.pathname}${url.search}`;
   };
 
+  const buildAppUrlFromRequest = (request: FastifyRequest, path: string) => {
+    const configuredUrl = buildAppUrl(path);
+    if (configuredUrl.startsWith("http")) {
+      return configuredUrl;
+    }
+
+    const protocolHeader = request.headers["x-forwarded-proto"];
+    const hostHeader = request.headers["x-forwarded-host"] ?? request.headers.host;
+    const protocol = typeof protocolHeader === "string" ? protocolHeader.split(",")[0] : request.protocol;
+    const host = Array.isArray(hostHeader) ? hostHeader[0] : hostHeader;
+
+    if (!host) {
+      return path;
+    }
+
+    return `${protocol}://${host}${path}`;
+  };
+
+  const buildPublicLeaderboardPath = (token: string) => `/l/${token}`;
+
   const shouldUseSecureCookies = (request: FastifyRequest) => {
     const configuredUrl =
       params.env.APP_PUBLIC_URL ??
@@ -302,6 +326,22 @@ export function createApp(params: {
   const requireAdmin = async (request: FastifyRequest) => {
     await resolveDashboardSession(request);
   };
+
+  const serialiseSettings = (settings: Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>) => ({
+    appName: settings.appName,
+    pointsName: settings.pointsName,
+    currencyName: settings.currencyName,
+    passivePointsReward: decimalToNumber(settings.passivePointsReward),
+    passiveCurrencyReward: decimalToNumber(settings.passiveCurrencyReward),
+    passiveCooldownSeconds: settings.passiveCooldownSeconds,
+    passiveMinimumCharacters: settings.passiveMinimumCharacters,
+    passiveAllowedChannelIds: settings.passiveAllowedChannelIds,
+    passiveDeniedChannelIds: settings.passiveDeniedChannelIds,
+    commandLogChannelId: settings.commandLogChannelId,
+    redemptionChannelId: settings.redemptionChannelId,
+    listingChannelId: settings.listingChannelId,
+    economyMode: settings.economyMode,
+  });
 
   app.register(cors, {
     origin: true,
@@ -438,7 +478,31 @@ export function createApp(params: {
     }
   });
 
-  app.get("/api/bootstrap", { preHandler: requireAdmin }, async () => {
+  app.get("/api/public/leaderboard/:token", async (request, reply) => {
+    const { token } = publicLeaderboardParamsSchema.parse(request.params);
+    const config = await services.prisma.guildConfig.findUnique({
+      where: { publicLeaderboardToken: token },
+    });
+
+    if (!config) {
+      throw new AppError("Leaderboard not found.", 404);
+    }
+
+    const leaderboard = await services.economyService.getLeaderboard(config.guildId);
+    reply.header("X-Robots-Tag", "noindex, nofollow");
+
+    return {
+      appName: config.appName,
+      pointsName: config.pointsName,
+      leaderboard: leaderboard.map((group) => ({
+        id: group.id,
+        displayName: group.displayName,
+        pointsBalance: group.pointsBalance,
+      })),
+    };
+  });
+
+  app.get("/api/bootstrap", { preHandler: requireAdmin }, async (request) => {
     const [settings, capabilities, groups, shopItems, listings, leaderboard, ledger, roles, channels, assignments, participants, submissions] = await Promise.all([
       services.configService.getOrCreate(params.env.GUILD_ID),
       services.roleCapabilityService.list(params.env.GUILD_ID),
@@ -455,11 +519,7 @@ export function createApp(params: {
     ]);
 
     return {
-      settings: {
-        ...settings,
-        passivePointsReward: decimalToNumber(settings.passivePointsReward),
-        passiveCurrencyReward: decimalToNumber(settings.passiveCurrencyReward),
-      },
+      settings: serialiseSettings(settings),
       capabilities: capabilities.map((capability) => ({
         ...capability,
         maxAward: capability.maxAward ? decimalToNumber(capability.maxAward) : null,
@@ -472,6 +532,9 @@ export function createApp(params: {
       listings,
       leaderboard,
       ledger,
+      publicLeaderboardUrl: settings.publicLeaderboardToken
+        ? buildAppUrlFromRequest(request, buildPublicLeaderboardPath(settings.publicLeaderboardToken))
+        : null,
       discord: {
         roles,
         channels,
@@ -484,21 +547,13 @@ export function createApp(params: {
 
   app.get("/api/settings", { preHandler: requireAdmin }, async () => {
     const settings = await services.configService.getOrCreate(params.env.GUILD_ID);
-    return {
-      ...settings,
-      passivePointsReward: decimalToNumber(settings.passivePointsReward),
-      passiveCurrencyReward: decimalToNumber(settings.passiveCurrencyReward),
-    };
+    return serialiseSettings(settings);
   });
 
   app.put("/api/settings", { preHandler: requireAdmin }, async (request) => {
     const input = settingsSchema.parse(request.body);
     const settings = await services.configService.update(params.env.GUILD_ID, input);
-    return {
-      ...settings,
-      passivePointsReward: decimalToNumber(settings.passivePointsReward),
-      passiveCurrencyReward: decimalToNumber(settings.passiveCurrencyReward),
-    };
+    return serialiseSettings(settings);
   });
 
   app.get("/api/capabilities", { preHandler: requireAdmin }, async () => {

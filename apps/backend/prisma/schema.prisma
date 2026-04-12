@@ -43,6 +43,7 @@ model GuildConfig {
   appName                      String                @default("points accelerator")
   pointsName                   String                @default("points")
   currencyName                 String                @default("rice")
+  publicLeaderboardToken       String?               @unique
   passivePointsReward          Decimal               @default(1) @db.Decimal(18, 6)
   passiveCurrencyReward        Decimal               @default(1) @db.Decimal(18, 6)
   passiveCooldownSeconds       Int                   @default(60)

@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import type { PrismaClient } from "@prisma/client";
 
 import { decimal } from "../utils/decimal.js";
@@ -22,14 +24,33 @@ export class ConfigService {
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async getOrCreate(guildId: string) {
-    return this.prisma.guildConfig.upsert({
+    const config = await this.prisma.guildConfig.upsert({
       where: { guildId },
       create: {
         guildId,
+        publicLeaderboardToken: this.createPublicLeaderboardToken(),
         passivePointsReward: decimal(1),
         passiveCurrencyReward: decimal(1),
       },
       update: {},
+    });
+
+    if (config.publicLeaderboardToken) {
+      return config;
+    }
+
+    await this.prisma.guildConfig.updateMany({
+      where: {
+        guildId,
+        publicLeaderboardToken: null,
+      },
+      data: {
+        publicLeaderboardToken: this.createPublicLeaderboardToken(),
+      },
+    });
+
+    return this.prisma.guildConfig.findUniqueOrThrow({
+      where: { guildId },
     });
   }
 
@@ -56,5 +77,8 @@ export class ConfigService {
       },
     });
   }
-}
 
+  private createPublicLeaderboardToken() {
+    return randomBytes(18).toString("base64url");
+  }
+}

@@ -79,6 +79,8 @@ export type LeaderboardEntry = {
   currencyBalance: number;
 };
 
+export type PublicLeaderboardEntry = Pick<LeaderboardEntry, "id" | "displayName" | "pointsBalance">;
+
 export type LedgerEntry = {
   id: string;
   type: string;
@@ -115,6 +117,12 @@ export type AuthSession = {
   user?: AuthUser;
 };
 
+export type PublicLeaderboardPayload = {
+  appName: string;
+  pointsName: string;
+  leaderboard: PublicLeaderboardEntry[];
+};
+
 export type BootstrapPayload = {
   settings: Settings;
   capabilities: RoleCapability[];
@@ -123,6 +131,7 @@ export type BootstrapPayload = {
   listings: Listing[];
   leaderboard: LeaderboardEntry[];
   ledger: LedgerEntry[];
+  publicLeaderboardUrl: string | null;
   discord: {
     roles: DiscordOption[];
     channels: DiscordOption[];
