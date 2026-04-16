@@ -2,7 +2,7 @@
 
 ## Scope
 
-This repository is `points accelerator`, a group-first Discord economy bot.
+This repository is `points accelerator`, a group-first Discord economy bot with group points and participant wallets.
 
 It is a monorepo with:
 
@@ -18,16 +18,19 @@ It is a monorepo with:
 
 ## Important product constraints
 
-- Groups are the primary accounts.
+- Groups are the primary accounts for points and leaderboard state.
 - The ledger is append-only in practice: corrections should be new entries, not mutation of past balances.
-- `points` and `currency` are separate balances. Shop, `/pay`, and `/donate` affect currency, not leaderboard points.
+- `points` are group-based, leaderboard-visible, and spendable for `/buyforgroup`.
+- Spendable `currency` is participant-based for `/transfer`, `/buyforme`, and donation conversion.
+- `/donate` converts participant currency into group points using the configured guild rate.
+- Group purchases are approval-driven: a request waits for at least 50% of the current group role membership to approve, then charges the shared group points balance.
 - Role capability rules are first-class configuration. Avoid hardcoding role names or channel names.
 - Staff tiers are defined by Discord role capability rows. A blank `maxAward` means uncapped, not zero.
 - Admin auth uses Discord OAuth sessions backed by guild membership and dashboard-capable roles.
-- Participants are student registrations. Staff access stays role-based and does not require participant records.
-- Student registration requires an alphanumeric index ID and one active group.
+- Participants are Discord-linked student records. Staff access stays role-based and does not require participant records.
+- Students are auto-provisioned from Discord identity plus one active mapped group role. Index IDs are internal metadata, not a required student-facing setup step.
 - Students can submit text, an image, or both; empty submissions should be rejected.
-- Approved and outstanding submissions create `SUBMISSION_REWARD` ledger entries for the student's group. Outstanding adds the bonus reward.
+- Approved and outstanding submissions create `SUBMISSION_REWARD` group ledger entries for points and participant wallet entries for currency. Outstanding adds the bonus reward.
 - System-generated rewards must use explicit system paths instead of actor-role permission checks.
 - Submission images may be stored in Cloudflare R2, with Discord attachment URLs as fallback when object storage is not configured.
 
@@ -54,8 +57,8 @@ Useful backend commands:
 - If you change dashboard flows, add or update frontend tests and Playwright coverage where practical.
 - Backend Vitest currently uses one ephemeral Postgres per test file; do not enable file-level parallelism unless the harness is isolated per worker.
 - If `BootstrapPayload` changes, keep `apps/frontend/src/designPreview.ts` and Playwright bootstrap mocks in sync.
-- Prefer validating group economy flows end-to-end: passive rewards, awards/deductions, `/pay`, `/donate`, `/store`, `/buy`, `/sell`.
-- Prefer validating submission flows end-to-end as well: `/register`, `/submit`, `/submissions`, `/missing`, `/review_submission`, and dashboard review.
+- Prefer validating the split economy end-to-end: passive rewards, awards/deductions, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`, and `/sell`.
+- Prefer validating submission flows end-to-end as well: auto-provisioned participants, `/submit`, `/submissions`, `/missing`, `/review_submission`, and dashboard review.
 
 ## Deployment
 

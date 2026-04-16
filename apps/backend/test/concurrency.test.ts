@@ -35,6 +35,32 @@ async function seedCurrency(groupId: string, amount: number) {
   });
 }
 
+async function createParticipant(groupId: string, discordUserId: string, indexId: string) {
+  return ctx.services.participantService.register({
+    guildId: ctx.env.GUILD_ID,
+    discordUserId,
+    discordUsername: discordUserId,
+    indexId,
+    groupId,
+  });
+}
+
+async function seedParticipantCurrency(participantId: string, amount: number) {
+  await ctx.services.participantCurrencyService.awardParticipants({
+    guildId: ctx.env.GUILD_ID,
+    actor: {
+      userId: "system",
+      username: "System",
+      roleIds: [],
+    },
+    targetParticipantIds: [participantId],
+    currencyDelta: amount,
+    description: "Test seed",
+    type: "CORRECTION",
+    systemAction: true,
+  });
+}
+
 describe("economy concurrency", () => {
   beforeAll(async () => {
     const managed = ensureTestDatabase();
@@ -91,12 +117,16 @@ describe("economy concurrency", () => {
 
   it("keeps redemptions inside stock and wallet limits under concurrency", async () => {
     const group = await createGroup("Alpha", "role-alpha");
-    await seedCurrency(group.id, 10);
+    const firstParticipant = await createParticipant(group.id, "user-1", "S001");
+    const secondParticipant = await createParticipant(group.id, "user-2", "S002");
+    await seedParticipantCurrency(firstParticipant.id, 10);
+    await seedParticipantCurrency(secondParticipant.id, 10);
 
     const item = await ctx.services.shopService.upsert(ctx.env.GUILD_ID, {
       name: "Limited Prize",
       description: "One only",
-      currencyCost: 7,
+      audience: "INDIVIDUAL",
+      cost: 7,
       stock: 1,
       enabled: true,
       fulfillmentInstructions: null,
@@ -105,7 +135,7 @@ describe("economy concurrency", () => {
     const [firstRedemption, secondRedemption] = await Promise.allSettled([
       ctx.services.shopService.redeem({
         guildId: ctx.env.GUILD_ID,
-        groupId: group.id,
+        participantId: firstParticipant.id,
         shopItemId: item.id,
         requestedByUserId: "user-1",
         requestedByUsername: "Alice",
@@ -113,7 +143,7 @@ describe("economy concurrency", () => {
       }),
       ctx.services.shopService.redeem({
         guildId: ctx.env.GUILD_ID,
-        groupId: group.id,
+        participantId: secondParticipant.id,
         shopItemId: item.id,
         requestedByUserId: "user-2",
         requestedByUsername: "Bob",
@@ -126,11 +156,13 @@ describe("economy concurrency", () => {
     const refreshedItem = await ctx.prisma.shopItem.findUniqueOrThrow({
       where: { id: item.id },
     });
-    const balances = await ctx.services.groupService.getBalanceMap([group.id]);
     const redemptionCount = await ctx.prisma.shopRedemption.count();
 
     expect(refreshedItem.stock).toBe(0);
-    expect(balances[group.id]?.currencyBalance).toBe(3);
+    expect(
+      (await ctx.services.participantCurrencyService.getParticipantBalance(firstParticipant.id)) +
+        (await ctx.services.participantCurrencyService.getParticipantBalance(secondParticipant.id)),
+    ).toBe(13);
     expect(redemptionCount).toBe(1);
   });
 });

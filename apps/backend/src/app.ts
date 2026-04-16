@@ -30,6 +30,7 @@ const settingsSchema = z.object({
   appName: z.string().min(1),
   pointsName: z.string().min(1),
   currencyName: z.string().min(1),
+  groupPointsPerCurrencyDonation: z.number().positive(),
   mentorRoleIds: z.array(z.string()),
   passivePointsReward: z.number().nonnegative(),
   passiveCurrencyReward: z.number().nonnegative(),
@@ -70,7 +71,8 @@ const shopItemSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1),
   description: z.string().min(1),
-  currencyCost: z.number().nonnegative(),
+  audience: z.enum(["INDIVIDUAL", "GROUP"]),
+  cost: z.number().nonnegative(),
   stock: z.number().int().nonnegative().nullable(),
   enabled: z.boolean(),
   fulfillmentInstructions: z.string().nullable().optional(),
@@ -89,9 +91,10 @@ const awardSchema = z.object({
   actorUserId: z.string().optional(),
   actorUsername: z.string().optional(),
   actorRoleIds: z.array(z.string()),
-  targetGroupIds: z.array(z.string()).min(1),
-  pointsDelta: z.number(),
-  currencyDelta: z.number(),
+  targetGroupIds: z.array(z.string()).default([]),
+  targetParticipantId: z.string().min(1).optional(),
+  pointsDelta: z.number().default(0),
+  currencyDelta: z.number().optional().default(0),
   description: z.string().min(1),
 });
 
@@ -99,8 +102,8 @@ const paySchema = z.object({
   actorUserId: z.string().optional(),
   actorUsername: z.string().optional(),
   actorRoleIds: z.array(z.string()),
-  sourceGroupId: z.string().min(1),
-  targetGroupId: z.string().min(1),
+  sourceParticipantId: z.string().min(1),
+  targetParticipantId: z.string().min(1),
   amount: z.number().positive(),
   description: z.string().optional(),
 });
@@ -109,17 +112,26 @@ const donateSchema = z.object({
   actorUserId: z.string().optional(),
   actorUsername: z.string().optional(),
   actorRoleIds: z.array(z.string()),
-  sourceGroupId: z.string().min(1),
+  sourceParticipantId: z.string().min(1),
+  groupId: z.string().min(1),
   amount: z.number().positive(),
   description: z.string().optional(),
 });
 
 const redeemSchema = z.object({
-  groupId: z.string().min(1),
+  participantId: z.string().min(1),
   shopItemId: z.string().min(1),
   requestedByUserId: z.string().min(1),
   requestedByUsername: z.string().optional(),
   quantity: z.number().int().positive().optional(),
+  purchaseMode: z.enum(["INDIVIDUAL", "GROUP"]).optional(),
+});
+
+const approveGroupPurchaseSchema = z.object({
+  redemptionId: z.string().min(1),
+  participantId: z.string().min(1),
+  approvedByUserId: z.string().min(1),
+  approvedByUsername: z.string().optional(),
 });
 
 const assignmentSchema = z.object({
@@ -356,6 +368,7 @@ export function createApp(params: {
     appName: settings.appName,
     pointsName: settings.pointsName,
     currencyName: settings.currencyName,
+    groupPointsPerCurrencyDonation: decimalToNumber(settings.groupPointsPerCurrencyDonation),
     mentorRoleIds: settings.mentorRoleIds,
     passivePointsReward: decimalToNumber(settings.passivePointsReward),
     passiveCurrencyReward: decimalToNumber(settings.passiveCurrencyReward),
@@ -367,6 +380,23 @@ export function createApp(params: {
     redemptionChannelId: settings.redemptionChannelId,
     listingChannelId: settings.listingChannelId,
     economyMode: settings.economyMode,
+  });
+
+  const serialiseGroup = (group: Awaited<ReturnType<AppServices["groupService"]["list"]>>[number]) => ({
+    id: group.id,
+    displayName: group.displayName,
+    slug: group.slug,
+    mentorName: group.mentorName,
+    roleId: group.roleId,
+    active: group.active,
+    aliases: group.aliases,
+    pointsBalance: group.pointsBalance,
+  });
+
+  const serialiseLeaderboardEntry = (group: Awaited<ReturnType<AppServices["economyService"]["getLeaderboard"]>>[number]) => ({
+    id: group.id,
+    displayName: group.displayName,
+    pointsBalance: group.pointsBalance,
   });
 
   app.register(cors, {
@@ -521,13 +551,13 @@ export function createApp(params: {
         ...capability,
         maxAward: capability.maxAward ? decimalToNumber(capability.maxAward) : null,
       })),
-      groups,
+      groups: groups.map((group) => serialiseGroup(group)),
       shopItems: shopItems.map((item) => ({
         ...item,
-        currencyCost: decimalToNumber(item.currencyCost),
+        cost: decimalToNumber(item.cost),
       })),
       listings,
-      leaderboard,
+      leaderboard: leaderboard.map((entry) => serialiseLeaderboardEntry(entry)),
       ledger,
       discord: {
         roles,
@@ -567,7 +597,10 @@ export function createApp(params: {
     }));
   });
 
-  app.get("/api/groups", { preHandler: requireAdmin }, async () => services.groupService.list(params.env.GUILD_ID));
+  app.get("/api/groups", { preHandler: requireAdmin }, async () => {
+    const groups = await services.groupService.list(params.env.GUILD_ID);
+    return groups.map((group) => serialiseGroup(group));
+  });
 
   app.post("/api/groups", { preHandler: requireAdmin }, async (request) => {
     const group = await services.groupService.upsert(params.env.GUILD_ID, groupSchema.parse(request.body));
@@ -575,7 +608,8 @@ export function createApp(params: {
   });
 
   app.get("/api/leaderboard", { preHandler: requireDashboardMember }, async () => {
-    return services.economyService.getLeaderboard(params.env.GUILD_ID);
+    const leaderboard = await services.economyService.getLeaderboard(params.env.GUILD_ID);
+    return leaderboard.map((entry) => serialiseLeaderboardEntry(entry));
   });
 
   app.get("/api/ledger", { preHandler: requireAdmin }, async (request) => {
@@ -587,7 +621,7 @@ export function createApp(params: {
     const items = await services.shopService.list(params.env.GUILD_ID);
     return items.map((item) => ({
       ...item,
-      currencyCost: decimalToNumber(item.currencyCost),
+      cost: decimalToNumber(item.cost),
     }));
   });
 
@@ -595,7 +629,7 @@ export function createApp(params: {
     const item = await services.shopService.upsert(params.env.GUILD_ID, shopItemSchema.parse(request.body));
     return {
       ...item,
-      currencyCost: decimalToNumber(item.currencyCost),
+      cost: decimalToNumber(item.cost),
     };
   });
 
@@ -630,31 +664,69 @@ export function createApp(params: {
 
   app.post("/api/actions/award", { preHandler: requireAdmin }, async (request) => {
     const payload = awardSchema.parse(request.body);
-    return services.economyService.awardGroups({
-      guildId: params.env.GUILD_ID,
-      actor: {
-        userId: payload.actorUserId,
-        username: payload.actorUsername,
-        roleIds: payload.actorRoleIds,
-      },
+    if (payload.pointsDelta === 0 && payload.currencyDelta === 0) {
+      throw new AppError("At least one non-zero points or currency amount is required.", 400);
+    }
+
+    if (payload.pointsDelta !== 0 && payload.targetGroupIds.length === 0) {
+      throw new AppError("Select at least one group when adjusting points.", 400);
+    }
+
+    if (payload.currencyDelta !== 0 && !payload.targetParticipantId) {
+      throw new AppError("Select a participant when adjusting currency.", 400);
+    }
+
+    const actor = {
+      userId: payload.actorUserId,
+      username: payload.actorUsername,
+      roleIds: payload.actorRoleIds,
+    };
+
+    await services.prisma.$transaction(async (tx) => {
+      if (payload.pointsDelta !== 0) {
+        await services.economyService.awardGroups({
+          guildId: params.env.GUILD_ID,
+          actor,
+          targetGroupIds: payload.targetGroupIds,
+          pointsDelta: payload.pointsDelta,
+          currencyDelta: 0,
+          description: payload.description,
+          executor: tx,
+        });
+      }
+
+      if (payload.currencyDelta !== 0 && payload.targetParticipantId) {
+        await services.participantCurrencyService.awardParticipants({
+          guildId: params.env.GUILD_ID,
+          actor,
+          targetParticipantIds: [payload.targetParticipantId],
+          currencyDelta: payload.currencyDelta,
+          description: payload.description,
+          executor: tx,
+        });
+      }
+    });
+
+    return {
+      ok: true,
       targetGroupIds: payload.targetGroupIds,
+      targetParticipantId: payload.targetParticipantId ?? null,
       pointsDelta: payload.pointsDelta,
       currencyDelta: payload.currencyDelta,
-      description: payload.description,
-    });
+    };
   });
 
   app.post("/api/actions/pay", { preHandler: requireAdmin }, async (request) => {
     const payload = paySchema.parse(request.body);
-    return services.economyService.transferCurrency({
+    return services.participantCurrencyService.transferCurrency({
       guildId: params.env.GUILD_ID,
       actor: {
         userId: payload.actorUserId,
         username: payload.actorUsername,
         roleIds: payload.actorRoleIds,
       },
-      sourceGroupId: payload.sourceGroupId,
-      targetGroupId: payload.targetGroupId,
+      sourceParticipantId: payload.sourceParticipantId,
+      targetParticipantId: payload.targetParticipantId,
       amount: payload.amount,
       description: payload.description,
     });
@@ -662,28 +734,79 @@ export function createApp(params: {
 
   app.post("/api/actions/donate", { preHandler: requireAdmin }, async (request) => {
     const payload = donateSchema.parse(request.body);
-    return services.economyService.donateCurrency({
+    const settings = await services.configService.getOrCreate(params.env.GUILD_ID);
+    return services.economyService.donateParticipantCurrencyToGroupPoints({
       guildId: params.env.GUILD_ID,
       actor: {
         userId: payload.actorUserId,
         username: payload.actorUsername,
         roleIds: payload.actorRoleIds,
       },
-      sourceGroupId: payload.sourceGroupId,
+      participantId: payload.sourceParticipantId,
+      groupId: payload.groupId,
       amount: payload.amount,
+      conversionRate: decimalToNumber(settings.groupPointsPerCurrencyDonation),
       description: payload.description,
     });
   });
 
   app.post("/api/actions/redeem", { preHandler: requireAdmin }, async (request) => {
     const payload = redeemSchema.parse(request.body);
+    let groupMemberCount: number | undefined;
+    if ((payload.purchaseMode ?? "INDIVIDUAL") === "GROUP") {
+      const participant = await services.participantService.findById(params.env.GUILD_ID, payload.participantId);
+      if (!participant) {
+        throw new AppError("Participant not found.", 404);
+      }
+
+      const group = await services.groupService.findById(params.env.GUILD_ID, participant.groupId);
+      if (!group) {
+        throw new AppError("Group not found.", 404);
+      }
+
+      groupMemberCount = (await params.botRuntime?.getGroupMemberCount(group.roleId)) ?? undefined;
+      if (!groupMemberCount || groupMemberCount <= 0) {
+        throw new AppError("Live Discord group membership is unavailable for this group purchase.", 503);
+      }
+    }
+
     return services.shopService.redeem({
       guildId: params.env.GUILD_ID,
-      groupId: payload.groupId,
+      participantId: payload.participantId,
       shopItemId: payload.shopItemId,
       requestedByUserId: payload.requestedByUserId,
       requestedByUsername: payload.requestedByUsername,
       quantity: payload.quantity,
+      purchaseMode: payload.purchaseMode,
+      groupMemberCount,
+    });
+  });
+
+  app.post("/api/actions/approve-group-purchase", { preHandler: requireAdmin }, async (request) => {
+    const payload = approveGroupPurchaseSchema.parse(request.body);
+    const redemption = await services.shopService.getRedemption(params.env.GUILD_ID, payload.redemptionId);
+    if (!redemption) {
+      throw new AppError("Group purchase request not found.", 404);
+    }
+
+    let currentGroupMemberCount: number | undefined;
+    let currentGroupMemberDiscordUserIds: string[] | undefined;
+    if (redemption.purchaseMode === "GROUP") {
+      currentGroupMemberCount = (await params.botRuntime?.getGroupMemberCount(redemption.group.roleId)) ?? undefined;
+      currentGroupMemberDiscordUserIds = (await params.botRuntime?.getGroupMemberDiscordUserIds(redemption.group.roleId)) ?? undefined;
+      if (!currentGroupMemberCount || currentGroupMemberCount <= 0) {
+        throw new AppError("Live Discord group membership is unavailable for this group purchase.", 503);
+      }
+    }
+
+    return services.shopService.approveGroupPurchase({
+      guildId: params.env.GUILD_ID,
+      redemptionId: payload.redemptionId,
+      participantId: payload.participantId,
+      approvedByUserId: payload.approvedByUserId,
+      approvedByUsername: payload.approvedByUsername,
+      currentGroupMemberCount,
+      currentGroupMemberDiscordUserIds,
     });
   });
 

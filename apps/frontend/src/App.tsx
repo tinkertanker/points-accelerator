@@ -79,7 +79,8 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
     return {
       name: "",
       description: "",
-      currencyCost: 0,
+      audience: "INDIVIDUAL",
+      cost: 0,
       stock: null,
       enabled: true,
       fulfillmentInstructions: "",
@@ -90,7 +91,8 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
     id: item.id,
     name: item.name,
     description: item.description,
-    currencyCost: item.currencyCost,
+    audience: item.audience,
+    cost: item.cost,
     stock: item.stock,
     enabled: item.enabled,
     fulfillmentInstructions: item.fulfillmentInstructions,
@@ -412,7 +414,6 @@ export default function App() {
           <ActivityPanel
             bootstrap={bootstrap}
             canViewLedger={sessionUser.canManageSettings}
-            showCurrencyBalances={sessionUser.dashboardAccessLevel !== "viewer"}
           />
         );
       default:
@@ -523,7 +524,8 @@ export default function App() {
           <header className="login-hero">
             <h1>points accelerator</h1>
             <p className="lede">
-              Group rewards, transfers, shop pricing, role capabilities, and passive chat earn rates all live here.
+              Group points, personal wallets, shop pricing, role capabilities, and passive chat earn rates all live
+              here.
             </p>
           </header>
 

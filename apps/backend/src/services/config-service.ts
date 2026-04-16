@@ -6,6 +6,7 @@ export type GuildConfigUpdateInput = {
   appName?: string;
   pointsName?: string;
   currencyName?: string;
+  groupPointsPerCurrencyDonation?: number;
   mentorRoleIds?: string[];
   passivePointsReward?: number;
   passiveCurrencyReward?: number;
@@ -29,6 +30,7 @@ export class ConfigService {
         guildId,
         passivePointsReward: decimal(1),
         passiveCurrencyReward: decimal(1),
+        groupPointsPerCurrencyDonation: decimal(10),
       },
       update: {},
     });
@@ -43,6 +45,8 @@ export class ConfigService {
         appName: input.appName,
         pointsName: input.pointsName,
         currencyName: input.currencyName,
+        groupPointsPerCurrencyDonation:
+          input.groupPointsPerCurrencyDonation === undefined ? undefined : decimal(input.groupPointsPerCurrencyDonation),
         mentorRoleIds: input.mentorRoleIds,
         passivePointsReward: input.passivePointsReward === undefined ? undefined : decimal(input.passivePointsReward),
         passiveCurrencyReward:

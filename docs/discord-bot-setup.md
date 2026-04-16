@@ -72,8 +72,10 @@ Run these in the test server before production rollout:
 - `/leaderboard`
 - `/balance`
 - `/ledger`
-- `/pay`
+- `/transfer`
 - `/donate`
 - `/store`
-- `/buy`
+- `/buyforme`
+- `/buyforgroup`
+- `/approve_purchase`
 - `/sell`

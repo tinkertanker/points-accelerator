@@ -25,6 +25,8 @@ const botRuntime: BotRuntimeApi = {
   getRoles: vi.fn().mockResolvedValue([]),
   getTextChannels: vi.fn().mockResolvedValue([]),
   getDashboardMember: vi.fn(async (userId: string) => (userId === currentDashboardMember.userId ? currentDashboardMember : null)),
+  getGroupMemberCount: vi.fn().mockResolvedValue(null),
+  getGroupMemberDiscordUserIds: vi.fn().mockResolvedValue(null),
   postListing: vi.fn().mockResolvedValue(null),
 };
 
@@ -74,6 +76,7 @@ async function seedSettings(overrides: Partial<{ mentorRoleIds: string[] }> = {}
       appName: "points accelerator",
       pointsName: "points",
       currencyName: "rice",
+      groupPointsPerCurrencyDonation: 10,
       mentorRoleIds: overrides.mentorRoleIds ?? [],
       passivePointsReward: 1,
       passiveCurrencyReward: 1,
@@ -355,7 +358,8 @@ describe("Discord dashboard auth", () => {
       payload: {
         name: "Sticker pack",
         description: "Reward stickers",
-        currencyCost: 10,
+        audience: "INDIVIDUAL",
+        cost: 10,
         stock: 5,
         enabled: true,
         fulfillmentInstructions: null,

@@ -90,6 +90,20 @@ export default function SettingsPanel({
                 onChange={(event) => onSettingsChange({ ...settingsDraft, currencyName: event.target.value })}
               />
             </label>
+            <label>
+              Group points per donated currency
+              <input
+                type="number"
+                min="1"
+                value={settingsDraft.groupPointsPerCurrencyDonation}
+                onChange={(event) =>
+                  onSettingsChange({
+                    ...settingsDraft,
+                    groupPointsPerCurrencyDonation: Number(event.target.value),
+                  })
+                }
+              />
+            </label>
             <fieldset className="span-3 role-checklist">
               <legend>Mentor roles</legend>
               <p className="role-checklist__help">
@@ -280,11 +294,11 @@ export default function SettingsPanel({
               <dt>Admin</dt>
               <dd>Full dashboard access, including settings and groups.</dd>
               <dt>Award</dt>
-              <dd>Can give points/currency to groups.</dd>
+              <dd>Can give points to groups and handle staff-side currency adjustments.</dd>
               <dt>Max award</dt>
               <dd>Upper limit per award (blank = unlimited).</dd>
               <dt>Deduct</dt>
-              <dd>Can subtract points/currency from groups.</dd>
+              <dd>Can subtract points from groups and handle staff-side currency corrections.</dd>
               <dt>Multi</dt>
               <dd>Can award multiple groups at once.</dd>
               <dt>Sell</dt>

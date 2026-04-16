@@ -32,9 +32,31 @@ enum SubmissionStatus {
 }
 
 enum RedemptionStatus {
+  AWAITING_APPROVAL
   PENDING
   FULFILLED
   CANCELED
+}
+
+enum RedemptionMode {
+  INDIVIDUAL
+  GROUP
+}
+
+enum ShopItemAudience {
+  INDIVIDUAL
+  GROUP
+}
+
+enum ParticipantCurrencyEntryType {
+  MESSAGE_REWARD
+  MANUAL_AWARD
+  MANUAL_DEDUCT
+  CORRECTION
+  TRANSFER
+  DONATION
+  SHOP_REDEMPTION
+  SUBMISSION_REWARD
 }
 
 model GuildConfig {
@@ -43,6 +65,7 @@ model GuildConfig {
   appName                      String                @default("points accelerator")
   pointsName                   String                @default("points")
   currencyName                 String                @default("rice")
+  groupPointsPerCurrencyDonation Decimal             @default(10) @db.Decimal(18, 6)
   mentorRoleIds                String[]              @default([])
   publicLeaderboardToken       String?               @unique
   passivePointsReward          Decimal               @default(1) @db.Decimal(18, 6)
@@ -63,6 +86,7 @@ model GuildConfig {
   ledgerEntries                LedgerEntry[]
   marketplaceListings          MarketplaceListing[]
   shopRedemptions              ShopRedemption[]
+  participantCurrencyEntries   ParticipantCurrencyEntry[]
   auditLogs                    AuditLog[]
   participants                 Participant[]
   assignments                  Assignment[]
@@ -81,9 +105,10 @@ model Group {
   updatedAt      DateTime      @updatedAt
   guild          GuildConfig   @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   aliases        GroupAlias[]
-  ledgerSplits   LedgerSplit[]
-  shopRedemptions ShopRedemption[]
-  participants    Participant[]
+  ledgerSplits            LedgerSplit[]
+  shopRedemptions         ShopRedemption[]
+  participants            Participant[]
+  submissions             Submission[]
 
   @@unique([guildId, slug])
   @@unique([guildId, roleId])
@@ -131,6 +156,7 @@ model LedgerEntry {
   createdAt         DateTime        @default(now())
   guild             GuildConfig     @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   splits            LedgerSplit[]
+  shopRedemption    ShopRedemption?
 
   @@index([guildId, createdAt(sort: Desc)])
   @@index([guildId, externalRef])
@@ -155,7 +181,8 @@ model ShopItem {
   guildId                String
   name                   String
   description            String
-  currencyCost           Decimal           @db.Decimal(18, 6)
+  audience               ShopItemAudience  @default(INDIVIDUAL)
+  cost                   Decimal           @db.Decimal(18, 6)
   stock                  Int?
   enabled                Boolean           @default(true)
   fulfillmentInstructions String?
@@ -172,10 +199,17 @@ model ShopRedemption {
   guildId           String
   shopItemId        String
   groupId           String
+  requestedByParticipantId String?
   requestedByUserId String
   requestedByUsername String?
+  purchaseMode      RedemptionMode   @default(INDIVIDUAL)
   quantity          Int              @default(1)
-  totalCurrencyCost Decimal          @db.Decimal(18, 6)
+  totalCost         Decimal          @db.Decimal(18, 6)
+  approvalThreshold Int?
+  approvalMessageChannelId String?
+  approvalMessageId String?
+  currencyEntryId   String?
+  ledgerEntryId     String?
   status            RedemptionStatus @default(PENDING)
   notes             String?
   createdAt         DateTime         @default(now())
@@ -183,10 +217,17 @@ model ShopRedemption {
   guild             GuildConfig      @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   shopItem          ShopItem         @relation(fields: [shopItemId], references: [id], onDelete: Cascade)
   group             Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  requestedByParticipant Participant? @relation(fields: [requestedByParticipantId], references: [id], onDelete: SetNull)
+  currencyEntry     ParticipantCurrencyEntry? @relation(fields: [currencyEntryId], references: [id], onDelete: SetNull)
+  ledgerEntry       LedgerEntry?      @relation(fields: [ledgerEntryId], references: [id], onDelete: SetNull)
+  approvals         ShopRedemptionApproval[]
 
   @@index([guildId, createdAt(sort: Desc)])
   @@index([groupId, createdAt(sort: Desc)])
   @@index([shopItemId, createdAt(sort: Desc)])
+  @@index([requestedByParticipantId, createdAt(sort: Desc)])
+  @@unique([currencyEntryId])
+  @@unique([ledgerEntryId])
 }
 
 model MarketplaceListing {
@@ -235,11 +276,56 @@ model Participant {
   guild           GuildConfig  @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   group           Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
   submissions     Submission[]
+  currencySplits  ParticipantCurrencySplit[]
+  requestedShopRedemptions ShopRedemption[]
+  shopRedemptionApprovals ShopRedemptionApproval[]
 
   @@unique([guildId, discordUserId])
   @@unique([guildId, indexId])
   @@index([guildId, groupId])
   @@index([guildId, createdAt(sort: Desc)])
+}
+
+model ParticipantCurrencyEntry {
+  id                String                       @id @default(cuid())
+  guildId           String
+  type              ParticipantCurrencyEntryType
+  description       String
+  createdByUserId   String?
+  createdByUsername String?
+  externalRef       String?
+  createdAt         DateTime                     @default(now())
+  guild             GuildConfig                  @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  splits            ParticipantCurrencySplit[]
+  shopRedemption    ShopRedemption?
+
+  @@index([guildId, createdAt(sort: Desc)])
+  @@index([guildId, externalRef])
+}
+
+model ParticipantCurrencySplit {
+  id            String                   @id @default(cuid())
+  entryId       String
+  participantId String
+  currencyDelta Decimal                  @db.Decimal(18, 6)
+  createdAt     DateTime                 @default(now())
+  entry         ParticipantCurrencyEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  participant   Participant              @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@index([participantId, createdAt(sort: Desc)])
+  @@index([entryId])
+}
+
+model ShopRedemptionApproval {
+  id            String         @id @default(cuid())
+  redemptionId  String
+  participantId String
+  createdAt     DateTime       @default(now())
+  redemption    ShopRedemption @relation(fields: [redemptionId], references: [id], onDelete: Cascade)
+  participant   Participant    @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@unique([redemptionId, participantId])
+  @@index([participantId, createdAt(sort: Desc)])
 }
 
 model Assignment {
@@ -267,6 +353,7 @@ model Submission {
   guildId             String
   assignmentId        String
   participantId       String
+  groupId             String
   text                String           @default("")
   imageUrl            String?
   imageKey            String?
@@ -282,10 +369,12 @@ model Submission {
   guild               GuildConfig      @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   assignment          Assignment       @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
   participant         Participant      @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  group               Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@unique([guildId, assignmentId, participantId])
   @@index([guildId, createdAt(sort: Desc)])
   @@index([guildId, status, createdAt(sort: Desc)])
   @@index([guildId, assignmentId, createdAt(sort: Desc)])
   @@index([guildId, participantId, createdAt(sort: Desc)])
+  @@index([guildId, groupId, createdAt(sort: Desc)])
 }

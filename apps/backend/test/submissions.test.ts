@@ -359,6 +359,57 @@ describe("participants, assignments and submissions", () => {
       expect(submissions[0]!.status).toBe("PENDING");
     });
 
+    it("keeps the original group on past submissions after a participant moves groups", async () => {
+      const group = await seedGroupWithCapability();
+      const otherGroupResponse = await ctx.app.inject({
+        method: "POST",
+        url: "/api/groups",
+        headers: AUTH_HEADER(),
+        payload: {
+          displayName: "Team B",
+          slug: "team-b",
+          mentorName: "Bob",
+          roleId: "role-team-b",
+          aliases: [],
+          active: true,
+        },
+      });
+      const otherGroup = otherGroupResponse.json() as { id: string };
+
+      const participant = await ctx.services.participantService.register({
+        guildId: GUILD_ID,
+        discordUserId: "user-history",
+        discordUsername: "student-history",
+        indexId: "S999",
+        groupId: group.id,
+      });
+
+      const assignment = await ctx.services.assignmentService.upsert(GUILD_ID, {
+        title: "History Test",
+        baseCurrencyReward: 1,
+        basePointsReward: 2,
+        bonusCurrencyReward: 0,
+        bonusPointsReward: 0,
+        active: true,
+      });
+
+      await ctx.services.submissionService.create({
+        guildId: GUILD_ID,
+        assignmentId: assignment.id,
+        participantId: participant.id,
+        text: "original group snapshot",
+      });
+
+      await ctx.prisma.participant.update({
+        where: { id: participant.id },
+        data: { groupId: otherGroup.id },
+      });
+
+      const submissions = await ctx.services.submissionService.list(GUILD_ID);
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0]?.participant.group.displayName).toBe("Team A");
+    });
+
     it("prevents duplicate submissions for the same assignment", async () => {
       const group = await seedGroupWithCapability();
 
@@ -479,7 +530,7 @@ describe("participants, assignments and submissions", () => {
       const teamA = leaderboard.find((g) => g.displayName === "Team A");
       expect(teamA).toBeDefined();
       expect(teamA!.pointsBalance).toBe(10);
-      expect(teamA!.currencyBalance).toBe(5);
+      await expect(ctx.services.participantCurrencyService.getParticipantBalance(participant.id)).resolves.toBe(5);
     });
 
     it("marks a submission as outstanding and awards base + bonus rewards", async () => {
@@ -521,8 +572,9 @@ describe("participants, assignments and submissions", () => {
 
       // base + bonus: currency = 5 + 3 = 8, points = 10 + 5 = 15
       const balance = await ctx.services.economyService.getGroupBalance(group.id);
-      expect(balance.currencyBalance).toBe(8);
+      expect(balance.currencyBalance).toBe(0);
       expect(balance.pointsBalance).toBe(15);
+      await expect(ctx.services.participantCurrencyService.getParticipantBalance(participant.id)).resolves.toBe(8);
     });
 
     it("rejects a submission without awarding anything", async () => {
@@ -665,8 +717,9 @@ describe("participants, assignments and submissions", () => {
       expect(String((rejected[0]!.reason as Error).message)).toMatch(/already been reviewed/i);
 
       const balance = await ctx.services.economyService.getGroupBalance(group.id);
-      expect(balance.currencyBalance).toBe(5);
+      expect(balance.currencyBalance).toBe(0);
       expect(balance.pointsBalance).toBe(10);
+      await expect(ctx.services.participantCurrencyService.getParticipantBalance(participant.id)).resolves.toBe(5);
 
       const ledger = await ctx.services.economyService.getLedger(GUILD_ID);
       expect(ledger).toHaveLength(1);
@@ -831,7 +884,8 @@ describe("participants, assignments and submissions", () => {
       expect(ledger).toHaveLength(1);
       expect(ledger[0]!.type).toBe("SUBMISSION_REWARD");
       expect(ledger[0]!.splits[0]!.pointsDelta).toBe(7);
-      expect(ledger[0]!.splits[0]!.currencyDelta).toBe(3);
+      expect(ledger[0]!.splits[0]!.currencyDelta).toBe(0);
+      await expect(ctx.services.participantCurrencyService.getParticipantBalance(participant.id)).resolves.toBe(3);
     });
 
     it("createOrReplace creates a new submission when none exists", async () => {

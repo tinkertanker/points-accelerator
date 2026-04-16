@@ -2,9 +2,9 @@
 
 `points accelerator` is a group-first Discord economy bot for class communities.
 
-It tracks permanent `points` for leaderboards, separate spendable `currency` for the shop and transfers, and a role-driven capability system so each Discord role can be configured for what it can award, deduct, sell, or receive.
+It tracks group `points` that drive the leaderboard and also fund shared group purchases, separate spendable personal `currency` for wallet transfers and personal purchases, and a role-driven capability system so each Discord role can be configured for what it can award, deduct, sell, or receive.
 
-It also includes a Discord OAuth dashboard, marketplace listings, and a submission workflow for class use: students register once with an alphanumeric index ID and group, staff publish assignments, students submit work, and approved submissions award their group.
+It also includes a Discord OAuth dashboard, marketplace listings, and a submission workflow for class use: students are auto-provisioned from their Discord identity and active group role, staff publish assignments, students submit work, and approved submissions award group points plus personal currency.
 
 ## Monorepo layout
 
@@ -35,12 +35,12 @@ It also includes a Discord OAuth dashboard, marketplace listings, and a submissi
 
 ## Feature focus
 
-- Group-based passive message rewards
+- Group-based passive message points with participant wallet rewards
 - Manual awards and deductions with per-role caps
 - Discord ledger command with paging for recent transactions
 - Discord-login leaderboard view for any guild member
-- Group transfers and donations
-- Custom shop with spendable currency
+- Participant wallet transfers plus wallet-to-group point donations
+- Custom shop with personal purchases and majority-approved group purchases
 - Marketplace listings with optional Discord channel posting
 - Role capability matrix
 - Discord OAuth dashboard for staff configuration and review
@@ -52,11 +52,11 @@ It also includes a Discord OAuth dashboard, marketplace listings, and a submissi
 ## Phase 1 command set
 
 - Staff roles such as admins or alumni: `/award`, `/deduct`
-- Students: `/balance`, `/leaderboard`, `/ledger`
+- Students: `/balance`, `/leaderboard`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`
 
 ## Submission command set
 
-- Students: `/register`, `/submit`
+- Students: `/submit`
 - Staff roles: `/submissions`, `/missing`, `/review_submission`
 
 The dashboard uses Discord sign-in with three access tiers:

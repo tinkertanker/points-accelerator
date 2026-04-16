@@ -2,6 +2,7 @@ export type Settings = {
   appName: string;
   pointsName: string;
   currencyName: string;
+  groupPointsPerCurrencyDonation: number;
   mentorRoleIds: string[];
   passivePointsReward: number;
   passiveCurrencyReward: number;
@@ -38,7 +39,6 @@ export type Group = {
   active: boolean;
   aliases: Array<{ value: string }>;
   pointsBalance: number;
-  currencyBalance: number;
 };
 
 export type GroupDraft = {
@@ -55,7 +55,8 @@ export type ShopItem = {
   id: string;
   name: string;
   description: string;
-  currencyCost: number;
+  audience: "INDIVIDUAL" | "GROUP";
+  cost: number;
   stock: number | null;
   enabled: boolean;
   fulfillmentInstructions: string | null;
@@ -77,7 +78,6 @@ export type LeaderboardEntry = {
   id: string;
   displayName: string;
   pointsBalance: number;
-  currencyBalance: number;
 };
 
 export type LedgerEntry = {
@@ -182,6 +182,7 @@ export type Participant = {
   discordUsername: string | null;
   indexId: string;
   groupId: string;
+  currencyBalance: number;
   group: {
     id: string;
     displayName: string;

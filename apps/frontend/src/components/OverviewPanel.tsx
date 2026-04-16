@@ -49,29 +49,35 @@ export default function OverviewPanel({ bootstrap, settingsDraft }: OverviewPane
             <h3>Map every student team to a Discord role</h3>
             <p>
               In <strong>Role mapping</strong>, create one group per student role. Students can only use{" "}
-              <code>/balance</code> when their Discord role maps to exactly one active group.
+              <code>/balance</code> when their Discord role maps to exactly one active group, and their wallet is
+              created automatically the first time they use the bot.
             </p>
           </li>
           <li>
             <h3>Name the economy once</h3>
             <p>
               In <strong>Economy shape</strong>, set the labels for <strong>{settingsDraft.pointsName}</strong> and{" "}
-              <strong>{settingsDraft.currencyName}</strong>, plus any passive earning rules you want before class
-              starts.
+              <strong>{settingsDraft.currencyName}</strong>, choose the donation conversion rate, and set any passive
+              earning rules you want before class starts.
             </p>
           </li>
           <li>
             <h3>Smoke test the class commands in Discord</h3>
             <p>
               Staff should test award and deduct flows with a reason. Students should test their own balance, the
-              shared leaderboard, and the paged ledger feed.
+              shared leaderboard, wallet-to-wallet transfers, group-point donations, and the paged points ledger feed.
             </p>
           </li>
         </ol>
         <p className="walkthrough-commands">
           <code>/award targets:@gryffindor points:5 reason:"helped another group"</code>
+          <code>/award member:@harry currency:3 reason:"great explanation"</code>
           <code>/deduct targets:@gryffindor points:2 reason:"late submission"</code>
           <code>/balance</code>
+          <code>/transfer member:@harry amount:3</code>
+          <code>/donate amount:2</code>
+          <code>/buyforme item_id:bubble-tea</code>
+          <code>/buyforgroup item_id:pizza quantity:2</code>
           <code>/leaderboard</code>
           <code>/ledger</code>
           <code>/ledger page:2</code>

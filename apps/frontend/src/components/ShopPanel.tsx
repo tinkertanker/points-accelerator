@@ -35,6 +35,9 @@ export default function ShopPanel({
                   <th scope="col" className="col-description">
                     Description
                   </th>
+                  <th scope="col" className="col-stock">
+                    Audience
+                  </th>
                   <th scope="col" className="col-cost">
                     Cost
                   </th>
@@ -74,14 +77,28 @@ export default function ShopPanel({
                         placeholder="Shown in the shop"
                       />
                     </td>
+                    <td className="col-stock">
+                      <select
+                        value={item.audience}
+                        aria-label="Audience"
+                        onChange={(event) => {
+                          const next = [...shopDrafts];
+                          next[index] = { ...item, audience: event.target.value as ShopItemDraft["audience"] };
+                          onShopDraftsChange(next);
+                        }}
+                      >
+                        <option value="INDIVIDUAL">Personal</option>
+                        <option value="GROUP">Group</option>
+                      </select>
+                    </td>
                     <td className="col-cost">
                       <input
                         type="number"
-                        value={item.currencyCost}
-                        aria-label="Cost in currency"
+                        value={item.cost}
+                        aria-label={`Cost in ${item.audience === "GROUP" ? "points" : "currency"}`}
                         onChange={(event) => {
                           const next = [...shopDrafts];
-                          next[index] = { ...item, currencyCost: Number(event.target.value) };
+                          next[index] = { ...item, cost: Number(event.target.value) };
                           onShopDraftsChange(next);
                         }}
                         placeholder="0"

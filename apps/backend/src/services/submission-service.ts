@@ -5,20 +5,41 @@ import { AppError } from "../utils/app-error.js";
 import { decimal, decimalToNumber } from "../utils/decimal.js";
 import type { AuditService } from "./audit-service.js";
 import type { EconomyService } from "./economy-service.js";
+import type { ParticipantCurrencyService } from "./participant-currency-service.js";
 
 export class SubmissionService {
   public constructor(
     private readonly prisma: PrismaClient,
     private readonly economyService: EconomyService,
+    private readonly participantCurrencyService: ParticipantCurrencyService,
     private readonly auditService: AuditService,
   ) {}
 
   private toSubmissionResponse<T extends {
     currencyAwarded: Decimal | null;
     pointsAwarded: Decimal | null;
+    group?: {
+      id: string;
+      displayName: string;
+    };
+    participant?: {
+      id: string;
+      indexId: string;
+      discordUserId: string | null;
+      discordUsername: string | null;
+    };
   }>(submission: T) {
+    const participant =
+      submission.group && submission.participant
+        ? {
+            ...submission.participant,
+            group: submission.group,
+          }
+        : submission.participant;
+
     return {
       ...submission,
+      participant,
       currencyAwarded: submission.currencyAwarded === null ? null : decimalToNumber(submission.currencyAwarded),
       pointsAwarded: submission.pointsAwarded === null ? null : decimalToNumber(submission.pointsAwarded),
     };
@@ -34,13 +55,13 @@ export class SubmissionService {
       },
       include: {
         assignment: { select: { id: true, title: true } },
+        group: { select: { id: true, displayName: true } },
         participant: {
           select: {
             id: true,
             indexId: true,
             discordUserId: true,
             discordUsername: true,
-            group: { select: { id: true, displayName: true } },
           },
         },
       },
@@ -88,25 +109,34 @@ export class SubmissionService {
       throw new AppError("You have already submitted for this assignment. Contact an admin if you need to resubmit.", 409);
     }
 
+    const participant = await this.prisma.participant.findFirst({
+      where: { id: params.participantId, guildId: params.guildId },
+      select: { groupId: true },
+    });
+    if (!participant) {
+      throw new AppError("Participant not found.", 404);
+    }
+
     try {
       const submission = await this.prisma.submission.create({
         data: {
           guildId: params.guildId,
           assignmentId: params.assignmentId,
           participantId: params.participantId,
+          groupId: participant.groupId,
           text,
           imageUrl: params.imageUrl ?? null,
           imageKey: params.imageKey ?? null,
         },
         include: {
           assignment: { select: { id: true, title: true } },
+          group: { select: { id: true, displayName: true } },
           participant: {
             select: {
               id: true,
               indexId: true,
               discordUserId: true,
               discordUsername: true,
-              group: { select: { id: true, displayName: true } },
             },
           },
         },
@@ -138,6 +168,7 @@ export class SubmissionService {
         where: { id: params.submissionId, guildId: params.guildId },
         include: {
           assignment: true,
+          group: true,
           participant: {
             include: { group: true },
           },
@@ -202,23 +233,40 @@ export class SubmissionService {
           ? `Outstanding submission for "${submission.assignment.title}" by ${submission.participant.discordUsername ?? submission.participant.indexId}`
           : `Submission approved for "${submission.assignment.title}" by ${submission.participant.discordUsername ?? submission.participant.indexId}`;
 
-        const entry = await this.economyService.awardGroups({
-          guildId: params.guildId,
-          actor: {
-            userId: params.reviewedByUserId,
-            username: params.reviewedByUsername,
-            roleIds: [],
-          },
-          targetGroupIds: [submission.participant.groupId],
-          pointsDelta: pointsAwarded,
-          currencyDelta: currencyAwarded,
-          description,
-          type: "SUBMISSION_REWARD",
-          systemAction: true,
-          executor: tx,
-        });
+        const actor = {
+          userId: params.reviewedByUserId,
+          username: params.reviewedByUsername,
+          roleIds: [],
+        };
 
-        ledgerEntryId = entry.id;
+        if (pointsAwarded > 0) {
+          const entry = await this.economyService.awardGroups({
+            guildId: params.guildId,
+            actor,
+            targetGroupIds: [submission.groupId],
+            pointsDelta: pointsAwarded,
+            currencyDelta: 0,
+            description,
+            type: "SUBMISSION_REWARD",
+            systemAction: true,
+            executor: tx,
+          });
+
+          ledgerEntryId = entry.id;
+        }
+
+        if (currencyAwarded > 0) {
+          await this.participantCurrencyService.awardParticipants({
+            guildId: params.guildId,
+            actor,
+            targetParticipantIds: [submission.participantId],
+            currencyDelta: currencyAwarded,
+            description,
+            type: "SUBMISSION_REWARD",
+            systemAction: true,
+            executor: tx,
+          });
+        }
       }
 
       const updated = await tx.submission.update({
@@ -226,13 +274,13 @@ export class SubmissionService {
         data: { ledgerEntryId },
         include: {
           assignment: { select: { id: true, title: true } },
+          group: { select: { id: true, displayName: true } },
           participant: {
             select: {
               id: true,
               indexId: true,
               discordUserId: true,
               discordUsername: true,
-              group: { select: { id: true, displayName: true } },
             },
           },
         },
@@ -304,10 +352,19 @@ export class SubmissionService {
       );
     }
 
+    const participant = await this.prisma.participant.findFirst({
+      where: { id: params.participantId, guildId: params.guildId },
+      select: { groupId: true },
+    });
+    if (!participant) {
+      throw new AppError("Participant not found.", 404);
+    }
+
     const data = {
       guildId: params.guildId,
       assignmentId: params.assignmentId,
       participantId: params.participantId,
+      groupId: participant.groupId,
       text,
       imageUrl: params.imageUrl ?? null,
       imageKey: params.imageKey ?? null,
@@ -315,13 +372,13 @@ export class SubmissionService {
 
     const include = {
       assignment: { select: { id: true, title: true } },
+      group: { select: { id: true, displayName: true } },
       participant: {
         select: {
           id: true,
           indexId: true,
           discordUserId: true,
           discordUsername: true,
-          group: { select: { id: true, displayName: true } },
         },
       },
     } as const;
@@ -330,7 +387,7 @@ export class SubmissionService {
       const previousImageKey = existing.imageKey;
       const updated = await this.prisma.submission.update({
         where: { id: existing.id },
-        data: { text, imageUrl: data.imageUrl, imageKey: data.imageKey },
+        data: { groupId: participant.groupId, text, imageUrl: data.imageUrl, imageKey: data.imageKey },
         include,
       });
       return {

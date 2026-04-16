@@ -7,6 +7,7 @@ import type { ConfigService } from "./config-service.js";
 import type { GroupService } from "./group-service.js";
 import type { RoleCapabilityService } from "./role-capability-service.js";
 import type { AuditService } from "./audit-service.js";
+import type { ParticipantCurrencyService } from "./participant-currency-service.js";
 
 type Actor = {
   userId?: string;
@@ -34,6 +35,7 @@ export class EconomyService {
     private readonly groupService: GroupService,
     private readonly roleCapabilityService: RoleCapabilityService,
     private readonly auditService: AuditService,
+    private readonly participantCurrencyService: ParticipantCurrencyService,
   ) {}
 
   public async awardGroups(params: {
@@ -47,6 +49,7 @@ export class EconomyService {
     /** Skip actor permission checks for system-initiated awards (e.g. submission rewards). */
     systemAction?: boolean;
     executor?: PrismaExecutor;
+    externalRef?: string;
   }) {
     if (params.targetGroupIds.length === 0) {
       throw new AppError("Select at least one group.");
@@ -107,6 +110,7 @@ export class EconomyService {
         description: params.description,
         createdByUserId: params.actor.userId,
         createdByUsername: params.actor.username,
+        externalRef: params.externalRef,
         splits: {
           create: params.targetGroupIds.map((groupId) => ({
             groupId,
@@ -132,6 +136,7 @@ export class EconomyService {
         targetGroupIds: params.targetGroupIds,
         pointsDelta: params.pointsDelta,
         currencyDelta: params.currencyDelta,
+        externalRef: params.externalRef,
       },
       executor,
     });
@@ -142,6 +147,7 @@ export class EconomyService {
   public async rewardPassiveMessage(params: {
     guildId: string;
     groupId: string;
+    participantId?: string;
     userId: string;
     username?: string;
     messageId: string;
@@ -177,22 +183,44 @@ export class EconomyService {
       return null;
     }
 
-    return this.prisma.ledgerEntry.create({
-      data: {
-        guildId: params.guildId,
-        type: "MESSAGE_REWARD",
-        description: "Passive message reward",
-        createdByUserId: params.userId,
-        createdByUsername: params.username,
-        externalRef: params.messageId,
-        splits: {
-          create: {
-            groupId: params.groupId,
-            pointsDelta: config.passivePointsReward,
-            currencyDelta: config.passiveCurrencyReward,
+    return this.prisma.$transaction(async (tx) => {
+      const entry = await tx.ledgerEntry.create({
+        data: {
+          guildId: params.guildId,
+          type: "MESSAGE_REWARD",
+          description: "Passive message reward",
+          createdByUserId: params.userId,
+          createdByUsername: params.username,
+          externalRef: params.messageId,
+          splits: {
+            create: {
+              groupId: params.groupId,
+              pointsDelta: config.passivePointsReward,
+              currencyDelta: decimal(0),
+            },
           },
         },
-      },
+      });
+
+      if (params.participantId && decimalToNumber(config.passiveCurrencyReward) > 0) {
+        await this.participantCurrencyService.awardParticipants({
+          guildId: params.guildId,
+          actor: {
+            userId: params.userId,
+            username: params.username,
+            roleIds: [],
+          },
+          targetParticipantIds: [params.participantId],
+          currencyDelta: decimalToNumber(config.passiveCurrencyReward),
+          description: "Passive message reward",
+          type: "MESSAGE_REWARD",
+          systemAction: true,
+          executor: tx,
+          externalRef: params.messageId,
+        });
+      }
+
+      return entry;
     });
   }
 
@@ -324,6 +352,115 @@ export class EconomyService {
     if (balance < amount) {
       throw new AppError("Group does not have enough currency.", 409);
     }
+  }
+
+  public async assertGroupHasPoints(groupId: string, amount: number, executor: PrismaExecutor = this.prisma) {
+    const balances = await this.getBalanceMapWithExecutor(executor, [groupId]);
+    const balance = balances[groupId]?.pointsBalance ?? 0;
+
+    if (balance < amount) {
+      throw new AppError("Group does not have enough points.", 409);
+    }
+  }
+
+  public async donateParticipantCurrencyToGroupPoints(params: {
+    guildId: string;
+    actor: Actor;
+    participantId: string;
+    groupId: string;
+    amount: number;
+    conversionRate: number;
+    description?: string;
+  }) {
+    if (params.amount <= 0) {
+      throw new AppError("Donation amount must be greater than zero.");
+    }
+
+    if (params.conversionRate <= 0) {
+      throw new AppError("Donation conversion rate must be greater than zero.", 400);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id
+        FROM "Participant"
+        WHERE id = ${params.participantId}
+          AND "guildId" = ${params.guildId}
+        FOR UPDATE
+      `);
+      await this.lockGroups(tx, params.guildId, [params.groupId]);
+
+      const participant = await tx.participant.findFirst({
+        where: {
+          id: params.participantId,
+          guildId: params.guildId,
+          groupId: params.groupId,
+        },
+      });
+
+      if (!participant) {
+        throw new AppError("Participant not found in the target group.", 404);
+      }
+
+      const groupPointsAward = params.amount * params.conversionRate;
+      const externalRef = `donation:${participant.id}:${Date.now()}`;
+
+      const currencyEntry = await this.participantCurrencyService.recordEntry({
+        guildId: params.guildId,
+        actor: params.actor,
+        type: "DONATION",
+        description: params.description ?? "Converted personal currency into group points",
+        splits: [{ participantId: params.participantId, currencyDelta: -params.amount }],
+        systemAction: true,
+        executor: tx,
+        externalRef,
+        auditAction: "participant_currency.donated_to_group",
+        auditPayload: {
+          participantId: params.participantId,
+          groupId: params.groupId,
+          amount: params.amount,
+          conversionRate: params.conversionRate,
+          groupPointsAward,
+        },
+      });
+
+      const ledgerEntry = await this.awardGroups({
+        guildId: params.guildId,
+        actor: params.actor,
+        targetGroupIds: [params.groupId],
+        pointsDelta: groupPointsAward,
+        currencyDelta: 0,
+        description: params.description ?? "Converted personal currency into group points",
+        type: "DONATION",
+        systemAction: true,
+        executor: tx,
+        externalRef,
+      });
+
+      await this.auditService.record({
+        guildId: params.guildId,
+        actorUserId: params.actor.userId,
+        actorUsername: params.actor.username,
+        action: "economy.group_points_donated",
+        entityType: "LedgerEntry",
+        entityId: ledgerEntry.id,
+        payload: {
+          participantId: params.participantId,
+          groupId: params.groupId,
+          amount: params.amount,
+          conversionRate: params.conversionRate,
+          groupPointsAward,
+          currencyEntryId: currencyEntry.id,
+        },
+        executor: tx,
+      });
+
+      return {
+        currencyEntry,
+        ledgerEntry,
+        groupPointsAward,
+      };
+    });
   }
 
   public async getGroupBalance(groupId: string) {

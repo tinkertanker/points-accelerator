@@ -1,19 +1,62 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { BotRuntimeApi } from "../src/bot/runtime.js";
 import { createTestApp, resetDatabase } from "./helpers/test-app.js";
 import { ensureTestDatabase } from "./helpers/test-database.js";
 
 let cleanupDatabase = () => undefined;
 let ctx: Awaited<ReturnType<typeof createTestApp>>;
+const groupMemberCounts = new Map<string, number>();
+const botRuntime: BotRuntimeApi = {
+  getRoles: vi.fn().mockResolvedValue([]),
+  getTextChannels: vi.fn().mockResolvedValue([]),
+  getDashboardMember: vi.fn().mockResolvedValue(null),
+  getGroupMemberCount: vi.fn(async (roleId: string) => groupMemberCounts.get(roleId) ?? null),
+  getGroupMemberDiscordUserIds: vi.fn(async (roleId: string) => {
+    const count = groupMemberCounts.get(roleId);
+    return count ? Array.from({ length: count }, (_, index) => `${roleId}-member-${index + 1}`) : null;
+  }),
+  postListing: vi.fn().mockResolvedValue(null),
+};
+
+async function registerParticipant(params: {
+  discordUserId: string;
+  discordUsername: string;
+  indexId: string;
+  groupId: string;
+}) {
+  return ctx.services.participantService.register({
+    guildId: ctx.env.GUILD_ID,
+    ...params,
+  });
+}
+
+async function seedParticipantCurrency(participantId: string, amount: number) {
+  await ctx.services.participantCurrencyService.awardParticipants({
+    guildId: ctx.env.GUILD_ID,
+    actor: {
+      userId: "system",
+      username: "System",
+      roleIds: [],
+    },
+    targetParticipantIds: [participantId],
+    currencyDelta: amount,
+    description: "Test seed",
+    type: "CORRECTION",
+    systemAction: true,
+  });
+}
 
 describe("points accelerator API", () => {
   beforeAll(async () => {
     const managed = ensureTestDatabase();
     cleanupDatabase = managed.cleanup;
-    ctx = await createTestApp(managed.url);
+    ctx = await createTestApp(managed.url, { botRuntime });
   });
 
   beforeEach(async () => {
+    groupMemberCounts.clear();
+    vi.clearAllMocks();
     await resetDatabase(ctx.prisma);
   });
 
@@ -94,6 +137,12 @@ describe("points accelerator API", () => {
       },
     });
     const group = groupResponse.json() as { id: string };
+    const participant = await registerParticipant({
+      discordUserId: "user-student",
+      discordUsername: "Student",
+      indexId: "S001",
+      groupId: group.id,
+    });
 
     const awardResponse = await ctx.app.inject({
       method: "POST",
@@ -104,6 +153,7 @@ describe("points accelerator API", () => {
         actorUsername: "Admin",
         actorRoleIds: ["role-admin"],
         targetGroupIds: [group.id],
+        targetParticipantId: participant.id,
         pointsDelta: 10,
         currencyDelta: 4,
         description: "Answered a challenge",
@@ -117,15 +167,15 @@ describe("points accelerator API", () => {
       url: "/api/leaderboard",
       headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
     });
-    const leaderboard = leaderboardResponse.json() as Array<{ displayName: string; pointsBalance: number; currencyBalance: number }>;
+    const leaderboard = leaderboardResponse.json() as Array<{ displayName: string; pointsBalance: number }>;
 
     expect(leaderboard).toEqual([
       expect.objectContaining({
         displayName: "Gryffindor",
         pointsBalance: 10,
-        currencyBalance: 4,
       }),
     ]);
+    await expect(ctx.services.participantCurrencyService.getParticipantBalance(participant.id)).resolves.toBe(4);
   });
 
   it("rejects awards above the configured role cap", async () => {
@@ -174,13 +224,88 @@ describe("points accelerator API", () => {
         actorRoleIds: ["role-mentor"],
         targetGroupIds: [group.id],
         pointsDelta: 50,
-        currencyDelta: 50,
+        currencyDelta: 0,
         description: "Too much",
       },
     });
 
     expect(awardResponse.statusCode).toBe(403);
     expect(awardResponse.json()).toMatchObject({ message: expect.stringMatching(/at most 10/i) });
+  });
+
+  it("rolls back mixed awards when one leg fails", async () => {
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-mentor",
+          roleName: "Mentor",
+          canManageDashboard: false,
+          canAward: true,
+          maxAward: 5,
+          canDeduct: true,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: false,
+        },
+      ],
+    });
+
+    const groupResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        displayName: "Ravenclaw",
+        slug: "ravenclaw",
+        mentorName: null,
+        roleId: "role-ravenclaw",
+        aliases: [],
+        active: true,
+      },
+    });
+    const group = groupResponse.json() as { id: string };
+    const participant = await registerParticipant({
+      discordUserId: "user-raven",
+      discordUsername: "Raven",
+      indexId: "S777",
+      groupId: group.id,
+    });
+
+    const response = await ctx.app.inject({
+      method: "POST",
+      url: "/api/actions/award",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        actorUserId: "mentor-1",
+        actorUsername: "Mentor",
+        actorRoleIds: ["role-mentor"],
+        targetGroupIds: [group.id],
+        targetParticipantId: participant.id,
+        pointsDelta: 4,
+        currencyDelta: 6,
+        description: "Should fail atomically",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+
+    const leaderboardResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/leaderboard",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+    const leaderboard = leaderboardResponse.json() as Array<{ displayName: string; pointsBalance: number }>;
+    expect(leaderboard).toEqual([
+      expect.objectContaining({
+        displayName: "Ravenclaw",
+        pointsBalance: 0,
+      }),
+    ]);
+    await expect(ctx.services.participantCurrencyService.getParticipantBalance(participant.id)).resolves.toBe(0);
   });
 
   it("transfers currency and redeems from the shop without affecting points", async () => {
@@ -233,6 +358,18 @@ describe("points accelerator API", () => {
 
     const source = sourceResponse.json() as { id: string };
     const target = targetResponse.json() as { id: string };
+    const sourceParticipant = await registerParticipant({
+      discordUserId: "user-1",
+      discordUsername: "Alpha user",
+      indexId: "S001",
+      groupId: source.id,
+    });
+    const targetParticipant = await registerParticipant({
+      discordUserId: "user-2",
+      discordUsername: "Beta user",
+      indexId: "S002",
+      groupId: target.id,
+    });
 
     await ctx.app.inject({
       method: "POST",
@@ -244,10 +381,11 @@ describe("points accelerator API", () => {
         actorRoleIds: ["role-admin"],
         targetGroupIds: [source.id],
         pointsDelta: 20,
-        currencyDelta: 20,
+        currencyDelta: 0,
         description: "Seed funds",
       },
     });
+    await seedParticipantCurrency(sourceParticipant.id, 20);
 
     await ctx.app.inject({
       method: "POST",
@@ -257,8 +395,8 @@ describe("points accelerator API", () => {
         actorUserId: "admin",
         actorUsername: "Admin",
         actorRoleIds: ["role-admin"],
-        sourceGroupId: source.id,
-        targetGroupId: target.id,
+        sourceParticipantId: sourceParticipant.id,
+        targetParticipantId: targetParticipant.id,
         amount: 5,
         description: "Prize split",
       },
@@ -271,7 +409,8 @@ describe("points accelerator API", () => {
       payload: {
         name: "Bubble Tea",
         description: "sweet reward",
-        currencyCost: 3,
+        audience: "INDIVIDUAL",
+        cost: 3,
         stock: 10,
         enabled: true,
         fulfillmentInstructions: "manual",
@@ -284,7 +423,7 @@ describe("points accelerator API", () => {
       url: "/api/actions/redeem",
       headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
       payload: {
-        groupId: target.id,
+        participantId: targetParticipant.id,
         shopItemId: item.id,
         requestedByUserId: "user-2",
         requestedByUsername: "Beta user",
@@ -297,20 +436,83 @@ describe("points accelerator API", () => {
       url: "/api/leaderboard",
       headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
     });
-    const leaderboard = leaderboardResponse.json() as Array<{ displayName: string; pointsBalance: number; currencyBalance: number }>;
+    const leaderboard = leaderboardResponse.json() as Array<{ displayName: string; pointsBalance: number }>;
 
     expect(leaderboard).toEqual([
       expect.objectContaining({
         displayName: "Alpha",
         pointsBalance: 20,
-        currencyBalance: 15,
       }),
       expect.objectContaining({
         displayName: "Beta",
         pointsBalance: 0,
-        currencyBalance: 2,
       }),
     ]);
+
+    await expect(ctx.services.participantCurrencyService.getParticipantBalance(sourceParticipant.id)).resolves.toBe(15);
+    await expect(ctx.services.participantCurrencyService.getParticipantBalance(targetParticipant.id)).resolves.toBe(2);
+  });
+
+  it("supports currency-only staff awards through the admin API", async () => {
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-admin",
+          roleName: "Admin",
+          canManageDashboard: true,
+          canAward: true,
+          maxAward: 1000,
+          canDeduct: true,
+          canMultiAward: true,
+          canSell: true,
+          canReceiveAwards: true,
+          isGroupRole: false,
+        },
+      ],
+    });
+
+    const groupResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        displayName: "Ravenclaw",
+        slug: "ravenclaw",
+        mentorName: null,
+        roleId: "role-ravenclaw",
+        aliases: [],
+        active: true,
+      },
+    });
+    const group = groupResponse.json() as { id: string };
+    const participant = await registerParticipant({
+      discordUserId: "user-raven",
+      discordUsername: "Raven",
+      indexId: "S100",
+      groupId: group.id,
+    });
+
+    const response = await ctx.app.inject({
+      method: "POST",
+      url: "/api/actions/award",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        actorUserId: "admin",
+        actorUsername: "Admin",
+        actorRoleIds: ["role-admin"],
+        targetGroupIds: [],
+        targetParticipantId: participant.id,
+        pointsDelta: 0,
+        currencyDelta: 6,
+        description: "Helpful demo answer",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    await expect(ctx.services.participantCurrencyService.getParticipantBalance(participant.id)).resolves.toBe(6);
   });
 
   it("allows sold-out shop items to be saved with zero stock", async () => {
@@ -323,7 +525,8 @@ describe("points accelerator API", () => {
       payload: {
         name: "Mystery Box",
         description: "limited drop",
-        currencyCost: 8,
+        audience: "INDIVIDUAL",
+        cost: 8,
         stock: 1,
         enabled: true,
         fulfillmentInstructions: null,
@@ -340,7 +543,8 @@ describe("points accelerator API", () => {
         id: createdItem.id,
         name: "Mystery Box",
         description: "limited drop",
-        currencyCost: 8,
+        audience: "INDIVIDUAL",
+        cost: 8,
         stock: 0,
         enabled: true,
         fulfillmentInstructions: null,
@@ -352,5 +556,296 @@ describe("points accelerator API", () => {
       id: createdItem.id,
       stock: 0,
     });
+  });
+
+  it("allows unfunded group purchase requests to be created before points are available", async () => {
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-admin",
+          roleName: "Admin",
+          canManageDashboard: true,
+          canAward: true,
+          maxAward: 1000,
+          canDeduct: true,
+          canMultiAward: true,
+          canSell: true,
+          canReceiveAwards: true,
+          isGroupRole: false,
+        },
+      ],
+    });
+
+    const groupResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        displayName: "Hufflepuff",
+        slug: "hufflepuff",
+        mentorName: null,
+        roleId: "role-hufflepuff",
+        aliases: [],
+        active: true,
+      },
+    });
+    const group = groupResponse.json() as { id: string };
+    groupMemberCounts.set("role-hufflepuff", 1);
+    const participant = await registerParticipant({
+      discordUserId: "user-huff",
+      discordUsername: "Hufflepuff user",
+      indexId: "S123",
+      groupId: group.id,
+    });
+
+    const itemResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/shop-items",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        name: "Shared feast",
+        description: "Team reward",
+        audience: "GROUP",
+        cost: 25,
+        stock: 5,
+        enabled: true,
+        fulfillmentInstructions: "manual",
+      },
+    });
+    const item = itemResponse.json() as { id: string };
+
+    const redeemResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/actions/redeem",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        participantId: participant.id,
+        shopItemId: item.id,
+        requestedByUserId: "user-huff",
+        requestedByUsername: "Hufflepuff user",
+        quantity: 1,
+        purchaseMode: "GROUP",
+      },
+    });
+
+    expect(redeemResponse.statusCode).toBe(200);
+    expect(redeemResponse.json()).toMatchObject({
+      purchaseMode: "GROUP",
+      status: "AWAITING_APPROVAL",
+      approvalThreshold: 1,
+    });
+  });
+
+  it("auto-executes funded quorum-1 group purchases on creation", async () => {
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-admin",
+          roleName: "Admin",
+          canManageDashboard: true,
+          canAward: true,
+          maxAward: 1000,
+          canDeduct: true,
+          canMultiAward: true,
+          canSell: true,
+          canReceiveAwards: true,
+          isGroupRole: false,
+        },
+      ],
+    });
+
+    const groupResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        displayName: "Slytherin",
+        slug: "slytherin",
+        mentorName: null,
+        roleId: "role-slytherin",
+        aliases: [],
+        active: true,
+      },
+    });
+    const group = groupResponse.json() as { id: string };
+    groupMemberCounts.set("role-slytherin", 1);
+
+    const participant = await registerParticipant({
+      discordUserId: "user-sly",
+      discordUsername: "Sly user",
+      indexId: "S777",
+      groupId: group.id,
+    });
+
+    await ctx.app.inject({
+      method: "POST",
+      url: "/api/actions/award",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        actorUserId: "admin",
+        actorUsername: "Admin",
+        actorRoleIds: ["role-admin"],
+        targetGroupIds: [group.id],
+        targetParticipantId: participant.id,
+        pointsDelta: 30,
+        currencyDelta: 0,
+        description: "Seed points",
+      },
+    });
+
+    const itemResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/shop-items",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        name: "Shared cauldron",
+        description: "Team reward",
+        audience: "GROUP",
+        cost: 10,
+        stock: 5,
+        enabled: true,
+        fulfillmentInstructions: "manual",
+      },
+    });
+    const item = itemResponse.json() as { id: string };
+
+    const redeemResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/actions/redeem",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        participantId: participant.id,
+        shopItemId: item.id,
+        requestedByUserId: "user-sly",
+        requestedByUsername: "Sly user",
+        quantity: 1,
+        purchaseMode: "GROUP",
+      },
+    });
+
+    expect(redeemResponse.statusCode).toBe(200);
+    expect(redeemResponse.json()).toMatchObject({
+      purchaseMode: "GROUP",
+      status: "PENDING",
+      approvalThreshold: 1,
+    });
+  });
+
+  it("ignores approvals from members who have left the group", async () => {
+    const groupAlphaResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        displayName: "Alpha",
+        slug: "alpha",
+        mentorName: null,
+        roleId: "role-alpha",
+        aliases: [],
+        active: true,
+      },
+    });
+    const alphaGroup = groupAlphaResponse.json() as { id: string };
+
+    const groupBetaResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        displayName: "Beta",
+        slug: "beta",
+        mentorName: null,
+        roleId: "role-beta",
+        aliases: [],
+        active: true,
+      },
+    });
+    const betaGroup = groupBetaResponse.json() as { id: string };
+
+    const requester = await registerParticipant({
+      discordUserId: "user-a1",
+      discordUsername: "Alpha One",
+      indexId: "A001",
+      groupId: alphaGroup.id,
+    });
+    const approver = await registerParticipant({
+      discordUserId: "user-a2",
+      discordUsername: "Alpha Two",
+      indexId: "A002",
+      groupId: alphaGroup.id,
+    });
+    await registerParticipant({
+      discordUserId: "user-a3",
+      discordUsername: "Alpha Three",
+      indexId: "A003",
+      groupId: alphaGroup.id,
+    });
+    await registerParticipant({
+      discordUserId: "user-a4",
+      discordUsername: "Alpha Four",
+      indexId: "A004",
+      groupId: alphaGroup.id,
+    });
+
+    await ctx.services.economyService.awardGroups({
+      guildId: ctx.env.GUILD_ID,
+      actor: {
+        userId: "system",
+        username: "System",
+        roleIds: [],
+      },
+      targetGroupIds: [alphaGroup.id],
+      pointsDelta: 20,
+      currencyDelta: 0,
+      description: "Seed points",
+      type: "CORRECTION",
+      systemAction: true,
+    });
+
+    const item = await ctx.services.shopService.upsert(ctx.env.GUILD_ID, {
+      name: "Shared feast",
+      description: "Group reward",
+      audience: "GROUP",
+      cost: 10,
+      stock: 5,
+      enabled: true,
+      fulfillmentInstructions: null,
+    });
+
+    const redemption = await ctx.services.shopService.redeem({
+      guildId: ctx.env.GUILD_ID,
+      participantId: requester.id,
+      shopItemId: item.id,
+      requestedByUserId: requester.discordUserId,
+      requestedByUsername: requester.discordUsername ?? undefined,
+      quantity: 1,
+      purchaseMode: "GROUP",
+      groupMemberCount: 4,
+    });
+
+    await ctx.prisma.participant.update({
+      where: { id: requester.id },
+      data: { groupId: betaGroup.id },
+    });
+
+    const approvalResult = await ctx.services.shopService.approveGroupPurchase({
+      guildId: ctx.env.GUILD_ID,
+      redemptionId: redemption.id,
+      participantId: approver.id,
+      approvedByUserId: approver.discordUserId,
+      approvedByUsername: approver.discordUsername ?? undefined,
+      currentGroupMemberCount: 3,
+      currentGroupMemberDiscordUserIds: ["user-a2", "user-a3", "user-a4"],
+    });
+
+    expect(approvalResult.executed).toBe(false);
+    expect(approvalResult.approvalsCount).toBe(1);
+    expect(approvalResult.threshold).toBe(2);
   });
 });

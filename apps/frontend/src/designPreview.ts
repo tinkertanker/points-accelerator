@@ -118,6 +118,7 @@ function createInitialBootstrap(): BootstrapPayload {
       appName: "points accelerator",
       pointsName: "beans",
       currencyName: "rice",
+      groupPointsPerCurrencyDonation: 10,
       mentorRoleIds: ["role-staff"],
       passivePointsReward: 1,
       passiveCurrencyReward: 1,
@@ -168,7 +169,6 @@ function createInitialBootstrap(): BootstrapPayload {
         active: true,
         aliases: [{ value: "alpha" }],
         pointsBalance: 128,
-        currencyBalance: 24,
       },
       {
         id: "group-2",
@@ -179,7 +179,6 @@ function createInitialBootstrap(): BootstrapPayload {
         active: true,
         aliases: [],
         pointsBalance: 96,
-        currencyBalance: 18,
       },
     ],
     shopItems: [
@@ -187,10 +186,21 @@ function createInitialBootstrap(): BootstrapPayload {
         id: "shop-1",
         name: "Sticker pack",
         description: "Class merit stickers (digital)",
-        currencyCost: 15,
+        audience: "INDIVIDUAL",
+        cost: 15,
         stock: 40,
         enabled: true,
         fulfillmentInstructions: "DM the bot with your email.",
+      },
+      {
+        id: "shop-2",
+        name: "Shared pizza run",
+        description: "Team reward after enough approvals",
+        audience: "GROUP",
+        cost: 50,
+        stock: 8,
+        enabled: true,
+        fulfillmentInstructions: "Coordinate with the staff desk.",
       },
     ],
     listings: [
@@ -205,8 +215,8 @@ function createInitialBootstrap(): BootstrapPayload {
       },
     ],
     leaderboard: [
-      { id: "group-1", displayName: "Team Alpha", pointsBalance: 128, currencyBalance: 24 },
-      { id: "group-2", displayName: "Team Beta", pointsBalance: 96, currencyBalance: 18 },
+      { id: "group-1", displayName: "Team Alpha", pointsBalance: 128 },
+      { id: "group-2", displayName: "Team Beta", pointsBalance: 96 },
     ],
     ledger: [
       {
@@ -275,6 +285,7 @@ function createInitialBootstrap(): BootstrapPayload {
         discordUsername: "alice",
         indexId: "S001",
         groupId: "group-1",
+        currencyBalance: 24,
         group: { id: "group-1", displayName: "Team Alpha", slug: "team-alpha" },
         createdAt: new Date().toISOString(),
       },
@@ -355,14 +366,12 @@ export function designPreviewSaveGroup(draft: GroupDraft): Group {
       .filter(Boolean)
       .map((value) => ({ value })),
     pointsBalance: 0,
-    currencyBalance: 0,
   };
 
   const existingIndex = mockBootstrap.groups.findIndex((candidate) => candidate.id === group.id);
   if (existingIndex >= 0) {
     const previous = mockBootstrap.groups[existingIndex];
     group.pointsBalance = previous.pointsBalance;
-    group.currencyBalance = previous.currencyBalance;
     mockBootstrap.groups[existingIndex] = group;
   } else {
     mockBootstrap.groups.push(group);
@@ -374,7 +383,6 @@ export function designPreviewSaveGroup(draft: GroupDraft): Group {
       id: entry.id,
       displayName: entry.displayName,
       pointsBalance: entry.pointsBalance,
-      currencyBalance: entry.currencyBalance,
     }));
 
   return group;
@@ -385,7 +393,8 @@ export function designPreviewSaveShopItem(draft: ShopItemDraft): ShopItem {
     id: draft.id ?? `shop-${Date.now()}`,
     name: draft.name,
     description: draft.description,
-    currencyCost: draft.currencyCost,
+    audience: draft.audience,
+    cost: draft.cost,
     stock: draft.stock,
     enabled: draft.enabled,
     fulfillmentInstructions: draft.fulfillmentInstructions ?? null,

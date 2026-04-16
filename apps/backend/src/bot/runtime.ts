@@ -47,6 +47,8 @@ export interface BotRuntimeApi {
   getRoles(): Promise<Array<{ id: string; name: string }>>;
   getTextChannels(): Promise<Array<{ id: string; name: string }>>;
   getDashboardMember(userId: string): Promise<DashboardMember | null>;
+  getGroupMemberCount(roleId: string): Promise<number | null>;
+  getGroupMemberDiscordUserIds(roleId: string): Promise<string[] | null>;
   postListing(channelId: string, content: string): Promise<{ channelId: string; messageId: string } | null>;
 }
 
@@ -233,6 +235,38 @@ export class BotRuntime {
     };
   }
 
+  public async getGroupMemberCount(roleId: string): Promise<number | null> {
+    const memberIds = await this.getGroupMemberDiscordUserIds(roleId);
+    return memberIds?.length ?? null;
+  }
+
+  public async getGroupMemberDiscordUserIds(roleId: string): Promise<string[] | null> {
+    if (!this.client) {
+      return null;
+    }
+
+    const guild = await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null);
+    if (!guild) {
+      return null;
+    }
+
+    const group = await this.services.groupService.resolveGroupByIdentifier(this.env.GUILD_ID, roleId);
+    if (!group) {
+      return null;
+    }
+
+    const eligibleMembers = await this.getEligibleGroupMembers({
+      groupId: group.id,
+      roleId,
+      guild,
+    }).catch(() => null);
+    if (!eligibleMembers) {
+      return null;
+    }
+
+    return eligibleMembers.map((member) => member.user.id);
+  }
+
   public async postListing(channelId: string, content: string): Promise<{ channelId: string; messageId: string } | null> {
     if (!this.client) {
       return null;
@@ -307,6 +341,89 @@ export class BotRuntime {
       : "none";
   }
 
+  private formatGroupPurchaseProgress(approvalsCount: number, threshold: number) {
+    return `${approvalsCount}/${threshold} approval${threshold === 1 ? "" : "s"}`;
+  }
+
+  private async resolveActiveParticipant(params: {
+    discordUserId: string;
+    discordUsername?: string;
+    roleIds: string[];
+  }) {
+    const group = await this.services.groupService.resolveGroupFromRoleIds(this.env.GUILD_ID, params.roleIds);
+    const participant = await this.services.participantService.ensureForGroup({
+      guildId: this.env.GUILD_ID,
+      discordUserId: params.discordUserId,
+      discordUsername: params.discordUsername,
+      groupId: group.id,
+    });
+
+    return {
+      group,
+      participant,
+    };
+  }
+
+  private async getEligibleGroupMembers(params: {
+    groupId: string;
+    roleId: string;
+    guild: ChatInputCommandInteraction["guild"];
+  }) {
+    const guild = params.guild;
+    if (!guild) {
+      return [];
+    }
+
+    const members = await guild.members.fetch();
+    const candidates = Array.from(members.values()).filter(
+      (candidate) => !candidate.user.bot && candidate.roles.cache.has(params.roleId),
+    );
+
+    const eligibleMembers = await Promise.all(
+      candidates.map(async (candidate) => {
+        const resolvedGroup = await this.services.groupService
+          .resolveGroupFromRoleIds(this.env.GUILD_ID, Array.from(candidate.roles.cache.keys()))
+          .catch(() => null);
+
+        return resolvedGroup?.id === params.groupId ? candidate : null;
+      }),
+    );
+
+    return eligibleMembers.filter((candidate): candidate is GuildMember => candidate !== null);
+  }
+
+  private async syncGroupParticipantsFromGuild(params: {
+    groupId: string;
+    roleId: string;
+    guild: ChatInputCommandInteraction["guild"];
+  }) {
+    const guild = params.guild;
+    if (!guild) {
+      return {
+        count: 0,
+        discordUserIds: [] as string[],
+      };
+    }
+
+    const eligibleMembers = await this.getEligibleGroupMembers(params);
+
+    await Promise.all(
+      eligibleMembers.map((candidate) =>
+        this.services.participantService.ensureForGroup({
+          guildId: this.env.GUILD_ID,
+          discordUserId: candidate.user.id,
+          discordUsername: candidate.user.username,
+          groupId: params.groupId,
+        }),
+      ),
+    );
+
+    return {
+      count: eligibleMembers.length,
+      discordUserIds: eligibleMembers.map((member) => member.user.id),
+    };
+  }
+
   private async handlePassiveMessage(params: {
     memberId: string;
     roleIds: string[];
@@ -316,13 +433,17 @@ export class BotRuntime {
     content: string;
     channelId: string;
   }) {
-    const group = await this.services.groupService.resolveGroupFromRoleIds(this.env.GUILD_ID, params.roleIds).catch(() => null);
-    if (!group) {
+    const resolved = await this.resolveActiveParticipant({
+      discordUserId: params.userId,
+      discordUsername: params.username,
+      roleIds: params.roleIds,
+    }).catch(() => null);
+    if (!resolved) {
       return;
     }
 
     const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-    const cooldownKey = `${params.memberId}:${group.id}`;
+    const cooldownKey = `${params.memberId}:${resolved.group.id}`;
     const now = Date.now();
     const previous = this.cooldowns.get(cooldownKey);
     if (previous && now - previous.seenAt < config.passiveCooldownSeconds * 1000) {
@@ -331,7 +452,8 @@ export class BotRuntime {
 
     const entry = await this.services.economyService.rewardPassiveMessage({
       guildId: this.env.GUILD_ID,
-      groupId: group.id,
+      groupId: resolved.group.id,
+      participantId: resolved.participant.id,
       userId: params.userId,
       username: params.username,
       messageId: params.messageId,
@@ -416,17 +538,20 @@ export class BotRuntime {
       }
 
       // --- 4. Look up participant -------------------------------------------
-      const participant = await this.services.participantService.findByDiscordUser(
-        guildId,
-        message.author.id,
-      );
+      const member =
+        message.member ??
+        (message.guild ? await message.guild.members.fetch(message.author.id).catch(() => null) : null);
 
-      if (!participant) {
-        await message.reply(
-          "You need to register first. Use `/register` with your index ID and group.",
-        );
+      if (!member) {
+        await message.reply("I couldn't determine your current group from Discord. Ask an admin to check your roles.");
         return;
       }
+
+      const { participant } = await this.resolveActiveParticipant({
+        discordUserId: message.author.id,
+        discordUsername: message.author.username,
+        roleIds: Array.from(member.roles.cache.keys()),
+      });
 
       // --- 5. Resolve assignment --------------------------------------------
       const activeAssignments = await this.services.assignmentService.listActive(guildId);
@@ -547,11 +672,16 @@ export class BotRuntime {
         return;
       }
       case "balance": {
-        const sourceGroup = await this.services.groupService.resolveGroupFromRoleIds(this.env.GUILD_ID, roleIds);
-        const balance = await this.services.economyService.getGroupBalance(sourceGroup.id);
+        const { group, participant } = await this.resolveActiveParticipant({
+          discordUserId: interaction.user.id,
+          discordUsername: interaction.user.username,
+          roleIds,
+        });
+        const balance = await this.services.economyService.getGroupBalance(group.id);
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const walletBalance = await this.services.participantCurrencyService.getParticipantBalance(participant.id);
         await interaction.reply({
-          content: `${sourceGroup.displayName}: ${balance.pointsBalance} ${config.pointsName}, ${balance.currencyBalance} ${config.currencyName}`,
+          content: `${group.displayName}: ${balance.pointsBalance} ${config.pointsName} available for the leaderboard and /buyforgroup. Your wallet: ${walletBalance} ${config.currencyName}.`,
           ephemeral: true,
         });
         return;
@@ -581,72 +711,157 @@ export class BotRuntime {
         await interaction.reply({ content });
         return;
       }
-      case "pay": {
-        const target = interaction.options.getString("target", true);
+      case "transfer": {
+        const targetUser = interaction.options.getUser("member", true);
         const amount = interaction.options.getNumber("amount", true);
-        const sourceGroup = await this.services.groupService.resolveGroupFromRoleIds(this.env.GUILD_ID, roleIds);
-        const targetGroup = await this.services.groupService.resolveGroupByIdentifier(this.env.GUILD_ID, target);
-        if (!targetGroup) {
-          throw new AppError("Target group not found.", 404);
+        const { participant: sourceParticipant } = await this.resolveActiveParticipant({
+          discordUserId: interaction.user.id,
+          discordUsername: interaction.user.username,
+          roleIds,
+        });
+        const targetMember = await interaction.guild?.members.fetch(targetUser.id).catch(() => null);
+        if (!targetMember) {
+          throw new AppError("Target user is not in this server.", 404);
         }
-        await this.services.economyService.transferCurrency({
+        const { participant: targetParticipant } = await this.resolveActiveParticipant({
+          discordUserId: targetUser.id,
+          discordUsername: targetUser.username,
+          roleIds: Array.from(targetMember.roles.cache.keys()),
+        });
+        await this.services.participantCurrencyService.transferCurrency({
           guildId: this.env.GUILD_ID,
           actor,
-          sourceGroupId: sourceGroup.id,
-          targetGroupId: targetGroup.id,
+          sourceParticipantId: sourceParticipant.id,
+          targetParticipantId: targetParticipant.id,
           amount,
-          description: `${sourceGroup.displayName} paid ${targetGroup.displayName}`,
+          description: `${interaction.user.username} transferred ${amount} to ${targetUser.username}`,
         });
-        await interaction.reply(`${sourceGroup.displayName} paid ${amount} to ${targetGroup.displayName}.`);
+        await interaction.reply(`${interaction.user.username} transferred ${amount} to ${targetUser.username}.`);
         return;
       }
       case "donate": {
         const amount = interaction.options.getNumber("amount", true);
-        const sourceGroup = await this.services.groupService.resolveGroupFromRoleIds(this.env.GUILD_ID, roleIds);
-        await this.services.economyService.donateCurrency({
+        const { group, participant: sourceParticipant } = await this.resolveActiveParticipant({
+          discordUserId: interaction.user.id,
+          discordUsername: interaction.user.username,
+          roleIds,
+        });
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const donation = await this.services.economyService.donateParticipantCurrencyToGroupPoints({
           guildId: this.env.GUILD_ID,
           actor,
-          sourceGroupId: sourceGroup.id,
+          participantId: sourceParticipant.id,
+          groupId: group.id,
           amount,
-          description: `${sourceGroup.displayName} donated ${amount}`,
+          conversionRate: config.groupPointsPerCurrencyDonation.toNumber(),
+          description: `${interaction.user.username} donated ${amount} ${config.currencyName} to ${group.displayName}`,
         });
-        await interaction.reply(`${sourceGroup.displayName} donated ${amount}.`);
+        await interaction.reply(
+          `${interaction.user.username} donated ${amount} ${config.currencyName} to ${group.displayName}, adding ${donation.groupPointsAward} ${config.pointsName}.`,
+        );
         return;
       }
       case "award":
       case "deduct": {
-        const targets = interaction.options.getString("targets", true);
-        const points = interaction.options.getNumber("points", true);
-        const currency = interaction.options.getNumber("currency") ?? points;
+        const targets = interaction.options.getString("targets");
+        const points = interaction.options.getNumber("points") ?? 0;
+        const currency = interaction.options.getNumber("currency") ?? 0;
+        const targetMember = interaction.options.getUser("member");
         const reason = interaction.options.getString("reason", true);
-        const targetGroups = await Promise.all(
-          targets
-            .split(",")
-            .map((segment) => segment.trim())
-            .filter(Boolean)
-            .map(async (segment) => {
-              const group = await this.services.groupService.resolveGroupByIdentifier(this.env.GUILD_ID, segment);
-              if (!group) {
-                throw new AppError(`Could not resolve group: ${segment}`, 404);
-              }
-              return group;
-            }),
-        );
-
         const sign = interaction.commandName === "award" ? 1 : -1;
-        await this.services.economyService.awardGroups({
-          guildId: this.env.GUILD_ID,
-          actor,
-          targetGroupIds: targetGroups.map((group) => group.id),
-          pointsDelta: points * sign,
-          currencyDelta: currency * sign,
-          description: reason,
-        });
-        await interaction.reply(
-          `${interaction.commandName === "award" ? "Awarded" : "Deducted"} ${Math.abs(points)} points to ${targetGroups
-            .map((group) => group.displayName)
-            .join(", ")}.`,
-        );
+        if (points === 0 && currency === 0) {
+          throw new AppError("Add a non-zero points or currency amount.", 400);
+        }
+
+        const targetGroups =
+          points === 0
+            ? []
+            : await Promise.all(
+                (targets ?? "")
+                  .split(",")
+                  .map((segment) => segment.trim())
+                  .filter(Boolean)
+                  .map(async (segment) => {
+                    const group = await this.services.groupService.resolveGroupByIdentifier(this.env.GUILD_ID, segment);
+                    if (!group) {
+                      throw new AppError(`Could not resolve group: ${segment}`, 404);
+                    }
+                    return group;
+                  }),
+              );
+
+        if (points !== 0 && targetGroups.length === 0) {
+          throw new AppError("Choose at least one target group when awarding or deducting points.", 400);
+        }
+
+        let currencyParticipant:
+          | Awaited<ReturnType<BotRuntime["resolveActiveParticipant"]>>["participant"]
+          | undefined;
+        if (currency !== 0) {
+          if (!targetMember) {
+            throw new AppError("Choose a member when awarding or deducting currency.", 400);
+          }
+
+          const memberRecord = await interaction.guild?.members.fetch(targetMember.id).catch(() => null);
+          if (!memberRecord) {
+            throw new AppError("Selected member is not in this server.", 404);
+          }
+
+          ({ participant: currencyParticipant } = await this.resolveActiveParticipant({
+            discordUserId: targetMember.id,
+            discordUsername: targetMember.username,
+            roleIds: Array.from(memberRecord.roles.cache.keys()),
+          }));
+        }
+
+        if (targetGroups.length > 0) {
+          await this.services.prisma.$transaction(async (tx) => {
+            await this.services.economyService.awardGroups({
+              guildId: this.env.GUILD_ID,
+              actor,
+              targetGroupIds: targetGroups.map((group) => group.id),
+              pointsDelta: points * sign,
+              currencyDelta: 0,
+              description: reason,
+              executor: tx,
+            });
+
+            if (currencyParticipant && currency !== 0) {
+              await this.services.participantCurrencyService.awardParticipants({
+                guildId: this.env.GUILD_ID,
+                actor,
+                targetParticipantIds: [currencyParticipant.id],
+                currencyDelta: currency * sign,
+                description: reason,
+                executor: tx,
+              });
+            }
+          });
+        } else if (currencyParticipant && currency !== 0) {
+          await this.services.participantCurrencyService.awardParticipants({
+            guildId: this.env.GUILD_ID,
+            actor,
+            targetParticipantIds: [currencyParticipant.id],
+            currencyDelta: currency * sign,
+            description: reason,
+          });
+        }
+
+        const actionLabel = interaction.commandName === "award" ? "Awarded" : "Deducted";
+        const summaries = [
+          targetGroups.length > 0
+            ? `${Math.abs(points)} points ${interaction.commandName === "award" ? "to" : "from"} ${targetGroups
+                .map((group) => group.displayName)
+                .join(", ")}`
+            : null,
+          currencyParticipant && currency !== 0
+            ? `${Math.abs(currency)} currency ${interaction.commandName === "award" ? "to" : "from"} ${
+                currencyParticipant.discordUsername ?? currencyParticipant.indexId
+              }`
+            : null,
+        ].filter((value): value is string => value !== null);
+
+        await interaction.reply(`${actionLabel} ${summaries.join(" and ")}.`);
         return;
       }
       case "sell": {
@@ -676,53 +891,119 @@ export class BotRuntime {
         return;
       }
       case "store": {
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const items = await this.services.shopService.list(this.env.GUILD_ID);
-        const lines = items
-          .filter((item) => item.enabled)
-          .slice(0, 15)
-          .map((item) => `${item.id}: ${item.name} (${item.currencyCost.toString()})`);
+        const enabledItems = items.filter((item) => item.enabled).slice(0, 20);
+        const personalLines = enabledItems
+          .filter((item) => item.audience === "INDIVIDUAL")
+          .map((item) => `${item.id}: ${item.name} (${item.cost.toString()} ${config.currencyName})`);
+        const groupLines = enabledItems
+          .filter((item) => item.audience === "GROUP")
+          .map((item) => `${item.id}: ${item.name} (${item.cost.toString()} ${config.pointsName})`);
+        const sections = [
+          personalLines.length > 0 ? `Personal items:\n${personalLines.join("\n")}` : null,
+          groupLines.length > 0 ? `Group items:\n${groupLines.join("\n")}` : null,
+        ].filter((value): value is string => value !== null);
         await interaction.reply({
-          content: lines.length > 0 ? `Store items:\n${lines.join("\n")}\nUse /buy with the full item id.` : "Store is empty.",
+          content:
+            sections.length > 0
+              ? `${sections.join("\n\n")}\nUse /buyforme for personal wallet purchases, /buyforgroup for shared group-point purchases, and /donate to convert wallet currency into group points.`
+              : "Store is empty.",
           ephemeral: true,
         });
         return;
       }
-      case "buy": {
+      case "buyforme":
+      case "buyforgroup": {
         const itemId = interaction.options.getString("item_id", true);
         const quantity = interaction.options.getInteger("quantity") ?? 1;
-        const sourceGroup = await this.services.groupService.resolveGroupFromRoleIds(this.env.GUILD_ID, roleIds);
+        const purchaseMode = interaction.commandName === "buyforgroup" ? "GROUP" : "INDIVIDUAL";
+        const { group, participant } = await this.resolveActiveParticipant({
+          discordUserId: interaction.user.id,
+          discordUsername: interaction.user.username,
+          roleIds,
+        });
+        let groupMemberCount: number | undefined;
+        if (purchaseMode === "GROUP") {
+          const syncedGroupMembers = await this.syncGroupParticipantsFromGuild({
+            groupId: group.id,
+            roleId: group.roleId,
+            guild: interaction.guild,
+          });
+          groupMemberCount = syncedGroupMembers.count;
+        }
         const redemption = await this.services.shopService.redeem({
           guildId: this.env.GUILD_ID,
-          groupId: sourceGroup.id,
+          participantId: participant.id,
           shopItemId: itemId,
           requestedByUserId: interaction.user.id,
           requestedByUsername: interaction.user.username,
           quantity,
+          purchaseMode,
+          groupMemberCount,
         });
+        let sharedMessageSuffix = "";
+        if (purchaseMode === "GROUP") {
+          const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+          const announcementChannelId = config.redemptionChannelId ?? interaction.channelId;
+          const posted = announcementChannelId
+            ? await this.postListing(
+                announcementChannelId,
+                `Group purchase request for **${redemption.shopItem.name}** x${redemption.quantity} by **${group.displayName}**.\nRequest ID: \`${redemption.id}\`\n${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded.\nApprove with \`/approve_purchase purchase_id:${redemption.id}\`.`,
+              )
+            : null;
+          if (posted) {
+            await this.services.shopService.setApprovalMessage({
+              guildId: this.env.GUILD_ID,
+              redemptionId: redemption.id,
+              channelId: posted.channelId,
+              messageId: posted.messageId,
+            });
+            sharedMessageSuffix = " A shared approval message has been posted for your group.";
+          }
+        }
         await interaction.reply({
-          content: `Redemption recorded for ${quantity} item(s). Request ID: ${redemption.id.slice(0, 8)}`,
+          content:
+            purchaseMode === "GROUP"
+              ? `Group purchase request created for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase.${sharedMessageSuffix}`
+              : `Purchase recorded for ${quantity} item(s). Request ID: ${redemption.id}`,
           ephemeral: true,
         });
         return;
       }
-      case "register": {
-        const indexId = interaction.options.getString("index_id", true);
-        const groupIdentifier = interaction.options.getString("group", true);
-        const targetGroup = await this.services.groupService.resolveGroupByIdentifier(this.env.GUILD_ID, groupIdentifier);
-        if (!targetGroup) {
-          throw new AppError("Could not find that group. Check the name or ask an admin.");
-        }
-
-        const participant = await this.services.participantService.register({
-          guildId: this.env.GUILD_ID,
+      case "approve_purchase": {
+        const purchaseId = interaction.options.getString("purchase_id", true);
+        const { group, participant } = await this.resolveActiveParticipant({
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
-          indexId,
-          groupId: targetGroup.id,
+          roleIds,
+        });
+        const syncedGroupMembers = await this.syncGroupParticipantsFromGuild({
+          groupId: group.id,
+          roleId: group.roleId,
+          guild: interaction.guild,
+        });
+        const currentGroupMemberCount = syncedGroupMembers.count;
+        const result = await this.services.shopService.approveGroupPurchase({
+          guildId: this.env.GUILD_ID,
+          redemptionId: purchaseId,
+          participantId: participant.id,
+          approvedByUserId: interaction.user.id,
+          approvedByUsername: interaction.user.username,
+          currentGroupMemberCount,
+          currentGroupMemberDiscordUserIds: syncedGroupMembers.discordUserIds,
         });
 
+        const progress = this.formatGroupPurchaseProgress(result.approvalsCount, result.threshold);
+        const blockingSuffix =
+          "blockingGroup" in result && result.blockingGroup
+            ? ` ${result.blockingGroup} does not currently have enough group points, so the request stays open until more points are earned or donated.`
+            : "";
+
         await interaction.reply({
-          content: `Registered! Index ID: **${participant.indexId}**, Group: **${participant.group.displayName}**. You can now use /submit.`,
+          content: result.executed
+            ? `Approval recorded. ${progress}. The group purchase is now funded and pending fulfilment.${blockingSuffix}`
+            : `Approval recorded. ${progress}.${blockingSuffix}`,
           ephemeral: true,
         });
         return;
@@ -730,16 +1011,11 @@ export class BotRuntime {
       case "submit": {
         await interaction.deferReply({ ephemeral: true });
 
-        const participant = await this.services.participantService.findByDiscordUser(
-          this.env.GUILD_ID,
-          interaction.user.id,
-        );
-        if (!participant) {
-          await interaction.editReply(
-            "You need to register first. Use `/register` with your index ID and group.",
-          );
-          return;
-        }
+        const { participant } = await this.resolveActiveParticipant({
+          discordUserId: interaction.user.id,
+          discordUsername: interaction.user.username,
+          roleIds,
+        });
 
         const assignmentIdentifier = interaction.options.getString("assignment", true);
         const text = interaction.options.getString("text") ?? "";
@@ -849,7 +1125,7 @@ export class BotRuntime {
         const lines = recent.map((sub) => {
           const status = sub.status === "PENDING" ? "\u23f3" : sub.status === "APPROVED" ? "\u2705" : sub.status === "OUTSTANDING" ? "\u2b50" : "\u274c";
           const name = sub.participant.discordUsername ?? sub.participant.indexId;
-          return `${status} \`${sub.id.slice(0, 8)}\` **${sub.assignment.title}** \u2014 ${name} (${sub.participant.group.displayName})`;
+          return `${status} \`${sub.id.slice(0, 8)}\` **${sub.assignment.title}** \u2014 ${name} (${sub.group.displayName})`;
         });
 
         await interaction.reply({
@@ -972,7 +1248,7 @@ export class BotRuntime {
     const rest = new REST({ version: "10" }).setToken(this.env.DISCORD_BOT_TOKEN);
     const commands = [
       new SlashCommandBuilder().setName("leaderboard").setDescription("Show the group leaderboard."),
-      new SlashCommandBuilder().setName("balance").setDescription("Show your group balance."),
+      new SlashCommandBuilder().setName("balance").setDescription("Show your group points and personal wallet."),
       new SlashCommandBuilder()
         .setName("ledger")
         .setDescription("Show the 10 most recent ledger entries.")
@@ -980,51 +1256,55 @@ export class BotRuntime {
           option.setName("page").setDescription("Page number, 10 entries per page").setRequired(false).setMinValue(1),
         ),
       new SlashCommandBuilder()
-        .setName("pay")
-        .setDescription("Pay another group from your group wallet.")
-        .addStringOption((option) => option.setName("target").setDescription("Group role mention or alias").setRequired(true))
+        .setName("transfer")
+        .setDescription("Send wallet currency to another student.")
+        .addUserOption((option) => option.setName("member").setDescription("Recipient").setRequired(true))
         .addNumberOption((option) => option.setName("amount").setDescription("Currency amount").setRequired(true)),
       new SlashCommandBuilder()
         .setName("donate")
-        .setDescription("Donate currency from your group.")
+        .setDescription("Convert your wallet currency into group points.")
         .addNumberOption((option) => option.setName("amount").setDescription("Currency amount").setRequired(true)),
       new SlashCommandBuilder()
         .setName("award")
-        .setDescription("Award one or more groups.")
-        .addStringOption((option) => option.setName("targets").setDescription("Comma-separated aliases or role mentions").setRequired(true))
-        .addNumberOption((option) => option.setName("points").setDescription("Points delta").setRequired(true))
-        .addStringOption((option) => option.setName("reason").setDescription("Award reason").setRequired(true))
-        .addNumberOption((option) =>
-          option.setName("currency").setDescription("Currency delta; defaults to points amount").setRequired(false),
-        ),
+        .setDescription("Award group points, participant currency, or both.")
+        .addStringOption((option) => option.setName("targets").setDescription("Comma-separated group aliases or role mentions").setRequired(false))
+        .addNumberOption((option) => option.setName("points").setDescription("Points delta for the target groups").setRequired(false))
+        .addUserOption((option) => option.setName("member").setDescription("Member whose wallet should change").setRequired(false))
+        .addNumberOption((option) => option.setName("currency").setDescription("Currency delta for the selected member").setRequired(false))
+        .addStringOption((option) => option.setName("reason").setDescription("Award reason").setRequired(true)),
       new SlashCommandBuilder()
         .setName("deduct")
-        .setDescription("Deduct from one or more groups.")
-        .addStringOption((option) => option.setName("targets").setDescription("Comma-separated aliases or role mentions").setRequired(true))
-        .addNumberOption((option) => option.setName("points").setDescription("Points delta").setRequired(true))
-        .addStringOption((option) => option.setName("reason").setDescription("Deduction reason").setRequired(true))
-        .addNumberOption((option) =>
-          option.setName("currency").setDescription("Currency delta; defaults to points amount").setRequired(false),
-        ),
+        .setDescription("Deduct group points, participant currency, or both.")
+        .addStringOption((option) => option.setName("targets").setDescription("Comma-separated group aliases or role mentions").setRequired(false))
+        .addNumberOption((option) => option.setName("points").setDescription("Points delta for the target groups").setRequired(false))
+        .addUserOption((option) => option.setName("member").setDescription("Member whose wallet should change").setRequired(false))
+        .addNumberOption((option) => option.setName("currency").setDescription("Currency delta for the selected member").setRequired(false))
+        .addStringOption((option) => option.setName("reason").setDescription("Deduction reason").setRequired(true)),
       new SlashCommandBuilder()
         .setName("store")
         .setDescription("Browse the custom shop."),
       new SlashCommandBuilder()
-        .setName("buy")
-        .setDescription("Buy a shop item.")
+        .setName("buyforme")
+        .setDescription("Buy a shop item for yourself.")
         .addStringOption((option) => option.setName("item_id").setDescription("Shop item id").setRequired(true))
         .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
+      new SlashCommandBuilder()
+        .setName("buyforgroup")
+        .setDescription("Start a group purchase request for a shop item.")
+        .addStringOption((option) => option.setName("item_id").setDescription("Shop item id").setRequired(true))
+        .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
+      new SlashCommandBuilder()
+        .setName("approve_purchase")
+        .setDescription("Approve a pending group shop purchase.")
+        .addStringOption((option) =>
+          option.setName("purchase_id").setDescription("Full purchase ID shared in /buyforgroup").setRequired(true),
+        ),
       new SlashCommandBuilder()
         .setName("sell")
         .setDescription("Create a marketplace listing.")
         .addStringOption((option) => option.setName("title").setDescription("Listing title").setRequired(true))
         .addStringOption((option) => option.setName("description").setDescription("Listing description").setRequired(true))
         .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity, leave blank for infinite").setRequired(false)),
-      new SlashCommandBuilder()
-        .setName("register")
-        .setDescription("Register for the economy with your index ID and group.")
-        .addStringOption((option) => option.setName("index_id").setDescription("Your index ID (e.g. student number)").setRequired(true))
-        .addStringOption((option) => option.setName("group").setDescription("Your group name or role mention").setRequired(true)),
       new SlashCommandBuilder()
         .setName("submit")
         .setDescription("Submit work for an assignment.")

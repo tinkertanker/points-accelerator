@@ -36,7 +36,7 @@ Run locally:
 ### Passive earning
 
 - Send one valid message from a grouped test user
-- Confirm points and currency both increase as configured
+- Confirm group points increase and the sender's personal currency increases
 - Confirm cooldown blocks spam
 - Confirm denied channels do not reward
 
@@ -48,18 +48,24 @@ Run locally:
 - Verify deduction is blocked for roles without deduct power
 - Verify a non-receivable group role cannot be awarded
 
-### Group economy flows
+### Personal wallet flows
 
-- `/pay` from one test group to another
-- `/donate` from a test group
-- Verify these affect currency only, not points
+- Ensure at least two test users each have exactly one mapped active group role
+- `/transfer` from one student to another
+- `/donate` from one student
+- Verify `/transfer` affects participant currency only
+- Verify `/donate` reduces participant currency and increases the caller's group points using the configured conversion rate
+- Verify `/balance` auto-creates the wallet view without any manual registration step
 
 ### Shop
 
 - Open `/store`
-- Buy an item with `/buy`
-- Verify currency decreases
+- Buy an item with `/buyforme`
+- Verify the buyer's personal currency decreases
 - Verify stock decreases for limited items
+- Create a `/buyforgroup` request
+- Approve it from enough group members with `/approve_purchase`
+- Verify the group's shared points are charged and the request moves to pending fulfilment
 
 ### Listings
 
@@ -69,14 +75,13 @@ Run locally:
 
 ### Submissions
 
-- Register at least two student test users with `/register`
-- Verify non-alphanumeric index IDs are rejected
+- Ensure at least two student test users each have exactly one mapped active group role
 - Submit one assignment with `/submit`
 - Confirm an empty submission is rejected
 - Run `/submissions` and `/missing` from a staff role
 - Confirm a non-staff user is blocked from `/submissions`
 - Review a submission with `/review_submission`
-- Verify approved and outstanding reviews create `SUBMISSION_REWARD` ledger entries
+- Verify approved and outstanding reviews add group points plus personal currency for the submitter
 
 ## Production cutover
 

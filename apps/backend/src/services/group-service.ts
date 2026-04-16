@@ -50,6 +50,7 @@ export class GroupService {
         guildId,
         passivePointsReward: decimal(1),
         passiveCurrencyReward: decimal(1),
+        groupPointsPerCurrencyDonation: decimal(10),
       },
       update: {},
     });
@@ -165,6 +166,15 @@ export class GroupService {
     }
 
     return groups[0];
+  }
+
+  public async findById(guildId: string, groupId: string) {
+    return this.prisma.group.findFirst({
+      where: {
+        guildId,
+        id: groupId,
+      },
+    });
   }
 
   public async getBalanceMap(groupIds: string[]) {

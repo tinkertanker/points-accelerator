@@ -132,7 +132,7 @@ export default function GroupsPanel({
 
         <article className="section">
           <header className="section-header">
-            <h2>Review registered students</h2>
+            <h2>Review participants</h2>
           </header>
           <div className="matrix-scroll">
             <table className="matrix-table participant-table">
@@ -141,14 +141,15 @@ export default function GroupsPanel({
                   <th scope="col">Index ID</th>
                   <th scope="col">Discord user</th>
                   <th scope="col">Group</th>
+                  <th scope="col">Wallet</th>
                   <th scope="col">Registered</th>
                 </tr>
               </thead>
               <tbody>
                 {participants.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="empty-cell">
-                      No participants registered yet.
+                    <td colSpan={5} className="empty-cell">
+                      No participants discovered yet.
                     </td>
                   </tr>
                 ) : (
@@ -157,6 +158,7 @@ export default function GroupsPanel({
                       <td>{participant.indexId}</td>
                       <td>{participant.discordUsername ?? participant.discordUserId}</td>
                       <td>{participant.group.displayName}</td>
+                      <td>{participant.currencyBalance}</td>
                       <td>
                         <time dateTime={participant.createdAt}>{new Date(participant.createdAt).toLocaleDateString()}</time>
                       </td>

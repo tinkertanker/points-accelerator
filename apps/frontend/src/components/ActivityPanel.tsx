@@ -3,13 +3,11 @@ import type { BootstrapPayload } from "../types";
 type ActivityPanelProps = {
   bootstrap: BootstrapPayload;
   canViewLedger: boolean;
-  showCurrencyBalances: boolean;
 };
 
 export default function ActivityPanel({
   bootstrap,
   canViewLedger,
-  showCurrencyBalances,
 }: ActivityPanelProps) {
   return (
     <div className="panel-stack">
@@ -26,7 +24,6 @@ export default function ActivityPanel({
                 <tr>
                   <th scope="col">Group</th>
                   <th scope="col">Points</th>
-                  {showCurrencyBalances ? <th scope="col">Currency</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -34,9 +31,6 @@ export default function ActivityPanel({
                   <tr key={group.id}>
                     <td>{group.displayName}</td>
                     <td className="leaderboard-table__num">{group.pointsBalance}</td>
-                    {showCurrencyBalances ? (
-                      <td className="leaderboard-table__num">{group.currencyBalance}</td>
-                    ) : null}
                   </tr>
                 ))}
               </tbody>

@@ -84,6 +84,7 @@ const bootstrapPayload = {
     appName: "points accelerator",
     pointsName: "beans",
     currencyName: "rice",
+    groupPointsPerCurrencyDonation: 10,
     mentorRoleIds: ["role-mentor"],
     passivePointsReward: 1,
     passiveCurrencyReward: 1,
@@ -105,7 +106,6 @@ const bootstrapPayload = {
       id: "group-1",
       displayName: "Alpha",
       pointsBalance: 99,
-      currencyBalance: 500,
     },
   ],
   ledger: [],
@@ -140,7 +140,7 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(screen.getByText(/group rewards, transfers, shop pricing/i)).toBeInTheDocument();
+    expect(screen.getByText(/group points, personal wallets, shop pricing/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign in with discord/i })).toBeInTheDocument();
   });
 
