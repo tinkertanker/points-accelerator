@@ -121,6 +121,7 @@ const bootstrapPayload = {
 describe("App", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/");
   });
 
   afterEach(() => {
@@ -180,13 +181,13 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("tab", { name: /overview/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /class launch checklist/i })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: /overview/i, selected: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open the guide/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: /settings/i }));
 
     expect(await screen.findByRole("button", { name: /save settings/i })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: /class launch checklist/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open the guide/i })).not.toBeInTheDocument();
   });
 
   it("shows only mentor tabs for an authenticated mentor", async () => {
