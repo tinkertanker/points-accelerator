@@ -1189,23 +1189,26 @@ export class BotRuntime {
       }
       case "bet": {
         const amount = interaction.options.getNumber("amount", true);
-        const sourceGroup = await this.services.groupService.resolveGroupFromRoleIds(this.env.GUILD_ID, roleIds);
+        const { participant } = await this.resolveActiveParticipant({
+          discordUserId: interaction.user.id,
+          discordUsername: interaction.user.username,
+          roleIds,
+        });
         const result = await this.services.bettingService.placeBet({
           guildId: this.env.GUILD_ID,
           actor,
-          groupId: sourceGroup.id,
-          groupDisplayName: sourceGroup.displayName,
+          participantId: participant.id,
           amount,
         });
 
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         if (result.won) {
           await interaction.reply(
-            `🎉 **You won!** ${sourceGroup.displayName} bet ${amount} ${config.currencyName} and won! New balance: ${result.newCurrencyBalance} ${config.currencyName}.`,
+            `🎉 **You won!** You bet ${amount} ${config.currencyName} from your wallet and won. New balance: ${result.newCurrencyBalance} ${config.currencyName}.`,
           );
         } else {
           await interaction.reply(
-            `💸 **You lost!** ${sourceGroup.displayName} bet ${amount} ${config.currencyName} and lost. New balance: ${result.newCurrencyBalance} ${config.currencyName}.`,
+            `💸 **You lost!** You bet ${amount} ${config.currencyName} from your wallet and lost. New balance: ${result.newCurrencyBalance} ${config.currencyName}.`,
           );
         }
         return;
@@ -1241,20 +1244,24 @@ export class BotRuntime {
       }
       case "exclusion": {
         const targetUser = interaction.options.getUser("user", true);
-        const sourceGroup = await this.services.groupService.resolveGroupFromRoleIds(this.env.GUILD_ID, roleIds);
+        const { group: sourceGroup } = await this.resolveActiveParticipant({
+          discordUserId: interaction.user.id,
+          discordUsername: interaction.user.username,
+          roleIds,
+        });
 
-        // Verify the target is in the same group
         const targetMember = await interaction.guild?.members.fetch(targetUser.id).catch(() => null);
         if (!targetMember) {
           throw new AppError("Could not find that user in this server.");
         }
 
-        const targetRoleIds = Array.from(targetMember.roles.cache.keys());
-        const targetGroup = await this.services.groupService
-          .resolveGroupFromRoleIds(this.env.GUILD_ID, targetRoleIds)
-          .catch(() => null);
+        const { group: targetGroup } = await this.resolveActiveParticipant({
+          discordUserId: targetUser.id,
+          discordUsername: targetUser.username,
+          roleIds: Array.from(targetMember.roles.cache.keys()),
+        });
 
-        if (!targetGroup || targetGroup.id !== sourceGroup.id) {
+        if (targetGroup.id !== sourceGroup.id) {
           throw new AppError("You can only vote to exclude members of your own group.");
         }
 

@@ -20,7 +20,9 @@ type EntryKind =
   | "TRANSFER"
   | "DONATION"
   | "SHOP_REDEMPTION"
-  | "SUBMISSION_REWARD";
+  | "SUBMISSION_REWARD"
+  | "BET_WIN"
+  | "BET_LOSS";
 
 type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
 

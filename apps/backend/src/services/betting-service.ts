@@ -4,6 +4,7 @@ import { AppError } from "../utils/app-error.js";
 import { decimal, decimalToNumber } from "../utils/decimal.js";
 import type { ConfigService } from "./config-service.js";
 import type { AuditService } from "./audit-service.js";
+import type { ParticipantCurrencyService } from "./participant-currency-service.js";
 
 type Actor = {
   userId: string;
@@ -15,7 +16,6 @@ type BetResult = {
   won: boolean;
   amount: number;
   newCurrencyBalance: number;
-  groupDisplayName: string;
 };
 
 type BetStats = {
@@ -33,121 +33,99 @@ export class BettingService {
   public constructor(
     private readonly prisma: PrismaClient,
     private readonly configService: ConfigService,
+    private readonly participantCurrencyService: ParticipantCurrencyService,
     private readonly auditService: AuditService,
   ) {}
 
   /**
-   * Place a double-or-nothing bet. The actor's group currency is wagered.
-   * On win the group gains `amount` currency; on loss the group loses `amount`.
+   * Place a double-or-nothing bet against the participant's wallet balance.
    */
   public async placeBet(params: {
     guildId: string;
     actor: Actor;
-    groupId: string;
-    groupDisplayName: string;
+    participantId: string;
     amount: number;
   }): Promise<BetResult> {
-    if (params.amount <= 0) {
-      throw new AppError("Bet amount must be greater than zero.");
-    }
-
     if (!Number.isFinite(params.amount)) {
       throw new AppError("Bet amount must be a valid number.");
     }
 
-    // Check for active exclusion
-    await this.assertNotExcluded(params.guildId, params.actor.userId);
+    if (params.amount <= 0) {
+      throw new AppError("Bet amount must be greater than zero.");
+    }
 
     const config = await this.configService.getOrCreate(params.guildId);
     const winChance = config.betWinChance;
-
-    // Roll: random integer from 0–99, win if < winChance
     const roll = Math.floor(Math.random() * 100);
     const won = roll < winChance;
-
     const currencyDelta = won ? params.amount : -params.amount;
     const type = won ? "BET_WIN" : "BET_LOSS";
-    const description = won
-      ? `${params.groupDisplayName} won a bet of ${params.amount}`
-      : `${params.groupDisplayName} lost a bet of ${params.amount}`;
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // Lock the group row
-      const lockedGroups = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      const lockedParticipants = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT id
-        FROM "Group"
+        FROM "Participant"
         WHERE "guildId" = ${params.guildId}
-          AND id = ${params.groupId}
+          AND id = ${params.participantId}
         FOR UPDATE
       `);
 
-      if (lockedGroups.length === 0) {
-        throw new AppError("Group not found.", 404);
+      if (lockedParticipants.length !== 1) {
+        throw new AppError("Participant not found.", 404);
       }
 
-      // Check balance
-      const grouped = await tx.ledgerSplit.groupBy({
-        by: ["groupId"],
-        where: { groupId: params.groupId },
+      await this.assertNotExcluded(params.guildId, params.actor.userId, tx);
+
+      const currentBalance = await tx.participantCurrencySplit.aggregate({
+        where: { participantId: params.participantId },
         _sum: { currencyDelta: true },
       });
 
-      const currentBalance = grouped.length > 0
-        ? decimalToNumber(grouped[0]._sum.currencyDelta)
-        : 0;
-
-      if (currentBalance < params.amount) {
-        throw new AppError(
-          `Your group doesn't have enough currency. Current balance: ${currentBalance}.`,
-          409,
-        );
+      if (decimalToNumber(currentBalance._sum.currencyDelta ?? decimal(0)) < params.amount) {
+        throw new AppError("Participant does not have enough currency.", 409);
       }
 
-      const entry = await tx.ledgerEntry.create({
-        data: {
-          guildId: params.guildId,
-          type,
-          description,
-          createdByUserId: params.actor.userId,
-          createdByUsername: params.actor.username,
-          splits: {
-            create: {
-              groupId: params.groupId,
-              pointsDelta: decimal(0),
-              currencyDelta: decimal(currencyDelta),
-            },
+      await this.participantCurrencyService.recordEntry({
+        guildId: params.guildId,
+        actor: params.actor,
+        type,
+        description: won
+          ? `${params.actor.username ?? "A participant"} won a bet of ${params.amount}`
+          : `${params.actor.username ?? "A participant"} lost a bet of ${params.amount}`,
+        splits: [
+          {
+            participantId: params.participantId,
+            currencyDelta,
           },
+        ],
+        systemAction: true,
+        executor: tx,
+        auditAction: won ? "bet.won" : "bet.lost",
+        auditPayload: {
+          amount: params.amount,
+          participantId: params.participantId,
+          won,
+          roll,
+          winChance,
         },
-        include: { splits: true },
+      });
+
+      const balance = await tx.participantCurrencySplit.aggregate({
+        where: { participantId: params.participantId },
+        _sum: { currencyDelta: true },
       });
 
       return {
-        entry,
-        newBalance: currentBalance + currencyDelta,
+        newBalance: decimalToNumber(balance._sum.currencyDelta ?? decimal(0)),
       };
-    });
-
-    await this.auditService.record({
-      guildId: params.guildId,
-      actorUserId: params.actor.userId,
-      actorUsername: params.actor.username,
-      action: won ? "bet.won" : "bet.lost",
-      entityType: "LedgerEntry",
-      entityId: result.entry.id,
-      payload: {
-        amount: params.amount,
-        groupId: params.groupId,
-        won,
-        roll,
-        winChance,
-      },
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     });
 
     return {
       won,
       amount: params.amount,
       newCurrencyBalance: result.newBalance,
-      groupDisplayName: params.groupDisplayName,
     };
   }
 
@@ -156,21 +134,21 @@ export class BettingService {
    */
   public async getStats(guildId: string, userId: string): Promise<BetStats> {
     const [wins, losses, winTotals, lossTotals] = await Promise.all([
-      this.prisma.ledgerEntry.count({
+      this.prisma.participantCurrencyEntry.count({
         where: {
           guildId,
           type: "BET_WIN",
           createdByUserId: userId,
         },
       }),
-      this.prisma.ledgerEntry.count({
+      this.prisma.participantCurrencyEntry.count({
         where: {
           guildId,
           type: "BET_LOSS",
           createdByUserId: userId,
         },
       }),
-      this.prisma.ledgerSplit.aggregate({
+      this.prisma.participantCurrencySplit.aggregate({
         where: {
           entry: {
             guildId,
@@ -180,7 +158,7 @@ export class BettingService {
         },
         _sum: { currencyDelta: true },
       }),
-      this.prisma.ledgerSplit.aggregate({
+      this.prisma.participantCurrencySplit.aggregate({
         where: {
           entry: {
             guildId,
@@ -208,8 +186,12 @@ export class BettingService {
   /**
    * Check if a user has an active betting exclusion. Throws if excluded.
    */
-  public async assertNotExcluded(guildId: string, userId: string): Promise<void> {
-    const exclusion = await this.prisma.betExclusion.findFirst({
+  public async assertNotExcluded(
+    guildId: string,
+    userId: string,
+    executor: PrismaClient | Prisma.TransactionClient = this.prisma,
+  ): Promise<void> {
+    const exclusion = await executor.betExclusion.findFirst({
       where: {
         guildId,
         targetUserId: userId,
@@ -269,14 +251,12 @@ export class BettingService {
               );
             }
 
-            const pendingVote = await tx.betExclusion.findUnique({
+            const pendingVote = await tx.betExclusion.findFirst({
               where: {
-                guildId_targetUserId_groupId_expiresAt: {
-                  guildId: params.guildId,
-                  targetUserId: params.targetUserId,
-                  groupId: params.groupId,
-                  expiresAt: pendingEpoch,
-                },
+                guildId: params.guildId,
+                targetUserId: params.targetUserId,
+                groupId: params.groupId,
+                expiresAt: pendingEpoch,
               },
             });
 

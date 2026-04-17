@@ -17,6 +17,7 @@ async function seedSettingsAndGroup() {
       appName: "points accelerator",
       pointsName: "points",
       currencyName: "rice",
+      groupPointsPerCurrencyDonation: 10,
       mentorRoleIds: [],
       passivePointsReward: 1,
       passiveCurrencyReward: 1,
@@ -79,24 +80,27 @@ async function seedSettingsAndGroup() {
   });
 
   const group = groupResponse.json() as { id: string };
-
-  // Give the group some starting currency via award
-  await ctx.app.inject({
-    method: "POST",
-    url: "/api/actions/award",
-    headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
-    payload: {
-      actorUserId: "admin-user",
-      actorUsername: "admin",
-      actorRoleIds: ["role-admin"],
-      targetGroupIds: [group.id],
-      pointsDelta: 0,
-      currencyDelta: 100,
-      description: "Starting currency for betting tests",
-    },
+  const participant = await ctx.services.participantService.ensureForGroup({
+    guildId: GUILD_ID,
+    discordUserId: "user-1",
+    discordUsername: "alice",
+    groupId: group.id,
   });
 
-  return group;
+  await ctx.services.participantCurrencyService.awardParticipants({
+    guildId: GUILD_ID,
+    actor: {
+      userId: "admin-user",
+      username: "admin",
+      roleIds: ["role-admin"],
+    },
+    targetParticipantIds: [participant.id],
+    currencyDelta: 100,
+    description: "Starting currency for betting tests",
+    systemAction: true,
+  });
+
+  return { group, participant };
 }
 
 describe("betting system", () => {
@@ -119,14 +123,13 @@ describe("betting system", () => {
   });
 
   it("places a bet and creates a ledger entry", async () => {
-    const group = await seedSettingsAndGroup();
+    const { participant } = await seedSettingsAndGroup();
 
     const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
     const result = await ctx.services.bettingService.placeBet({
       guildId: GUILD_ID,
       actor,
-      groupId: group.id,
-      groupDisplayName: "Team Alpha",
+      participantId: participant.id,
       amount: 10,
     });
 
@@ -134,8 +137,7 @@ describe("betting system", () => {
     expect(typeof result.won).toBe("boolean");
     expect(typeof result.newCurrencyBalance).toBe("number");
 
-    // Should have created a ledger entry of type BET_WIN or BET_LOSS
-    const entries = await ctx.prisma.ledgerEntry.findMany({
+    const entries = await ctx.prisma.participantCurrencyEntry.findMany({
       where: { guildId: GUILD_ID, type: { in: ["BET_WIN", "BET_LOSS"] } },
       include: { splits: true },
     });
@@ -151,30 +153,28 @@ describe("betting system", () => {
   });
 
   it("rejects bet when group has insufficient currency", async () => {
-    const group = await seedSettingsAndGroup();
+    const { participant } = await seedSettingsAndGroup();
 
     const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
     await expect(
       ctx.services.bettingService.placeBet({
         guildId: GUILD_ID,
         actor,
-        groupId: group.id,
-        groupDisplayName: "Team Alpha",
+        participantId: participant.id,
         amount: 200,
       }),
     ).rejects.toThrow(/enough currency/i);
   });
 
   it("rejects bet with zero or negative amount", async () => {
-    const group = await seedSettingsAndGroup();
+    const { participant } = await seedSettingsAndGroup();
 
     const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
     await expect(
       ctx.services.bettingService.placeBet({
         guildId: GUILD_ID,
         actor,
-        groupId: group.id,
-        groupDisplayName: "Team Alpha",
+        participantId: participant.id,
         amount: 0,
       }),
     ).rejects.toThrow(/greater than zero/i);
@@ -183,24 +183,21 @@ describe("betting system", () => {
       ctx.services.bettingService.placeBet({
         guildId: GUILD_ID,
         actor,
-        groupId: group.id,
-        groupDisplayName: "Team Alpha",
+        participantId: participant.id,
         amount: -5,
       }),
     ).rejects.toThrow(/greater than zero/i);
   });
 
   it("returns betting stats for a user", async () => {
-    const group = await seedSettingsAndGroup();
+    const { participant } = await seedSettingsAndGroup();
     const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
 
-    // Place several small bets
     for (let i = 0; i < 5; i++) {
       await ctx.services.bettingService.placeBet({
         guildId: GUILD_ID,
         actor,
-        groupId: group.id,
-        groupDisplayName: "Team Alpha",
+        participantId: participant.id,
         amount: 1,
       });
     }
@@ -226,7 +223,7 @@ describe("betting system", () => {
   });
 
   it("allows exclusion voting and blocks betting when excluded", async () => {
-    const group = await seedSettingsAndGroup();
+    const { group, participant } = await seedSettingsAndGroup();
 
     // First vote
     const vote1 = await ctx.services.bettingService.voteExclusion({
@@ -240,7 +237,6 @@ describe("betting system", () => {
     expect(vote1.finalized).toBe(false);
     expect(vote1.expiresAt).toBeNull();
 
-    // Second vote from a different user finalizes the exclusion
     const vote2 = await ctx.services.bettingService.voteExclusion({
       guildId: GUILD_ID,
       voterUserId: "user-3",
@@ -252,14 +248,12 @@ describe("betting system", () => {
     expect(vote2.finalized).toBe(true);
     expect(vote2.expiresAt).not.toBeNull();
 
-    // Now user-1 should be excluded from betting
     const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
     await expect(
       ctx.services.bettingService.placeBet({
         guildId: GUILD_ID,
         actor,
-        groupId: group.id,
-        groupDisplayName: "Team Alpha",
+        participantId: participant.id,
         amount: 1,
       }),
     ).rejects.toThrow(/excluded from betting/i);
@@ -305,7 +299,7 @@ describe("betting system", () => {
   });
 
   it("keeps pending exclusion votes scoped to a single group", async () => {
-    const groupAlpha = await seedSettingsAndGroup();
+    const { group: groupAlpha } = await seedSettingsAndGroup();
     const groupBeta = await ctx.app.inject({
       method: "POST",
       url: "/api/groups",
@@ -380,6 +374,7 @@ describe("betting system", () => {
         appName: "points accelerator",
         pointsName: "points",
         currencyName: "rice",
+        groupPointsPerCurrencyDonation: 10,
         mentorRoleIds: [],
         passivePointsReward: 1,
         passiveCurrencyReward: 1,

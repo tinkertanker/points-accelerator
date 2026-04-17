@@ -59,6 +59,8 @@ enum ParticipantCurrencyEntryType {
   DONATION
   SHOP_REDEMPTION
   SUBMISSION_REWARD
+  BET_WIN
+  BET_LOSS
 }
 
 model GuildConfig {
@@ -113,7 +115,7 @@ model Group {
   shopRedemptions         ShopRedemption[]
   participants            Participant[]
   submissions             Submission[]
-  betExclusions   BetExclusion[]
+  betExclusions           BetExclusion[]
 
   @@unique([guildId, slug])
   @@unique([guildId, roleId])
@@ -389,7 +391,7 @@ model BetExclusion {
   guildId             String
   groupId             String?
   targetUserId        String
-  targetUsername       String?
+  targetUsername      String?
   createdByUserId     String
   createdByUsername   String?
   expiresAt           DateTime
