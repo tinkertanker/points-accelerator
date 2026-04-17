@@ -88,6 +88,7 @@ describe("points accelerator API", () => {
         redemptionChannelId: null,
         listingChannelId: null,
         economyMode: "SIMPLE",
+        betWinChance: 50,
       },
     });
 

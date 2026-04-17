@@ -1187,6 +1187,106 @@ export class BotRuntime {
         });
         return;
       }
+      case "bet": {
+        const amount = interaction.options.getNumber("amount", true);
+        const { participant } = await this.resolveActiveParticipant({
+          discordUserId: interaction.user.id,
+          discordUsername: interaction.user.username,
+          roleIds,
+        });
+        const result = await this.services.bettingService.placeBet({
+          guildId: this.env.GUILD_ID,
+          actor,
+          participantId: participant.id,
+          amount,
+        });
+
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        if (result.won) {
+          await interaction.reply(
+            `🎉 **You won!** You bet ${amount} ${config.currencyName} from your wallet and won. New balance: ${result.newCurrencyBalance} ${config.currencyName}.`,
+          );
+        } else {
+          await interaction.reply(
+            `💸 **You lost!** You bet ${amount} ${config.currencyName} from your wallet and lost. New balance: ${result.newCurrencyBalance} ${config.currencyName}.`,
+          );
+        }
+        return;
+      }
+      case "betstats": {
+        const targetUser = interaction.options.getUser("user") ?? interaction.user;
+        const stats = await this.services.bettingService.getStats(this.env.GUILD_ID, targetUser.id);
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+
+        if (stats.totalBets === 0) {
+          await interaction.reply({
+            content: targetUser.id === interaction.user.id
+              ? "You haven't placed any bets yet."
+              : `${targetUser.username} hasn't placed any bets yet.`,
+            ephemeral: true,
+          });
+          return;
+        }
+
+        const winRate = ((stats.wins / stats.totalBets) * 100).toFixed(1);
+        const label = targetUser.id === interaction.user.id ? "Your" : `${targetUser.username}'s`;
+        const lines = [
+          `📊 **${label} betting stats:**`,
+          `Total bets: ${stats.totalBets}`,
+          `Wins: ${stats.wins} / Losses: ${stats.losses} (${winRate}% win rate)`,
+          `Total won: ${stats.totalWon} ${config.currencyName}`,
+          `Total lost: ${stats.totalLost} ${config.currencyName}`,
+          `Net gain: ${stats.netGain >= 0 ? "+" : ""}${stats.netGain} ${config.currencyName}`,
+        ];
+
+        await interaction.reply({ content: lines.join("\n"), ephemeral: true });
+        return;
+      }
+      case "exclusion": {
+        const targetUser = interaction.options.getUser("user", true);
+        const { group: sourceGroup } = await this.resolveActiveParticipant({
+          discordUserId: interaction.user.id,
+          discordUsername: interaction.user.username,
+          roleIds,
+        });
+
+        const targetMember = await interaction.guild?.members.fetch(targetUser.id).catch(() => null);
+        if (!targetMember) {
+          throw new AppError("Could not find that user in this server.");
+        }
+
+        const { group: targetGroup } = await this.resolveActiveParticipant({
+          discordUserId: targetUser.id,
+          discordUsername: targetUser.username,
+          roleIds: Array.from(targetMember.roles.cache.keys()),
+        });
+
+        if (targetGroup.id !== sourceGroup.id) {
+          throw new AppError("You can only vote to exclude members of your own group.");
+        }
+
+        const result = await this.services.bettingService.voteExclusion({
+          guildId: this.env.GUILD_ID,
+          voterUserId: interaction.user.id,
+          voterUsername: interaction.user.username,
+          targetUserId: targetUser.id,
+          targetUsername: targetUser.username,
+          groupId: sourceGroup.id,
+        });
+
+        if (result.finalized) {
+          const expiresTimestamp = Math.floor(result.expiresAt!.getTime() / 1000);
+          await interaction.reply(
+            `🚫 **${targetUser.username}** has been excluded from betting until <t:${expiresTimestamp}:f>. Two group members voted for this exclusion.`,
+          );
+        } else {
+          await interaction.reply({
+            content: `🗳️ Vote recorded to exclude **${targetUser.username}** from betting. One more teammate from ${sourceGroup.displayName} must also use /exclusion to finalize.`,
+            ephemeral: true,
+          });
+        }
+        return;
+      }
       default:
         throw new AppError("Unknown command.", 404);
     }
@@ -1336,6 +1436,24 @@ export class BotRuntime {
       new SlashCommandBuilder()
         .setName("missing")
         .setDescription("See who hasn't submitted for each assignment (admin)."),
+      new SlashCommandBuilder()
+        .setName("bet")
+        .setDescription("Bet currency in a game of double or nothing.")
+        .addNumberOption((option) =>
+          option.setName("amount").setDescription("Amount of currency to bet").setRequired(true).setMinValue(1),
+        ),
+      new SlashCommandBuilder()
+        .setName("betstats")
+        .setDescription("View betting statistics.")
+        .addUserOption((option) =>
+          option.setName("user").setDescription("User to check stats for (defaults to yourself)").setRequired(false),
+        ),
+      new SlashCommandBuilder()
+        .setName("exclusion")
+        .setDescription("Vote to exclude a group member from betting for a week.")
+        .addUserOption((option) =>
+          option.setName("user").setDescription("The group member to exclude from betting").setRequired(true),
+        ),
     ].map((command) => command.toJSON());
 
     await rest.put(Routes.applicationGuildCommands(this.env.DISCORD_APPLICATION_ID, this.env.DISCORD_GUILD_ID), {

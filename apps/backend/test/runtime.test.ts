@@ -74,6 +74,18 @@ function createRuntimeFixture() {
       transferCurrency: vi.fn().mockResolvedValue({ id: "entry-1" }),
       awardParticipants: vi.fn().mockResolvedValue({ id: "entry-3" }),
     },
+    bettingService: {
+      placeBet: vi.fn().mockResolvedValue({ won: true, amount: 1, newCurrencyBalance: 8 }),
+      getStats: vi.fn().mockResolvedValue({
+        totalBets: 1,
+        wins: 1,
+        losses: 0,
+        totalWon: 1,
+        totalLost: 0,
+        netGain: 1,
+      }),
+      voteExclusion: vi.fn().mockResolvedValue({ finalized: false, expiresAt: null }),
+    },
     listingService: {
       create: vi.fn().mockResolvedValue({ title: "Listing" }),
     },

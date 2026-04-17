@@ -42,6 +42,7 @@ const settingsSchema = z.object({
   redemptionChannelId: z.string().nullable(),
   listingChannelId: z.string().nullable(),
   economyMode: z.enum(["SIMPLE", "ADVANCED"]),
+  betWinChance: z.number().int().min(0).max(100),
 });
 
 const roleCapabilitySchema = z.object({
@@ -380,6 +381,7 @@ export function createApp(params: {
     redemptionChannelId: settings.redemptionChannelId,
     listingChannelId: settings.listingChannelId,
     economyMode: settings.economyMode,
+    betWinChance: settings.betWinChance,
   });
 
   const serialiseGroup = (group: Awaited<ReturnType<AppServices["groupService"]["list"]>>[number]) => ({

@@ -1,0 +1,465 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+import { createTestApp, resetDatabase } from "./helpers/test-app.js";
+import { ensureTestDatabase } from "./helpers/test-database.js";
+
+let cleanupDatabase = () => undefined;
+let ctx: Awaited<ReturnType<typeof createTestApp>>;
+
+const GUILD_ID = "guild-test";
+
+async function seedSettingsAndGroup() {
+  await ctx.app.inject({
+    method: "PUT",
+    url: "/api/settings",
+    headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    payload: {
+      appName: "points accelerator",
+      pointsName: "points",
+      currencyName: "rice",
+      groupPointsPerCurrencyDonation: 10,
+      mentorRoleIds: [],
+      passivePointsReward: 1,
+      passiveCurrencyReward: 1,
+      passiveCooldownSeconds: 60,
+      passiveMinimumCharacters: 4,
+      passiveAllowedChannelIds: [],
+      passiveDeniedChannelIds: [],
+      commandLogChannelId: null,
+      redemptionChannelId: null,
+      listingChannelId: null,
+      economyMode: "SIMPLE",
+      betWinChance: 50,
+    },
+  });
+
+  await ctx.app.inject({
+    method: "PUT",
+    url: "/api/capabilities",
+    headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    payload: [
+      {
+        roleId: "role-admin",
+        roleName: "Admin",
+        canManageDashboard: true,
+        canAward: true,
+        maxAward: 1000,
+        canDeduct: true,
+        canMultiAward: true,
+        canSell: true,
+        canReceiveAwards: true,
+        isGroupRole: false,
+      },
+      {
+        roleId: "role-alpha",
+        roleName: "Team Alpha",
+        canManageDashboard: false,
+        canAward: false,
+        maxAward: null,
+        canDeduct: false,
+        canMultiAward: false,
+        canSell: false,
+        canReceiveAwards: true,
+        isGroupRole: true,
+      },
+    ],
+  });
+
+  const groupResponse = await ctx.app.inject({
+    method: "POST",
+    url: "/api/groups",
+    headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    payload: {
+      displayName: "Team Alpha",
+      slug: "team-alpha",
+      mentorName: "Mentor",
+      roleId: "role-alpha",
+      aliases: ["alpha"],
+      active: true,
+    },
+  });
+
+  const group = groupResponse.json() as { id: string };
+  const participant = await ctx.services.participantService.ensureForGroup({
+    guildId: GUILD_ID,
+    discordUserId: "user-1",
+    discordUsername: "alice",
+    groupId: group.id,
+  });
+
+  await ctx.services.participantCurrencyService.awardParticipants({
+    guildId: GUILD_ID,
+    actor: {
+      userId: "admin-user",
+      username: "admin",
+      roleIds: ["role-admin"],
+    },
+    targetParticipantIds: [participant.id],
+    currencyDelta: 100,
+    description: "Starting currency for betting tests",
+    systemAction: true,
+  });
+
+  return { group, participant };
+}
+
+describe("betting system", () => {
+  beforeAll(async () => {
+    const managed = ensureTestDatabase();
+    cleanupDatabase = managed.cleanup;
+    ctx = await createTestApp(managed.url);
+  });
+
+  beforeEach(async () => {
+    await resetDatabase(ctx.prisma);
+  });
+
+  afterAll(async () => {
+    if (ctx) {
+      await ctx.app.close();
+      await ctx.prisma.$disconnect();
+    }
+    cleanupDatabase();
+  });
+
+  it("places a bet and creates a ledger entry", async () => {
+    const { participant } = await seedSettingsAndGroup();
+
+    const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
+    const result = await ctx.services.bettingService.placeBet({
+      guildId: GUILD_ID,
+      actor,
+      participantId: participant.id,
+      amount: 10,
+    });
+
+    expect(result.amount).toBe(10);
+    expect(typeof result.won).toBe("boolean");
+    expect(typeof result.newCurrencyBalance).toBe("number");
+
+    const entries = await ctx.prisma.participantCurrencyEntry.findMany({
+      where: { guildId: GUILD_ID, type: { in: ["BET_WIN", "BET_LOSS"] } },
+      include: { splits: true },
+    });
+    expect(entries).toHaveLength(1);
+
+    if (result.won) {
+      expect(entries[0].type).toBe("BET_WIN");
+      expect(result.newCurrencyBalance).toBe(110);
+    } else {
+      expect(entries[0].type).toBe("BET_LOSS");
+      expect(result.newCurrencyBalance).toBe(90);
+    }
+  });
+
+  it("rejects bet when the participant wallet has insufficient currency", async () => {
+    const { participant } = await seedSettingsAndGroup();
+
+    const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
+    await expect(
+      ctx.services.bettingService.placeBet({
+        guildId: GUILD_ID,
+        actor,
+        participantId: participant.id,
+        amount: 200,
+      }),
+    ).rejects.toThrow(/enough currency/i);
+  });
+
+  it("rejects bets against another participant's wallet", async () => {
+    const { group, participant } = await seedSettingsAndGroup();
+    const otherParticipant = await ctx.services.participantService.ensureForGroup({
+      guildId: GUILD_ID,
+      discordUserId: "user-2",
+      discordUsername: "bob",
+      groupId: group.id,
+    });
+
+    await ctx.services.participantCurrencyService.awardParticipants({
+      guildId: GUILD_ID,
+      actor: {
+        userId: "admin-user",
+        username: "admin",
+        roleIds: ["role-admin"],
+      },
+      targetParticipantIds: [otherParticipant.id],
+      currencyDelta: 50,
+      description: "Starting currency for another participant",
+      systemAction: true,
+    });
+
+    const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
+    await expect(
+      ctx.services.bettingService.placeBet({
+        guildId: GUILD_ID,
+        actor,
+        participantId: otherParticipant.id,
+        amount: 10,
+      }),
+    ).rejects.toThrow(/only bet with their own wallet currency/i);
+
+    expect(participant.id).not.toBe(otherParticipant.id);
+  });
+
+  it("rejects bet with zero or negative amount", async () => {
+    const { participant } = await seedSettingsAndGroup();
+
+    const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
+    await expect(
+      ctx.services.bettingService.placeBet({
+        guildId: GUILD_ID,
+        actor,
+        participantId: participant.id,
+        amount: 0,
+      }),
+    ).rejects.toThrow(/greater than zero/i);
+
+    await expect(
+      ctx.services.bettingService.placeBet({
+        guildId: GUILD_ID,
+        actor,
+        participantId: participant.id,
+        amount: -5,
+      }),
+    ).rejects.toThrow(/greater than zero/i);
+  });
+
+  it("returns betting stats for a user", async () => {
+    const { participant } = await seedSettingsAndGroup();
+    const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
+
+    for (let i = 0; i < 5; i++) {
+      await ctx.services.bettingService.placeBet({
+        guildId: GUILD_ID,
+        actor,
+        participantId: participant.id,
+        amount: 1,
+      });
+    }
+
+    const stats = await ctx.services.bettingService.getStats(GUILD_ID, "user-1");
+    expect(stats.totalBets).toBe(5);
+    expect(stats.wins + stats.losses).toBe(5);
+    expect(stats.totalWon).toBeGreaterThanOrEqual(0);
+    expect(stats.totalLost).toBeGreaterThanOrEqual(0);
+  });
+
+  it("returns empty stats for a user with no bets", async () => {
+    await seedSettingsAndGroup();
+    const stats = await ctx.services.bettingService.getStats(GUILD_ID, "unknown-user");
+    expect(stats).toEqual({
+      totalBets: 0,
+      wins: 0,
+      losses: 0,
+      totalWon: 0,
+      totalLost: 0,
+      netGain: 0,
+    });
+  });
+
+  it("allows exclusion voting and blocks betting when excluded", async () => {
+    const { group, participant } = await seedSettingsAndGroup();
+
+    // First vote
+    const vote1 = await ctx.services.bettingService.voteExclusion({
+      guildId: GUILD_ID,
+      voterUserId: "user-2",
+      voterUsername: "bob",
+      targetUserId: "user-1",
+      targetUsername: "alice",
+      groupId: group.id,
+    });
+    expect(vote1.finalized).toBe(false);
+    expect(vote1.expiresAt).toBeNull();
+
+    const vote2 = await ctx.services.bettingService.voteExclusion({
+      guildId: GUILD_ID,
+      voterUserId: "user-3",
+      voterUsername: "carol",
+      targetUserId: "user-1",
+      targetUsername: "alice",
+      groupId: group.id,
+    });
+    expect(vote2.finalized).toBe(true);
+    expect(vote2.expiresAt).not.toBeNull();
+
+    const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
+    await expect(
+      ctx.services.bettingService.placeBet({
+        guildId: GUILD_ID,
+        actor,
+        participantId: participant.id,
+        amount: 1,
+      }),
+    ).rejects.toThrow(/excluded from betting/i);
+  });
+
+  it("prevents self-exclusion voting", async () => {
+    await seedSettingsAndGroup();
+
+    await expect(
+      ctx.services.bettingService.voteExclusion({
+        guildId: GUILD_ID,
+        voterUserId: "user-1",
+        voterUsername: "alice",
+        targetUserId: "user-1",
+        targetUsername: "alice",
+        groupId: "group-alpha",
+      }),
+    ).rejects.toThrow(/cannot exclude yourself/i);
+  });
+
+  it("prevents duplicate votes from the same user", async () => {
+    const { group } = await seedSettingsAndGroup();
+
+    await ctx.services.bettingService.voteExclusion({
+      guildId: GUILD_ID,
+      voterUserId: "user-2",
+      voterUsername: "bob",
+      targetUserId: "user-1",
+      targetUsername: "alice",
+      groupId: group.id,
+    });
+
+    await expect(
+      ctx.services.bettingService.voteExclusion({
+        guildId: GUILD_ID,
+        voterUserId: "user-2",
+        voterUsername: "bob",
+        targetUserId: "user-1",
+        targetUsername: "alice",
+        groupId: group.id,
+      }),
+    ).rejects.toThrow(/already voted/i);
+  });
+
+  it("expires stale pending exclusion votes before accepting a new vote", async () => {
+    const { group } = await seedSettingsAndGroup();
+
+    const staleVote = await ctx.prisma.betExclusion.create({
+      data: {
+        guildId: GUILD_ID,
+        groupId: group.id,
+        targetUserId: "user-1",
+        targetUsername: "alice",
+        createdByUserId: "user-2",
+        createdByUsername: "bob",
+        expiresAt: new Date(0),
+        createdAt: new Date(Date.now() - (25 * 60 * 60 * 1000)),
+      },
+    });
+
+    const result = await ctx.services.bettingService.voteExclusion({
+      guildId: GUILD_ID,
+      voterUserId: "user-2",
+      voterUsername: "bob",
+      targetUserId: "user-1",
+      targetUsername: "alice",
+      groupId: group.id,
+    });
+
+    expect(result.finalized).toBe(false);
+    expect(result.expiresAt).toBeNull();
+
+    const deletedStaleVote = await ctx.prisma.betExclusion.findUnique({
+      where: { id: staleVote.id },
+    });
+    expect(deletedStaleVote).toBeNull();
+  });
+
+  it("keeps pending exclusion votes scoped to a single group", async () => {
+    const { group: groupAlpha } = await seedSettingsAndGroup();
+    const groupBeta = await ctx.app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        displayName: "Team Beta",
+        slug: "team-beta",
+        mentorName: "Mentor",
+        roleId: "role-beta",
+        aliases: ["beta"],
+        active: true,
+      },
+    });
+
+    const beta = groupBeta.json() as { id: string };
+
+    const firstVote = await ctx.services.bettingService.voteExclusion({
+      guildId: GUILD_ID,
+      voterUserId: "user-2",
+      voterUsername: "bob",
+      targetUserId: "user-1",
+      targetUsername: "alice",
+      groupId: groupAlpha.id,
+    });
+
+    const secondVote = await ctx.services.bettingService.voteExclusion({
+      guildId: GUILD_ID,
+      voterUserId: "user-3",
+      voterUsername: "carol",
+      targetUserId: "user-1",
+      targetUsername: "alice",
+      groupId: beta.id,
+    });
+
+    expect(firstVote.finalized).toBe(false);
+    expect(secondVote.finalized).toBe(false);
+
+    const pendingVotes = await ctx.prisma.betExclusion.findMany({
+      where: {
+        guildId: GUILD_ID,
+        targetUserId: "user-1",
+        expiresAt: new Date(0),
+      },
+      orderBy: { groupId: "asc" },
+    });
+
+    expect(pendingVotes).toHaveLength(2);
+    expect(pendingVotes.map((vote) => vote.groupId)).toEqual([groupAlpha.id, beta.id].sort());
+  });
+
+  it("settings API includes betWinChance", async () => {
+    await seedSettingsAndGroup();
+
+    const response = await ctx.app.inject({
+      method: "GET",
+      url: "/api/settings",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+
+    const settings = response.json() as { betWinChance: number };
+    expect(settings.betWinChance).toBe(50);
+  });
+
+  it("settings API allows updating betWinChance", async () => {
+    await seedSettingsAndGroup();
+
+    const response = await ctx.app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        appName: "points accelerator",
+        pointsName: "points",
+        currencyName: "rice",
+        groupPointsPerCurrencyDonation: 10,
+        mentorRoleIds: [],
+        passivePointsReward: 1,
+        passiveCurrencyReward: 1,
+        passiveCooldownSeconds: 60,
+        passiveMinimumCharacters: 4,
+        passiveAllowedChannelIds: [],
+        passiveDeniedChannelIds: [],
+        commandLogChannelId: null,
+        redemptionChannelId: null,
+        listingChannelId: null,
+        economyMode: "SIMPLE",
+        betWinChance: 75,
+      },
+    });
+
+    const settings = response.json() as { betWinChance: number };
+    expect(settings.betWinChance).toBe(75);
+  });
+});

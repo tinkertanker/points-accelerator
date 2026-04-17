@@ -189,6 +189,22 @@ export default function SettingsPanel({
               </select>
             </label>
             <label>
+              Bet win chance (%)
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={settingsDraft.betWinChance}
+                onChange={(event) =>
+                  onSettingsChange({
+                    ...settingsDraft,
+                    betWinChance: Math.min(100, Math.max(0, Math.round(Number(event.target.value)))),
+                  })
+                }
+              />
+            </label>
+            <label>
               Listing channel
               <select
                 value={settingsDraft.listingChannelId ?? ""}
