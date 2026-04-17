@@ -294,6 +294,48 @@ html[data-theme="dark"] .theme-toggle {
   gap: 0.5rem;
 }
 
+.topbar-guide-link {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.35rem 0.65rem;
+}
+
+.topbar-guide-link:hover {
+  background: var(--gradient-subtle);
+  border-color: transparent;
+  color: var(--text);
+}
+
+.topbar-guide-link.is-active {
+  background: var(--gradient-medium);
+  color: var(--primary);
+  border-color: transparent;
+}
+
+.guide-inline-link {
+  background: none;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  display: inline;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+
+.guide-inline-link:hover {
+  color: var(--primary-hover);
+  border: none;
+  background: none;
+}
+
 .preview-access-picker {
   align-items: center;
   color: var(--text-dim);
@@ -1392,4 +1434,217 @@ dl.stats-row {
 
 .assignment-table .col-deadline input {
   font-size: 0.8rem;
+}
+
+/* --- Guide panel --- */
+
+.guide-layout {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(0, 0.2fr) minmax(0, 0.8fr);
+  align-items: start;
+  overflow: hidden;
+}
+
+.guide-content {
+  min-width: 0;
+}
+
+.guide-nav {
+  position: sticky;
+  top: 1rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.guide-nav ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.guide-nav__link {
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0.4rem 0.65rem;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+  width: 100%;
+}
+
+.guide-nav__link:hover {
+  background: var(--gradient-subtle);
+  color: var(--text);
+  border-color: transparent;
+}
+
+/* Guide sections (collapsible) */
+.guide-section {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.guide-section summary {
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 700;
+  list-style: none;
+  padding: 1rem 1.25rem;
+  position: relative;
+  padding-left: 2.25rem;
+  user-select: none;
+}
+
+.guide-section summary:hover {
+  color: var(--primary);
+}
+
+.guide-section summary::before {
+  content: "▸";
+  position: absolute;
+  left: 1rem;
+  top: 1.05rem;
+  color: var(--primary);
+  font-size: 1rem;
+  transition: transform 0.15s ease;
+}
+
+.guide-section[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.guide-section summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Prose content inside sections */
+.guide-prose {
+  padding: 0 1.25rem 1.25rem;
+}
+
+.guide-prose h3 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 1.25rem 0 0.4rem;
+}
+
+.guide-prose h3:first-child {
+  margin-top: 0;
+}
+
+.guide-prose p {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  margin: 0 0 0.75rem;
+}
+
+.guide-prose code {
+  background: var(--gradient-subtle);
+  border-radius: 4px;
+  font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
+  font-size: 0.78rem;
+  padding: 0.15em 0.4em;
+}
+
+/* Definition list for flows */
+.guide-flow {
+  display: grid;
+  gap: 0.2rem 0.75rem;
+  grid-template-columns: auto 1fr;
+  margin: 0.5rem 0 1rem;
+  padding: 0;
+}
+
+.guide-flow dt {
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.guide-flow dd {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+/* Command reference table */
+.guide-command-table {
+  min-width: 40rem;
+}
+
+.guide-command-table td code {
+  background: var(--gradient-subtle);
+  border-radius: 4px;
+  font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
+  font-size: 0.75rem;
+  padding: 0.12em 0.35em;
+  white-space: nowrap;
+}
+
+.guide-group-heading {
+  background: var(--gradient-subtle) !important;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 0.45rem 0.4rem !important;
+  text-transform: uppercase;
+}
+
+/* Guide walkthrough inside details — always single column */
+.guide-prose .walkthrough {
+  grid-template-columns: 1fr;
+  margin-bottom: 1rem;
+}
+
+/* Prevent overflow inside guide sections */
+.guide-section {
+  overflow: hidden;
+}
+
+.guide-prose {
+  overflow-x: auto;
+}
+
+/* Responsive: sidebar → top strip */
+@media (max-width: 1040px) {
+  .guide-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .guide-nav {
+    position: static;
+    background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    border-radius: 12px;
+    padding: 0.35rem;
+  }
+
+  .guide-nav ul {
+    flex-direction: row;
+    gap: 0.2rem;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .guide-nav__link {
+    font-size: 0.75rem;
+    padding: 0.35rem 0.6rem;
+    white-space: nowrap;
+  }
 }

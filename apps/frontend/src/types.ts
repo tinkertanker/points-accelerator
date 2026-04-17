@@ -147,7 +147,8 @@ export type TabId =
   | "groups"
   | "shop"
   | "assignments"
-  | "activity";
+  | "activity"
+  | "guide";
 
 export type Assignment = {
   id: string;

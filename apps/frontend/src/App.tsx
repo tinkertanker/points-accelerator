@@ -1,8 +1,9 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useCallback, useEffect, useState } from "react";
 
 import ActivityPanel from "./components/ActivityPanel";
 import AssignmentsPanel from "./components/AssignmentsPanel";
 import GroupsPanel from "./components/GroupsPanel";
+import GuidePanel from "./components/GuidePanel";
 import OverviewPanel from "./components/OverviewPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import ShopPanel from "./components/ShopPanel";
@@ -128,8 +129,15 @@ function toAssignmentDraft(assignment?: Assignment): AssignmentDraft {
   };
 }
 
+const ALL_TAB_IDS = new Set<string>(["overview", "settings", "groups", "shop", "assignments", "activity", "guide"]);
+
+function tabFromHash(): TabId | null {
+  const raw = window.location.hash.replace("#", "");
+  return ALL_TAB_IDS.has(raw) ? (raw as TabId) : null;
+}
+
 const DASHBOARD_TABS: TabDefinition[] = [
-  { id: "overview", label: "Overview", description: "Launch checklist and current totals" },
+  { id: "overview", label: "Overview", description: "At-a-glance totals" },
   { id: "settings", label: "Settings", description: "Economy rules and role capabilities" },
   { id: "groups", label: "Groups", description: "Team mapping and participants" },
   { id: "shop", label: "Shop", description: "Catalogue, pricing, and fulfilment" },
@@ -209,7 +217,12 @@ export default function App() {
   const [status, setStatus] = useState(getInitialStatus);
   const [isInitialising, setIsInitialising] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabId>(getDefaultTab());
+  const [activeTab, setActiveTabRaw] = useState<TabId>(() => tabFromHash() ?? getDefaultTab());
+
+  const setActiveTab = useCallback((tab: TabId) => {
+    setActiveTabRaw(tab);
+    window.history.pushState(null, "", `#${tab}`);
+  }, []);
 
   const discordRoles = bootstrap?.discord.roles ?? [];
   const discordChannels = bootstrap?.discord.channels ?? [];
@@ -291,7 +304,9 @@ export default function App() {
 
         if (!cancelled) {
           setSessionUser(session.user);
-          setActiveTab(getDefaultTab(session.user.dashboardAccessLevel));
+          if (!tabFromHash()) {
+            setActiveTab(getDefaultTab(session.user.dashboardAccessLevel));
+          }
         }
 
         const payload = await api.bootstrap();
@@ -319,6 +334,15 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const onPopState = () => {
+      const tab = tabFromHash();
+      if (tab) setActiveTabRaw(tab);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   const handleLogin = () => {
     setStatus("Redirecting to Discord...");
     api.beginDiscordLogin();
@@ -344,10 +368,10 @@ export default function App() {
 
     switch (activeTab) {
       case "overview":
-        if (!settingsDraft || !sessionUser.canManageSettings) {
+        if (!sessionUser.canManageSettings) {
           return null;
         }
-        return <OverviewPanel bootstrap={bootstrap} settingsDraft={settingsDraft} />;
+        return <OverviewPanel bootstrap={bootstrap} onOpenGuide={() => setActiveTab("guide")} />;
       case "settings":
         if (!settingsDraft || !sessionUser.canManageSettings) {
           return null;
@@ -416,6 +440,8 @@ export default function App() {
             canViewLedger={sessionUser.canManageSettings}
           />
         );
+      case "guide":
+        return <GuidePanel />;
       default:
         return null;
     }
@@ -566,6 +592,13 @@ export default function App() {
                   </select>
                 </label>
               ) : null}
+              <button
+                type="button"
+                className={`topbar-guide-link${activeTab === "guide" ? " is-active" : ""}`}
+                onClick={() => setActiveTab("guide")}
+              >
+                Guide
+              </button>
               {sessionUser ? (
                 <p className="session-badge">
                   {sessionUser.avatarUrl ? <img src={sessionUser.avatarUrl} alt="" /> : null}
