@@ -96,7 +96,6 @@ model GuildConfig {
   participants                 Participant[]
   assignments                  Assignment[]
   submissions                  Submission[]
-  betExclusions                BetExclusion[]
 }
 
 model Group {
@@ -115,8 +114,6 @@ model Group {
   shopRedemptions         ShopRedemption[]
   participants            Participant[]
   submissions             Submission[]
-  betExclusions           BetExclusion[]
-
   @@unique([guildId, slug])
   @@unique([guildId, roleId])
   @@index([guildId, active, displayName])
@@ -384,22 +381,4 @@ model Submission {
   @@index([guildId, assignmentId, createdAt(sort: Desc)])
   @@index([guildId, participantId, createdAt(sort: Desc)])
   @@index([guildId, groupId, createdAt(sort: Desc)])
-}
-
-model BetExclusion {
-  id                  String      @id @default(cuid())
-  guildId             String
-  groupId             String?
-  targetUserId        String
-  targetUsername      String?
-  createdByUserId     String
-  createdByUsername   String?
-  expiresAt           DateTime
-  createdAt           DateTime    @default(now())
-  guild               GuildConfig @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
-  group               Group?      @relation(fields: [groupId], references: [id], onDelete: Cascade)
-
-  @@index([guildId, targetUserId, expiresAt])
-  @@index([groupId, expiresAt])
-  @@unique([guildId, targetUserId, groupId, expiresAt])
 }

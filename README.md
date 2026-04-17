@@ -43,7 +43,7 @@ The bot also supports participant-wallet betting: students can place double-or-n
 - Discord-login leaderboard view for any guild member
 - Participant wallet transfers plus wallet-to-group point donations
 - Custom shop with personal purchases and majority-approved group purchases
-- Participant wallet betting with configurable win chance and teammate exclusions
+- Participant wallet betting with configurable win chance
 - Marketplace listings with optional Discord channel posting
 - Role capability matrix
 - Discord OAuth dashboard for staff configuration and review
@@ -56,7 +56,7 @@ The bot also supports participant-wallet betting: students can place double-or-n
 
 - Staff roles such as admins or alumni: `/award`, `/deduct`
 - Students: `/balance`, `/leaderboard`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`
-- Students: `/balance`, `/leaderboard`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`, `/bet`, `/betstats`, `/exclusion`
+- Students: `/balance`, `/leaderboard`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`, `/bet`, `/betstats`
 
 ## Submission command set
 
@@ -71,4 +71,4 @@ The dashboard uses Discord sign-in with three access tiers:
 
 After signing into the dashboard, use the built-in walkthrough in the control room to configure role powers, map groups, create assignments, and smoke test the commands in Discord.
 
-For betting, review `Bet win chance (%)` in the dashboard settings before testing `/bet`; it defaults to `50` if you do not change it. `/exclusion` requires two distinct teammates from the same group, and pending votes stay scoped to that group even if role mappings change later.
+For betting, review `Bet win chance (%)` in the dashboard settings before testing `/bet`; it defaults to `50` if you do not change it.

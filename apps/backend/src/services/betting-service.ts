@@ -2,9 +2,8 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { AppError } from "../utils/app-error.js";
 import { decimal, decimalToNumber } from "../utils/decimal.js";
-import type { ConfigService } from "./config-service.js";
-import type { AuditService } from "./audit-service.js";
 import type { ParticipantCurrencyService } from "./participant-currency-service.js";
+import type { ConfigService } from "./config-service.js";
 
 type Actor = {
   userId: string;
@@ -27,15 +26,11 @@ type BetStats = {
   netGain: number;
 };
 
-const BET_EXCLUSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
-const PENDING_BET_EXCLUSION_VOTE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
 export class BettingService {
   public constructor(
     private readonly prisma: PrismaClient,
     private readonly configService: ConfigService,
     private readonly participantCurrencyService: ParticipantCurrencyService,
-    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -78,8 +73,6 @@ export class BettingService {
       if (lockedParticipants[0].discordUserId !== params.actor.userId) {
         throw new AppError("Participants may only bet with their own wallet currency.", 403);
       }
-
-      await this.assertNotExcluded(params.guildId, params.actor.userId, tx);
 
       const currentBalance = await tx.participantCurrencySplit.aggregate({
         where: { participantId: params.participantId },
@@ -186,189 +179,5 @@ export class BettingService {
       totalLost,
       netGain: totalWon - totalLost,
     };
-  }
-
-  /**
-   * Check if a user has an active betting exclusion. Throws if excluded.
-   */
-  public async assertNotExcluded(
-    guildId: string,
-    userId: string,
-    executor: PrismaClient | Prisma.TransactionClient = this.prisma,
-  ): Promise<void> {
-    const exclusion = await executor.betExclusion.findFirst({
-      where: {
-        guildId,
-        targetUserId: userId,
-        expiresAt: { gt: new Date() },
-      },
-      orderBy: { expiresAt: "desc" },
-    });
-
-    if (exclusion) {
-      const expiresTimestamp = Math.floor(exclusion.expiresAt.getTime() / 1000);
-      throw new AppError(
-        `You are excluded from betting until <t:${expiresTimestamp}:f>.`,
-        403,
-      );
-    }
-  }
-
-  /**
-   * Vote to exclude a group member from betting. The command layer is
-   * responsible for validating that the target currently belongs to the same
-   * group as the voter. This service persists that group context so pending
-   * votes cannot be finalized across groups if membership changes later.
-   */
-  public async voteExclusion(params: {
-    guildId: string;
-    voterUserId: string;
-    voterUsername?: string;
-    targetUserId: string;
-    targetUsername?: string;
-    groupId: string;
-  }): Promise<{ finalized: boolean; expiresAt: Date | null }> {
-    if (params.voterUserId === params.targetUserId) {
-      throw new AppError("You cannot exclude yourself.", 400);
-    }
-
-    const now = new Date();
-    const maxTransactionRetries = 3;
-    const pendingEpoch = new Date(0);
-    const pendingVoteCutoff = new Date(now.getTime() - PENDING_BET_EXCLUSION_VOTE_TTL_MS);
-    let attempt = 0;
-
-    while (true) {
-      try {
-        const result = await this.prisma.$transaction(
-          async (tx) => {
-            const activeExclusion = await tx.betExclusion.findFirst({
-              where: {
-                guildId: params.guildId,
-                targetUserId: params.targetUserId,
-                expiresAt: { gt: new Date() },
-              },
-              orderBy: { expiresAt: "desc" },
-            });
-
-            if (activeExclusion) {
-              const expiresTimestamp = Math.floor(activeExclusion.expiresAt.getTime() / 1000);
-              throw new AppError(
-                `This user is already excluded from betting until <t:${expiresTimestamp}:f>.`,
-                409,
-              );
-            }
-
-            await tx.betExclusion.deleteMany({
-              where: {
-                guildId: params.guildId,
-                targetUserId: params.targetUserId,
-                groupId: params.groupId,
-                expiresAt: pendingEpoch,
-                createdAt: { lte: pendingVoteCutoff },
-              },
-            });
-
-            const pendingVote = await tx.betExclusion.findFirst({
-              where: {
-                guildId: params.guildId,
-                targetUserId: params.targetUserId,
-                groupId: params.groupId,
-                expiresAt: pendingEpoch,
-                createdAt: { gt: pendingVoteCutoff },
-              },
-            });
-
-            if (pendingVote) {
-              if (pendingVote.createdByUserId === params.voterUserId) {
-                throw new AppError("You have already voted to exclude this user. A second teammate must also vote.");
-              }
-
-              const expiresAt = new Date(Date.now() + BET_EXCLUSION_DURATION_MS);
-              const finalized = await tx.betExclusion.updateMany({
-                where: {
-                  id: pendingVote.id,
-                  expiresAt: pendingEpoch,
-                },
-                data: { expiresAt },
-              });
-
-              if (finalized.count !== 1) {
-                throw new AppError("This exclusion vote is no longer pending. Please try again.");
-              }
-
-              return {
-                finalized: true as const,
-                expiresAt,
-                audit: {
-                  action: "bet.exclusion.finalized" as const,
-                  entityId: pendingVote.id,
-                  payload: {
-                    targetUserId: params.targetUserId,
-                    targetUsername: params.targetUsername,
-                    groupId: params.groupId,
-                    firstVoterUserId: pendingVote.createdByUserId,
-                    secondVoterUserId: params.voterUserId,
-                    expiresAt: expiresAt.toISOString(),
-                  },
-                },
-              };
-            }
-
-            const vote = await tx.betExclusion.create({
-              data: {
-                guildId: params.guildId,
-                groupId: params.groupId,
-                targetUserId: params.targetUserId,
-                targetUsername: params.targetUsername,
-                createdByUserId: params.voterUserId,
-                createdByUsername: params.voterUsername,
-                expiresAt: pendingEpoch,
-              },
-            });
-
-            return {
-              finalized: false as const,
-              expiresAt: null,
-              audit: {
-                action: "bet.exclusion.voted" as const,
-                entityId: vote.id,
-                payload: {
-                  targetUserId: params.targetUserId,
-                  targetUsername: params.targetUsername,
-                  groupId: params.groupId,
-                },
-              },
-            };
-          },
-          {
-            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-          },
-        );
-
-        await this.auditService.record({
-          guildId: params.guildId,
-          actorUserId: params.voterUserId,
-          actorUsername: params.voterUsername,
-          action: result.audit.action,
-          entityType: "BetExclusion",
-          entityId: result.audit.entityId,
-          payload: result.audit.payload,
-        });
-
-        return { finalized: result.finalized, expiresAt: result.expiresAt };
-      } catch (error) {
-        if (
-          error instanceof Prisma.PrismaClientKnownRequestError
-          && (error.code === "P2002" || error.code === "P2034")
-          && attempt < maxTransactionRetries
-        ) {
-          attempt += 1;
-          continue;
-        }
-
-        throw error;
-      }
-    }
   }
 }

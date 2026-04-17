@@ -86,7 +86,7 @@ test("authenticated admin can see the full control room", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByRole("tab", { name: /overview/i })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("heading", { name: /class launch checklist/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /open the guide/i })).toBeVisible();
   await expect(page.getByRole("tab", { name: /settings/i })).toBeVisible();
   await expect(page.getByRole("tab", { name: /groups/i })).toBeVisible();
   await expect(page.getByRole("tab", { name: /activity/i })).toBeVisible();

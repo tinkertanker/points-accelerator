@@ -29,7 +29,7 @@ export function createServices(prisma: PrismaClient) {
     auditService,
     participantCurrencyService,
   );
-  const bettingService = new BettingService(prisma, configService, participantCurrencyService, auditService);
+  const bettingService = new BettingService(prisma, configService, participantCurrencyService);
   const shopService = new ShopService(prisma, economyService, participantCurrencyService, auditService);
   const listingService = new ListingService(prisma, roleCapabilityService, auditService);
   const participantService = new ParticipantService(prisma);

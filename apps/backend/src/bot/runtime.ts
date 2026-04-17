@@ -1242,51 +1242,6 @@ export class BotRuntime {
         await interaction.reply({ content: lines.join("\n"), ephemeral: true });
         return;
       }
-      case "exclusion": {
-        const targetUser = interaction.options.getUser("user", true);
-        const { group: sourceGroup } = await this.resolveActiveParticipant({
-          discordUserId: interaction.user.id,
-          discordUsername: interaction.user.username,
-          roleIds,
-        });
-
-        const targetMember = await interaction.guild?.members.fetch(targetUser.id).catch(() => null);
-        if (!targetMember) {
-          throw new AppError("Could not find that user in this server.");
-        }
-
-        const { group: targetGroup } = await this.resolveActiveParticipant({
-          discordUserId: targetUser.id,
-          discordUsername: targetUser.username,
-          roleIds: Array.from(targetMember.roles.cache.keys()),
-        });
-
-        if (targetGroup.id !== sourceGroup.id) {
-          throw new AppError("You can only vote to exclude members of your own group.");
-        }
-
-        const result = await this.services.bettingService.voteExclusion({
-          guildId: this.env.GUILD_ID,
-          voterUserId: interaction.user.id,
-          voterUsername: interaction.user.username,
-          targetUserId: targetUser.id,
-          targetUsername: targetUser.username,
-          groupId: sourceGroup.id,
-        });
-
-        if (result.finalized) {
-          const expiresTimestamp = Math.floor(result.expiresAt!.getTime() / 1000);
-          await interaction.reply(
-            `🚫 **${targetUser.username}** has been excluded from betting until <t:${expiresTimestamp}:f>. Two group members voted for this exclusion.`,
-          );
-        } else {
-          await interaction.reply({
-            content: `🗳️ Vote recorded to exclude **${targetUser.username}** from betting. One more teammate from ${sourceGroup.displayName} must also use /exclusion to finalize.`,
-            ephemeral: true,
-          });
-        }
-        return;
-      }
       default:
         throw new AppError("Unknown command.", 404);
     }
@@ -1447,12 +1402,6 @@ export class BotRuntime {
         .setDescription("View betting statistics.")
         .addUserOption((option) =>
           option.setName("user").setDescription("User to check stats for (defaults to yourself)").setRequired(false),
-        ),
-      new SlashCommandBuilder()
-        .setName("exclusion")
-        .setDescription("Vote to exclude a group member from betting for a week.")
-        .addUserOption((option) =>
-          option.setName("user").setDescription("The group member to exclude from betting").setRequired(true),
         ),
     ].map((command) => command.toJSON());
 

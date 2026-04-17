@@ -84,7 +84,6 @@ function createRuntimeFixture() {
         totalLost: 0,
         netGain: 1,
       }),
-      voteExclusion: vi.fn().mockResolvedValue({ finalized: false, expiresAt: null }),
     },
     listingService: {
       create: vi.fn().mockResolvedValue({ title: "Listing" }),

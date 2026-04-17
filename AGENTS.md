@@ -34,7 +34,6 @@ It is a monorepo with:
 - Approved and outstanding submissions create `SUBMISSION_REWARD` group ledger entries for points and participant wallet entries for currency. Outstanding adds the bonus reward.
 - System-generated rewards must use explicit system paths instead of actor-role permission checks.
 - Submission images may be stored in Cloudflare R2, with Discord attachment URLs as fallback when object storage is not configured.
-- Betting exclusions require two distinct voters from the same group, and pending votes must stay scoped to that group until they expire or finalize.
 
 ## Common commands
 
@@ -61,7 +60,7 @@ Useful backend commands:
 - If `BootstrapPayload` changes, keep `apps/frontend/src/designPreview.ts` and Playwright bootstrap mocks in sync.
 - Prefer validating the split economy end-to-end: passive rewards, awards/deductions, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`, and `/sell`.
 - Prefer validating submission flows end-to-end as well: auto-provisioned participants, `/submit`, `/submissions`, `/missing`, `/review_submission`, and dashboard review.
-- Include `/bet`, `/betstats`, and `/exclusion` when touching betting or participant currency flow behaviour.
+- Include `/bet` and `/betstats` when touching betting or participant currency flow behaviour.
 
 ## Deployment
 
