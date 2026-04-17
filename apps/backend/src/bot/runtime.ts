@@ -1367,19 +1367,19 @@ export class BotRuntime {
       new SlashCommandBuilder()
         .setName("award")
         .setDescription("Award group points, participant currency, or both.")
+        .addStringOption((option) => option.setName("reason").setDescription("Award reason").setRequired(true))
         .addStringOption((option) => option.setName("targets").setDescription("Comma-separated group aliases or role mentions").setRequired(false))
         .addNumberOption((option) => option.setName("points").setDescription("Points delta for the target groups").setRequired(false))
         .addUserOption((option) => option.setName("member").setDescription("Member whose wallet should change").setRequired(false))
-        .addNumberOption((option) => option.setName("currency").setDescription("Currency delta for the selected member").setRequired(false))
-        .addStringOption((option) => option.setName("reason").setDescription("Award reason").setRequired(true)),
+        .addNumberOption((option) => option.setName("currency").setDescription("Currency delta for the selected member").setRequired(false)),
       new SlashCommandBuilder()
         .setName("deduct")
         .setDescription("Deduct group points, participant currency, or both.")
+        .addStringOption((option) => option.setName("reason").setDescription("Deduction reason").setRequired(true))
         .addStringOption((option) => option.setName("targets").setDescription("Comma-separated group aliases or role mentions").setRequired(false))
         .addNumberOption((option) => option.setName("points").setDescription("Points delta for the target groups").setRequired(false))
         .addUserOption((option) => option.setName("member").setDescription("Member whose wallet should change").setRequired(false))
-        .addNumberOption((option) => option.setName("currency").setDescription("Currency delta for the selected member").setRequired(false))
-        .addStringOption((option) => option.setName("reason").setDescription("Deduction reason").setRequired(true)),
+        .addNumberOption((option) => option.setName("currency").setDescription("Currency delta for the selected member").setRequired(false)),
       new SlashCommandBuilder()
         .setName("store")
         .setDescription("Browse the custom shop."),
