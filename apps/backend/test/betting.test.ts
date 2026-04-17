@@ -152,7 +152,7 @@ describe("betting system", () => {
     }
   });
 
-  it("rejects bet when group has insufficient currency", async () => {
+  it("rejects bet when the participant wallet has insufficient currency", async () => {
     const { participant } = await seedSettingsAndGroup();
 
     const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
@@ -164,6 +164,41 @@ describe("betting system", () => {
         amount: 200,
       }),
     ).rejects.toThrow(/enough currency/i);
+  });
+
+  it("rejects bets against another participant's wallet", async () => {
+    const { group, participant } = await seedSettingsAndGroup();
+    const otherParticipant = await ctx.services.participantService.ensureForGroup({
+      guildId: GUILD_ID,
+      discordUserId: "user-2",
+      discordUsername: "bob",
+      groupId: group.id,
+    });
+
+    await ctx.services.participantCurrencyService.awardParticipants({
+      guildId: GUILD_ID,
+      actor: {
+        userId: "admin-user",
+        username: "admin",
+        roleIds: ["role-admin"],
+      },
+      targetParticipantIds: [otherParticipant.id],
+      currencyDelta: 50,
+      description: "Starting currency for another participant",
+      systemAction: true,
+    });
+
+    const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
+    await expect(
+      ctx.services.bettingService.placeBet({
+        guildId: GUILD_ID,
+        actor,
+        participantId: otherParticipant.id,
+        amount: 10,
+      }),
+    ).rejects.toThrow(/only bet with their own wallet currency/i);
+
+    expect(participant.id).not.toBe(otherParticipant.id);
   });
 
   it("rejects bet with zero or negative amount", async () => {
@@ -275,7 +310,7 @@ describe("betting system", () => {
   });
 
   it("prevents duplicate votes from the same user", async () => {
-    const group = await seedSettingsAndGroup();
+    const { group } = await seedSettingsAndGroup();
 
     await ctx.services.bettingService.voteExclusion({
       guildId: GUILD_ID,
@@ -296,6 +331,40 @@ describe("betting system", () => {
         groupId: group.id,
       }),
     ).rejects.toThrow(/already voted/i);
+  });
+
+  it("expires stale pending exclusion votes before accepting a new vote", async () => {
+    const { group } = await seedSettingsAndGroup();
+
+    const staleVote = await ctx.prisma.betExclusion.create({
+      data: {
+        guildId: GUILD_ID,
+        groupId: group.id,
+        targetUserId: "user-1",
+        targetUsername: "alice",
+        createdByUserId: "user-2",
+        createdByUsername: "bob",
+        expiresAt: new Date(0),
+        createdAt: new Date(Date.now() - (25 * 60 * 60 * 1000)),
+      },
+    });
+
+    const result = await ctx.services.bettingService.voteExclusion({
+      guildId: GUILD_ID,
+      voterUserId: "user-2",
+      voterUsername: "bob",
+      targetUserId: "user-1",
+      targetUsername: "alice",
+      groupId: group.id,
+    });
+
+    expect(result.finalized).toBe(false);
+    expect(result.expiresAt).toBeNull();
+
+    const deletedStaleVote = await ctx.prisma.betExclusion.findUnique({
+      where: { id: staleVote.id },
+    });
+    expect(deletedStaleVote).toBeNull();
   });
 
   it("keeps pending exclusion votes scoped to a single group", async () => {

@@ -6,7 +6,7 @@ It tracks group `points` that drive the leaderboard and also fund shared group p
 
 It also includes a Discord OAuth dashboard, marketplace listings, and a submission workflow for class use: students are auto-provisioned from their Discord identity and active group role, staff publish assignments, students submit work, and approved submissions award group points plus personal currency.
 
-The bot also supports group-based betting: students can place double-or-nothing bets against their group's currency balance, view personal betting stats, and use a two-person teammate vote to exclude a member from betting for one week.
+The bot also supports participant-wallet betting: students can place double-or-nothing bets against their own wallet currency, view personal betting stats, and use a two-person teammate vote to exclude a member from betting for one week.
 
 ## Monorepo layout
 
@@ -71,4 +71,4 @@ The dashboard uses Discord sign-in with three access tiers:
 
 After signing into the dashboard, use the built-in walkthrough in the control room to configure role powers, map groups, create assignments, and smoke test the commands in Discord.
 
-For betting, configure `Bet win chance (%)` in the dashboard settings before testing `/bet`. `/exclusion` requires two distinct teammates from the same group, and pending votes stay scoped to that group even if role mappings change later.
+For betting, review `Bet win chance (%)` in the dashboard settings before testing `/bet`; it defaults to `50` if you do not change it. `/exclusion` requires two distinct teammates from the same group, and pending votes stay scoped to that group even if role mappings change later.

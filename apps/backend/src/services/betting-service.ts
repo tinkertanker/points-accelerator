@@ -28,6 +28,7 @@ type BetStats = {
 };
 
 const BET_EXCLUSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
+const PENDING_BET_EXCLUSION_VOTE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export class BettingService {
   public constructor(
@@ -62,8 +63,8 @@ export class BettingService {
     const type = won ? "BET_WIN" : "BET_LOSS";
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const lockedParticipants = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        SELECT id
+      const lockedParticipants = await tx.$queryRaw<Array<{ id: string; discordUserId: string }>>(Prisma.sql`
+        SELECT id, "discordUserId"
         FROM "Participant"
         WHERE "guildId" = ${params.guildId}
           AND id = ${params.participantId}
@@ -72,6 +73,10 @@ export class BettingService {
 
       if (lockedParticipants.length !== 1) {
         throw new AppError("Participant not found.", 404);
+      }
+
+      if (lockedParticipants[0].discordUserId !== params.actor.userId) {
+        throw new AppError("Participants may only bet with their own wallet currency.", 403);
       }
 
       await this.assertNotExcluded(params.guildId, params.actor.userId, tx);
@@ -227,8 +232,10 @@ export class BettingService {
       throw new AppError("You cannot exclude yourself.", 400);
     }
 
+    const now = new Date();
     const maxTransactionRetries = 3;
     const pendingEpoch = new Date(0);
+    const pendingVoteCutoff = new Date(now.getTime() - PENDING_BET_EXCLUSION_VOTE_TTL_MS);
     let attempt = 0;
 
     while (true) {
@@ -248,8 +255,19 @@ export class BettingService {
               const expiresTimestamp = Math.floor(activeExclusion.expiresAt.getTime() / 1000);
               throw new AppError(
                 `This user is already excluded from betting until <t:${expiresTimestamp}:f>.`,
+                409,
               );
             }
+
+            await tx.betExclusion.deleteMany({
+              where: {
+                guildId: params.guildId,
+                targetUserId: params.targetUserId,
+                groupId: params.groupId,
+                expiresAt: pendingEpoch,
+                createdAt: { lte: pendingVoteCutoff },
+              },
+            });
 
             const pendingVote = await tx.betExclusion.findFirst({
               where: {
@@ -257,6 +275,7 @@ export class BettingService {
                 targetUserId: params.targetUserId,
                 groupId: params.groupId,
                 expiresAt: pendingEpoch,
+                createdAt: { gt: pendingVoteCutoff },
               },
             });
 

@@ -62,7 +62,7 @@ After deployment:
 4. Map each student group role to a group entry.
 5. Set listing, redemption, and log channels.
 6. Add shop items if you want the shop enabled during phase 1.
-7. Set `Bet win chance (%)` in the dashboard if you want betting enabled for test users.
+7. Review `Bet win chance (%)` in the dashboard to set the desired win probability for test users. The default is `50`.
 
 ## 6. Test commands
 
