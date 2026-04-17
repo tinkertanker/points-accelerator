@@ -28,8 +28,12 @@ function createRuntimeFixture() {
       getOrCreate: vi.fn().mockResolvedValue(config),
     },
     groupService: {
-      resolveGroupFromRoleIds: vi.fn().mockResolvedValue({ id: "group-1", displayName: "Gryffindor" }),
-      resolveGroupByIdentifier: vi.fn().mockResolvedValue({ id: "group-1", displayName: "Gryffindor" }),
+      resolveGroupFromRoleIds: vi
+        .fn()
+        .mockResolvedValue({ id: "group-1", displayName: "Gryffindor", roleId: "group-role" }),
+      resolveGroupByIdentifier: vi
+        .fn()
+        .mockResolvedValue({ id: "group-1", displayName: "Gryffindor", roleId: "group-role" }),
     },
     economyService: {
       getLedger: vi.fn().mockResolvedValue([]),
@@ -552,7 +556,7 @@ describe("bot runtime", () => {
         throw new Error("multiple groups");
       }
 
-      return { id: "group-1", displayName: "Gryffindor" };
+      return { id: "group-1", displayName: "Gryffindor", roleId: "group-role" };
     });
     services.shopService.redeem.mockResolvedValue({
       id: "redemption-12345678",
