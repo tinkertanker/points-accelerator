@@ -675,6 +675,10 @@ dl.stats-row {
   gap: 1rem;
 }
 
+.settings-form-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .form-grid .span-2 {
   grid-column: span 2;
 }
@@ -683,21 +687,92 @@ dl.stats-row {
   grid-column: span 3;
 }
 
-.role-checklist {
+.settings-form-grid .span-full {
+  grid-column: 1 / -1;
+}
+
+.settings-field-pair,
+.settings-section {
   border: 1px solid var(--border);
   border-radius: 0.75rem;
-  display: grid;
-  gap: 0.75rem;
   margin: 0;
   min-width: 0;
+}
+
+.role-checklist {
+  display: grid;
+  gap: 0.75rem;
   padding: 1rem;
 }
 
+.settings-field-pair legend,
+.settings-section legend,
 .role-checklist legend {
   color: var(--text);
   font-size: 0.8rem;
   font-weight: 600;
+  letter-spacing: 0.04em;
   padding: 0 0.35rem;
+  text-transform: uppercase;
+}
+
+.settings-field-pair {
+  align-items: end;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1.65fr) minmax(4.75rem, 0.75fr);
+  padding: 0.9rem;
+}
+
+.settings-field-pair label {
+  margin: 0;
+}
+
+.settings-field-pair__label,
+.settings-field-pair__symbol {
+  min-width: 0;
+}
+
+.settings-section {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+}
+
+.settings-section__grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.settings-section__grid--channels {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-section__grid--reward {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.settings-section__grid--compact {
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 12rem));
+  justify-content: start;
+}
+
+.settings-section__grid > label {
+  min-width: 0;
+}
+
+.settings-field {
+  min-width: 0;
+}
+
+.settings-field--compact {
+  justify-self: start;
+  width: min(100%, 12rem);
+}
+
+.settings-field--compact input {
+  min-width: 0;
 }
 
 .role-checklist__help {
@@ -728,6 +803,11 @@ dl.stats-row {
 .channel-picker-field {
   display: grid;
   gap: 0.45rem;
+}
+
+.settings-section__grid--channels .channel-picker-field {
+  grid-column: span 1;
+  min-width: 0;
 }
 
 .channel-picker {
@@ -1459,6 +1539,14 @@ dl.stats-row {
   .form-grid .span-2,
   .form-grid .span-3 {
     grid-column: span 1;
+  }
+
+  .settings-field-pair,
+  .settings-section__grid,
+  .settings-section__grid--reward,
+  .settings-section__grid--compact,
+  .settings-section__grid--channels {
+    grid-template-columns: 1fr;
   }
 
   .topbar {

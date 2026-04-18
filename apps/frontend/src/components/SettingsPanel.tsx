@@ -239,7 +239,7 @@ export default function SettingsPanel({
             </button>
           </header>
 
-          <div className="form-grid">
+          <div className="form-grid settings-form-grid">
             <label>
               App name
               <input
@@ -247,35 +247,41 @@ export default function SettingsPanel({
                 onChange={(event) => onSettingsChange({ ...settingsDraft, appName: event.target.value })}
               />
             </label>
-            <label>
-              Points label
-              <input
-                value={settingsDraft.pointsName}
-                onChange={(event) => onSettingsChange({ ...settingsDraft, pointsName: event.target.value })}
-              />
-            </label>
-            <label>
-              Points symbol
-              <input
-                value={settingsDraft.pointsSymbol}
-                onChange={(event) => onSettingsChange({ ...settingsDraft, pointsSymbol: event.target.value })}
-              />
-            </label>
-            <label>
-              Currency label
-              <input
-                value={settingsDraft.currencyName}
-                onChange={(event) => onSettingsChange({ ...settingsDraft, currencyName: event.target.value })}
-              />
-            </label>
-            <label>
-              Currency symbol
-              <input
-                value={settingsDraft.currencySymbol}
-                onChange={(event) => onSettingsChange({ ...settingsDraft, currencySymbol: event.target.value })}
-              />
-            </label>
-            <label>
+            <fieldset className="settings-field-pair">
+              <legend>Points</legend>
+              <label className="settings-field-pair__label">
+                Label
+                <input
+                  value={settingsDraft.pointsName}
+                  onChange={(event) => onSettingsChange({ ...settingsDraft, pointsName: event.target.value })}
+                />
+              </label>
+              <label className="settings-field-pair__symbol">
+                Symbol
+                <input
+                  value={settingsDraft.pointsSymbol}
+                  onChange={(event) => onSettingsChange({ ...settingsDraft, pointsSymbol: event.target.value })}
+                />
+              </label>
+            </fieldset>
+            <fieldset className="settings-field-pair">
+              <legend>Currency</legend>
+              <label className="settings-field-pair__label">
+                Label
+                <input
+                  value={settingsDraft.currencyName}
+                  onChange={(event) => onSettingsChange({ ...settingsDraft, currencyName: event.target.value })}
+                />
+              </label>
+              <label className="settings-field-pair__symbol">
+                Symbol
+                <input
+                  value={settingsDraft.currencySymbol}
+                  onChange={(event) => onSettingsChange({ ...settingsDraft, currencySymbol: event.target.value })}
+                />
+              </label>
+            </fieldset>
+            <label className="settings-field settings-field--compact">
               Group points per donated currency
               <input
                 type="number"
@@ -289,7 +295,168 @@ export default function SettingsPanel({
                 }
               />
             </label>
-            <fieldset className="span-3 role-checklist">
+            <fieldset className="settings-section settings-section--reward span-full">
+              <legend>Passive rewards</legend>
+              <div className="settings-section__grid settings-section__grid--reward">
+                <label className="settings-field">
+                  Message points reward
+                  <input
+                    type="number"
+                    value={settingsDraft.passivePointsReward}
+                    onChange={(event) =>
+                      onSettingsChange({ ...settingsDraft, passivePointsReward: Number(event.target.value) })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  Message currency reward
+                  <input
+                    type="number"
+                    value={settingsDraft.passiveCurrencyReward}
+                    onChange={(event) =>
+                      onSettingsChange({ ...settingsDraft, passiveCurrencyReward: Number(event.target.value) })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  Passive cooldown (seconds)
+                  <input
+                    type="number"
+                    value={settingsDraft.passiveCooldownSeconds}
+                    onChange={(event) =>
+                      onSettingsChange({ ...settingsDraft, passiveCooldownSeconds: Number(event.target.value) })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  Min characters
+                  <input
+                    type="number"
+                    value={settingsDraft.passiveMinimumCharacters}
+                    onChange={(event) =>
+                      onSettingsChange({ ...settingsDraft, passiveMinimumCharacters: Number(event.target.value) })
+                    }
+                  />
+                </label>
+              </div>
+            </fieldset>
+            <fieldset className="settings-section span-full">
+              <legend>Betting</legend>
+              <div className="settings-section__grid settings-section__grid--compact">
+                <label className="settings-field settings-field--compact">
+                  Bet win chance (%)
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={settingsDraft.betWinChance}
+                    onChange={(event) =>
+                      onSettingsChange({
+                        ...settingsDraft,
+                        betWinChance: Math.min(100, Math.max(0, Math.round(Number(event.target.value)))),
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            </fieldset>
+            <fieldset className="settings-section span-full">
+              <legend>Discord channels</legend>
+              <div className="settings-section__grid">
+                <label>
+                  Listing channel
+                  <select
+                    value={settingsDraft.listingChannelId ?? ""}
+                    onChange={(event) =>
+                      onSettingsChange({
+                        ...settingsDraft,
+                        listingChannelId: event.target.value || null,
+                      })
+                    }
+                  >
+                    <option value="">Unset</option>
+                    {discordChannels.map((channel) => (
+                      <option key={channel.id} value={channel.id}>
+                        {channel.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Redemption channel
+                  <select
+                    value={settingsDraft.redemptionChannelId ?? ""}
+                    onChange={(event) =>
+                      onSettingsChange({
+                        ...settingsDraft,
+                        redemptionChannelId: event.target.value || null,
+                      })
+                    }
+                  >
+                    <option value="">Unset</option>
+                    {discordChannels.map((channel) => (
+                      <option key={channel.id} value={channel.id}>
+                        {channel.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Log channel
+                  <select
+                    value={settingsDraft.commandLogChannelId ?? ""}
+                    onChange={(event) =>
+                      onSettingsChange({
+                        ...settingsDraft,
+                        commandLogChannelId: event.target.value || null,
+                      })
+                    }
+                  >
+                    <option value="">Unset</option>
+                    {discordChannels.map((channel) => (
+                      <option key={channel.id} value={channel.id}>
+                        {channel.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </fieldset>
+            <fieldset className="settings-section span-full">
+              <legend>Passive channel eligibility</legend>
+              <div className="settings-section__grid settings-section__grid--channels">
+                <ChannelMultiSelectField
+                  label="Allowed passive channels"
+                  selectedIds={settingsDraft.passiveAllowedChannelIds}
+                  channels={sortedDiscordChannels}
+                  emptyState="All channels are currently allowed."
+                  hint="Leave this empty to allow passive rewards in every channel. Add channels here only if you want a strict allow-list."
+                  placeholder="Type a channel name or ID"
+                  onChange={(passiveAllowedChannelIds) =>
+                    onSettingsChange({
+                      ...settingsDraft,
+                      passiveAllowedChannelIds,
+                    })
+                  }
+                />
+                <ChannelMultiSelectField
+                  label="Denied passive channels"
+                  selectedIds={settingsDraft.passiveDeniedChannelIds}
+                  channels={sortedDiscordChannels}
+                  emptyState="No channels are currently denied."
+                  hint="Leave this empty to deny none. Denied channels always block passive rewards, even if they also appear in the allowed list."
+                  placeholder="Type a channel name or ID"
+                  onChange={(passiveDeniedChannelIds) =>
+                    onSettingsChange({
+                      ...settingsDraft,
+                      passiveDeniedChannelIds,
+                    })
+                  }
+                />
+              </div>
+            </fieldset>
+            <fieldset className="span-full role-checklist">
               <legend>Mentor roles</legend>
               <p className="role-checklist__help">
                 These roles can manage the shop, assignments, and submission reviews without getting access to
@@ -318,147 +485,6 @@ export default function SettingsPanel({
                 })}
               </div>
             </fieldset>
-            <label>
-              Message points reward
-              <input
-                type="number"
-                value={settingsDraft.passivePointsReward}
-                onChange={(event) =>
-                  onSettingsChange({ ...settingsDraft, passivePointsReward: Number(event.target.value) })
-                }
-              />
-            </label>
-            <label>
-              Message currency reward
-              <input
-                type="number"
-                value={settingsDraft.passiveCurrencyReward}
-                onChange={(event) =>
-                  onSettingsChange({ ...settingsDraft, passiveCurrencyReward: Number(event.target.value) })
-                }
-              />
-            </label>
-            <label>
-              Passive cooldown (seconds)
-              <input
-                type="number"
-                value={settingsDraft.passiveCooldownSeconds}
-                onChange={(event) =>
-                  onSettingsChange({ ...settingsDraft, passiveCooldownSeconds: Number(event.target.value) })
-                }
-              />
-            </label>
-            <label>
-              Min characters
-              <input
-                type="number"
-                value={settingsDraft.passiveMinimumCharacters}
-                onChange={(event) =>
-                  onSettingsChange({ ...settingsDraft, passiveMinimumCharacters: Number(event.target.value) })
-                }
-              />
-            </label>
-            <label>
-              Bet win chance (%)
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                value={settingsDraft.betWinChance}
-                onChange={(event) =>
-                  onSettingsChange({
-                    ...settingsDraft,
-                    betWinChance: Math.min(100, Math.max(0, Math.round(Number(event.target.value)))),
-                  })
-                }
-              />
-            </label>
-            <label>
-              Listing channel
-              <select
-                value={settingsDraft.listingChannelId ?? ""}
-                onChange={(event) =>
-                  onSettingsChange({
-                    ...settingsDraft,
-                    listingChannelId: event.target.value || null,
-                  })
-                }
-              >
-                <option value="">Unset</option>
-                {discordChannels.map((channel) => (
-                  <option key={channel.id} value={channel.id}>
-                    {channel.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Redemption channel
-              <select
-                value={settingsDraft.redemptionChannelId ?? ""}
-                onChange={(event) =>
-                  onSettingsChange({
-                    ...settingsDraft,
-                    redemptionChannelId: event.target.value || null,
-                  })
-                }
-              >
-                <option value="">Unset</option>
-                {discordChannels.map((channel) => (
-                  <option key={channel.id} value={channel.id}>
-                    {channel.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Log channel
-              <select
-                value={settingsDraft.commandLogChannelId ?? ""}
-                onChange={(event) =>
-                  onSettingsChange({
-                    ...settingsDraft,
-                    commandLogChannelId: event.target.value || null,
-                  })
-                }
-              >
-                <option value="">Unset</option>
-                {discordChannels.map((channel) => (
-                  <option key={channel.id} value={channel.id}>
-                    {channel.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <ChannelMultiSelectField
-              label="Allowed passive channels"
-              selectedIds={settingsDraft.passiveAllowedChannelIds}
-              channels={sortedDiscordChannels}
-              emptyState="All channels are currently allowed."
-              hint="Leave this empty to allow passive rewards in every channel. Add channels here only if you want a strict allow-list."
-              placeholder="Type a channel name or ID"
-              onChange={(passiveAllowedChannelIds) =>
-                onSettingsChange({
-                  ...settingsDraft,
-                  passiveAllowedChannelIds,
-                })
-              }
-            />
-            <ChannelMultiSelectField
-              label="Denied passive channels"
-              selectedIds={settingsDraft.passiveDeniedChannelIds}
-              channels={sortedDiscordChannels}
-              emptyState="No channels are currently denied."
-              hint="Leave this empty to deny none. Denied channels always block passive rewards, even if they also appear in the allowed list."
-              placeholder="Type a channel name or ID"
-              onChange={(passiveDeniedChannelIds) =>
-                onSettingsChange({
-                  ...settingsDraft,
-                  passiveDeniedChannelIds,
-                })
-              }
-            />
           </div>
         </article>
 
