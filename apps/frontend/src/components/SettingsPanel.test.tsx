@@ -7,7 +7,9 @@ import type { Settings } from "../types";
 const baseSettings: Settings = {
   appName: "points accelerator",
   pointsName: "points",
+  pointsSymbol: "pts",
   currencyName: "credits",
+  currencySymbol: "cr",
   groupPointsPerCurrencyDonation: 10,
   mentorRoleIds: [],
   passivePointsReward: 1,
@@ -19,7 +21,6 @@ const baseSettings: Settings = {
   commandLogChannelId: null,
   redemptionChannelId: null,
   listingChannelId: null,
-  economyMode: "SIMPLE",
   betWinChance: 50,
 };
 
