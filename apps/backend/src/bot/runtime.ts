@@ -1316,7 +1316,9 @@ export class BotRuntime {
               : null,
           ].filter((value): value is string => value !== null);
 
-          await interaction.reply(`${commandConfig.isDeduction ? "Deducted" : "Awarded"} ${summaries.join(" and ")}.`);
+          await interaction.reply(
+            `${commandConfig.isDeduction ? "Deducted" : "Awarded"} ${summaries.join(" and ")}. Reason: ${reason}`,
+          );
           return;
         } catch (error) {
           rollbackCooldown?.();

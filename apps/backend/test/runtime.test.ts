@@ -366,7 +366,7 @@ describe("bot runtime", () => {
       currencyDelta: 100,
       description: "Great work",
     });
-    expect(reply).toHaveBeenCalledWith("Awarded 100 bananas 💲 to Alex Carter.");
+    expect(reply).toHaveBeenCalledWith("Awarded 100 bananas 💲 to Alex Carter. Reason: Great work");
   });
 
   it("awards currency in bulk to eligible members across selected groups", async () => {
@@ -471,7 +471,62 @@ describe("bot runtime", () => {
       description: "Team effort",
       executor: {},
     });
-    expect(reply).toHaveBeenCalledWith("Awarded 15 bananas 💲 each to 2 members across Gryffindor (2).");
+    expect(reply).toHaveBeenCalledWith("Awarded 15 bananas 💲 each to 2 members across Gryffindor (2). Reason: Team effort");
+  });
+
+  it("echoes the reason in /awardpoints replies for group awards", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.groupService.resolveGroupByIdentifier.mockImplementation(async (_guildId: string, identifier: string) => {
+      if (identifier === "gryff") {
+        return { id: "group-1", displayName: "Gryffindor", roleId: "group-role" };
+      }
+
+      return null;
+    });
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const fetchMember = vi.fn(async (userId: string) => {
+      if (userId === "staff-1") {
+        return {
+          roles: { cache: new Map([["staff-role", {}]]) },
+          permissions: { has: vi.fn().mockReturnValue(false) },
+        };
+      }
+
+      return null;
+    });
+
+    await (runtime as any).handleCommand({
+      commandName: "awardpoints",
+      guild: {
+        members: {
+          fetch: fetchMember,
+        },
+      },
+      options: {
+        getNumber: vi.fn((name: string) => (name === "amount" ? 5 : null)),
+        getString: vi.fn((name: string) => (name === "targets" ? "gryff" : "Helped another group")),
+      },
+      reply,
+      user: {
+        id: "staff-1",
+        username: "Mentor",
+      },
+    });
+
+    expect(services.economyService.awardGroups).toHaveBeenCalledWith({
+      guildId: "guild-test",
+      actor: {
+        userId: "staff-1",
+        username: "Mentor",
+        roleIds: ["staff-role"],
+      },
+      targetGroupIds: ["group-1"],
+      pointsDelta: 5,
+      currencyDelta: 0,
+      description: "Helped another group",
+      executor: {},
+    });
+    expect(reply).toHaveBeenCalledWith("Awarded 5 blorgshj 🏅 to Gryffindor. Reason: Helped another group");
   });
 
   it("blocks repeated award commands during the configured role cooldown for non-admin members", async () => {
