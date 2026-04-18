@@ -6,7 +6,7 @@ It tracks group `points` that drive the leaderboard and also fund shared group p
 
 It also includes a Discord OAuth dashboard, marketplace listings, and a submission workflow for class use: students are auto-provisioned from their Discord identity and active group role, staff publish assignments, students submit work, and approved submissions award group points plus personal currency.
 
-The bot also supports participant-wallet betting: students can place double-or-nothing bets against their own wallet currency, view personal betting stats, and use a two-person teammate vote to exclude a member from betting for one week.
+The bot also supports participant-wallet betting: students can place double-or-nothing bets against their own wallet currency and view personal betting stats.
 
 ## Monorepo layout
 
