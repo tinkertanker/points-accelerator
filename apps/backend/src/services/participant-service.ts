@@ -20,6 +20,20 @@ function buildAutomaticIndexId(discordUserId: string): string {
 export class ParticipantService {
   public constructor(private readonly prisma: PrismaClient) {}
 
+  public async getCurrencyLeaderboard(guildId: string) {
+    const participants = await this.list(guildId);
+
+    return participants.sort((left, right) => {
+      if (right.currencyBalance !== left.currencyBalance) {
+        return right.currencyBalance - left.currencyBalance;
+      }
+
+      const leftName = left.discordUsername ?? left.indexId;
+      const rightName = right.discordUsername ?? right.indexId;
+      return leftName.localeCompare(rightName, undefined, { sensitivity: "base" });
+    });
+  }
+
   public async list(guildId: string) {
     const participants = await this.prisma.participant.findMany({
       where: { guildId },

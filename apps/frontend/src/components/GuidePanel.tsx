@@ -94,6 +94,7 @@ export default function GuidePanel() {
                 <code>/buyforme item_id:bubble-tea</code>
                 <code>/buyforgroup item_id:pizza quantity:2</code>
                 <code>/leaderboard</code>
+                <code>/forbes</code>
                 <code>/ledger</code>
                 <code>/ledger page:2</code>
               </p>
@@ -240,6 +241,12 @@ export default function GuidePanel() {
                       <td>Everyone</td>
                       <td>&mdash;</td>
                       <td>Show the top 10 groups by points</td>
+                    </tr>
+                    <tr>
+                      <td><code>/forbes</code></td>
+                      <td>Everyone</td>
+                      <td>&mdash;</td>
+                      <td>Show the top 10 students by wallet currency</td>
                     </tr>
                     <tr>
                       <td><code>/ledger</code></td>

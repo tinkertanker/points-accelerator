@@ -21,7 +21,7 @@ const botRuntime: BotRuntimeApi = {
 
 async function registerParticipant(params: {
   discordUserId: string;
-  discordUsername: string;
+  discordUsername?: string;
   indexId: string;
   groupId: string;
 }) {
@@ -179,6 +179,77 @@ describe("points accelerator API", () => {
       }),
     ]);
     await expect(ctx.services.participantCurrencyService.getParticipantBalance(participant.id)).resolves.toBe(4);
+  });
+
+  it("sorts the wallet leaderboard by participant currency balance", async () => {
+    await ctx.prisma.guildConfig.create({
+      data: {
+        guildId: ctx.env.GUILD_ID,
+      },
+    });
+
+    const alphaGroup = await ctx.prisma.group.create({
+      data: {
+        guildId: ctx.env.GUILD_ID,
+        displayName: "Alpha",
+        slug: "alpha",
+        mentorName: "A Mentor",
+        roleId: "role-alpha",
+        active: true,
+      },
+    });
+    const betaGroup = await ctx.prisma.group.create({
+      data: {
+        guildId: ctx.env.GUILD_ID,
+        displayName: "Beta",
+        slug: "beta",
+        mentorName: "B Mentor",
+        roleId: "role-beta",
+        active: true,
+      },
+    });
+    const alice = await registerParticipant({
+      discordUserId: "user-alice",
+      discordUsername: "Alice",
+      indexId: "S001",
+      groupId: alphaGroup.id,
+    });
+    const bob = await registerParticipant({
+      discordUserId: "user-bob",
+      discordUsername: "Bob",
+      indexId: "S002",
+      groupId: betaGroup.id,
+    });
+    const carol = await registerParticipant({
+      discordUserId: "user-carol",
+      indexId: "S003",
+      groupId: betaGroup.id,
+    });
+
+    await seedParticipantCurrency(alice.id, 6);
+    await seedParticipantCurrency(bob.id, 10);
+    await seedParticipantCurrency(carol.id, 10);
+
+    await expect(ctx.services.participantService.getCurrencyLeaderboard(ctx.env.GUILD_ID)).resolves.toEqual([
+      expect.objectContaining({
+        id: bob.id,
+        discordUsername: "Bob",
+        indexId: "S002",
+        currencyBalance: 10,
+      }),
+      expect.objectContaining({
+        id: carol.id,
+        discordUsername: null,
+        indexId: "S003",
+        currencyBalance: 10,
+      }),
+      expect.objectContaining({
+        id: alice.id,
+        discordUsername: "Alice",
+        indexId: "S001",
+        currencyBalance: 6,
+      }),
+    ]);
   });
 
   it("syncs groups for roles that can receive awards", async () => {

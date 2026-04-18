@@ -75,6 +75,7 @@ Run these in the test server before production rollout:
 - `/deductmember`
 - `/deductmixed`
 - `/leaderboard`
+- `/forbes`
 - `/balance`
 - `/ledger`
 - `/transfer`

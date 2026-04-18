@@ -744,6 +744,19 @@ export class BotRuntime {
         await interaction.reply({ content: content || "No groups yet." });
         return;
       }
+      case "forbes": {
+        const leaderboard = await this.services.participantService.getCurrencyLeaderboard(this.env.GUILD_ID);
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const content = leaderboard
+          .slice(0, 10)
+          .map(
+            (participant, index) =>
+              `${index + 1}. ${participant.discordUsername ?? participant.indexId}: ${this.formatCurrencyAmount(participant.currencyBalance, config)}`,
+          )
+          .join("\n");
+        await interaction.reply({ content: content || "No participants yet." });
+        return;
+      }
       case "balance": {
         const { group, participant } = await this.resolveActiveParticipant({
           discordUserId: interaction.user.id,
@@ -1410,6 +1423,7 @@ export class BotRuntime {
     const rest = new REST({ version: "10" }).setToken(this.env.DISCORD_BOT_TOKEN);
     const commands = [
       new SlashCommandBuilder().setName("leaderboard").setDescription("Show the group leaderboard."),
+      new SlashCommandBuilder().setName("forbes").setDescription("Show the individual wallet leaderboard."),
       new SlashCommandBuilder().setName("balance").setDescription("Show your group points and personal wallet."),
       new SlashCommandBuilder()
         .setName("ledger")

@@ -56,8 +56,8 @@ The bot also supports participant-wallet betting: students can place double-or-n
 ## Phase 1 command set
 
 - Staff roles such as admins or alumni: `/awardgroup`, `/award`, `/deductgroup`, `/deductmember`, `/deductmixed`
-- Students: `/balance`, `/leaderboard`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`
-- Students: `/balance`, `/leaderboard`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`, `/bet`, `/betstats`
+- Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`
+- Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`, `/bet`, `/betstats`
 
 The award and deduct flows use separate commands so Discord enforces the required fields:
 

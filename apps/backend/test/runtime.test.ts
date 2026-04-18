@@ -64,6 +64,7 @@ function createRuntimeFixture() {
     },
     participantService: {
       findByDiscordUser: vi.fn(),
+      getCurrencyLeaderboard: vi.fn().mockResolvedValue([]),
       ensureForGroup: vi.fn().mockResolvedValue({
         id: "participant-1",
         indexId: "AUTOUSER1",
@@ -633,6 +634,47 @@ describe("bot runtime", () => {
     });
   });
 
+  it("shows the personal wallet leaderboard in Discord", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.participantService.getCurrencyLeaderboard.mockResolvedValue([
+      {
+        id: "participant-2",
+        discordUsername: "Bob",
+        indexId: "S002",
+        currencyBalance: 9,
+      },
+      {
+        id: "participant-1",
+        discordUsername: null,
+        indexId: "S001",
+        currencyBalance: 7,
+      },
+    ]);
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "forbes",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue({
+            roles: { cache: new Map([["group-role", {}]]) },
+          }),
+        },
+      },
+      options: {},
+      reply,
+      user: {
+        id: "user-1",
+        username: "Alice",
+      },
+    });
+
+    expect(services.participantService.getCurrencyLeaderboard).toHaveBeenCalledWith("guild-test");
+    expect(reply).toHaveBeenCalledWith({
+      content: "1. Bob: 9 bananas 💲\n2. S001: 7 bananas 💲",
+    });
+  });
+
   it("creates a group purchase from /buyforgroup", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.groupService.resolveGroupFromRoleIds.mockImplementation(async (_guildId: string, roleIds: string[]) => {
@@ -782,7 +824,9 @@ describe("bot runtime", () => {
     const awardCommand = commands.find((command) => command.name === "award");
     const awardMixedCommand = commands.find((command) => command.name === "awardmixed");
     const deductMixedCommand = commands.find((command) => command.name === "deductmixed");
+    const forbesCommand = commands.find((command) => command.name === "forbes");
 
+    expect(forbesCommand).toEqual(expect.objectContaining({ name: "forbes" }));
     expect(awardGroupCommand?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "targets", required: true }),
