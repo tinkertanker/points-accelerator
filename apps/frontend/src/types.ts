@@ -15,7 +15,6 @@ export type Settings = {
   commandLogChannelId: string | null;
   redemptionChannelId: string | null;
   listingChannelId: string | null;
-  economyMode: "SIMPLE" | "ADVANCED";
   betWinChance: number;
 };
 

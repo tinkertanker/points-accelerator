@@ -342,21 +342,6 @@ export default function SettingsPanel({
               />
             </label>
             <label>
-              Economy mode
-              <select
-                value={settingsDraft.economyMode}
-                onChange={(event) =>
-                  onSettingsChange({
-                    ...settingsDraft,
-                    economyMode: event.target.value as Settings["economyMode"],
-                  })
-                }
-              >
-                <option value="SIMPLE">Simple</option>
-                <option value="ADVANCED">Advanced</option>
-              </select>
-            </label>
-            <label>
               Bet win chance (%)
               <input
                 type="number"

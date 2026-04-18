@@ -19,7 +19,6 @@ export type GuildConfigUpdateInput = {
   commandLogChannelId?: string | null;
   redemptionChannelId?: string | null;
   listingChannelId?: string | null;
-  economyMode?: "SIMPLE" | "ADVANCED";
   betWinChance?: number;
 };
 
@@ -63,7 +62,6 @@ export class ConfigService {
         commandLogChannelId: input.commandLogChannelId,
         redemptionChannelId: input.redemptionChannelId,
         listingChannelId: input.listingChannelId,
-        economyMode: input.economyMode,
         betWinChance: input.betWinChance,
       },
     });

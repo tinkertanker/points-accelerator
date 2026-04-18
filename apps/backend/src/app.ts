@@ -43,7 +43,6 @@ const settingsSchema = z.object({
   commandLogChannelId: z.string().nullable(),
   redemptionChannelId: z.string().nullable(),
   listingChannelId: z.string().nullable(),
-  economyMode: z.enum(["SIMPLE", "ADVANCED"]),
   betWinChance: z.number().int().min(0).max(100),
 });
 
@@ -388,7 +387,6 @@ export function createApp(params: {
     commandLogChannelId: settings.commandLogChannelId,
     redemptionChannelId: settings.redemptionChannelId,
     listingChannelId: settings.listingChannelId,
-    economyMode: settings.economyMode,
     betWinChance: settings.betWinChance,
   });
 

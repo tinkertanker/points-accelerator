@@ -7,11 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum EconomyMode {
-  SIMPLE
-  ADVANCED
-}
-
 enum LedgerEntryType {
   MESSAGE_REWARD
   MANUAL_AWARD
@@ -83,7 +78,6 @@ model GuildConfig {
   commandLogChannelId          String?
   redemptionChannelId          String?
   listingChannelId             String?
-  economyMode                  EconomyMode           @default(SIMPLE)
   betWinChance                 Int                   @default(50)
   createdAt                    DateTime              @default(now())
   updatedAt                    DateTime              @updatedAt
