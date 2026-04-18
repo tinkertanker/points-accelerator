@@ -133,6 +133,7 @@ model DiscordRoleCapability {
   canManageDashboard  Boolean     @default(false)
   canAward            Boolean     @default(false)
   maxAward            Decimal?    @db.Decimal(18, 6)
+  actionCooldownSeconds Int?
   canDeduct           Boolean     @default(false)
   canMultiAward       Boolean     @default(false)
   canSell             Boolean     @default(false)

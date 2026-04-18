@@ -32,12 +32,13 @@ The bot also supports participant-wallet betting: students can place double-or-n
 
 - The app is designed to run with PostgreSQL and can be deployed on a single Docker host with the provided Compose stack.
 - Apply schema changes with `docker compose exec backend npx prisma migrate deploy` after each deploy.
-- Current dashboard sessions and passive reward cooldowns live in backend memory, so the backend should be treated as a single-instance service unless that state is moved into shared storage.
+- Current dashboard sessions plus passive and role-based award/deduct cooldowns live in backend memory, so the backend should be treated as a single-instance service unless that state is moved into shared storage.
 - The bundled Postgres volume provides persistence, but you still need proper backups.
 
 ## Feature focus
 
 - Group-based passive message points with participant wallet rewards
+- Configurable award/deduct cooldowns in the role matrix with admin bypass
 - Manual awards and deductions with per-role caps
 - Discord ledger command with paging for recent transactions
 - Discord-login leaderboard view for any guild member

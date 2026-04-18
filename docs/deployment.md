@@ -38,7 +38,7 @@ Set these in your `.env` file before deploying:
 - Prisma migrations are the supported way to evolve the schema. After pulling a new release, run `docker compose exec backend npx prisma migrate deploy` before relying on the new code path.
 - The backend now adds explicit indexes for ledger history, passive reward dedupe, submissions, audit logs, and common dashboard list views. This improves behaviour once the ledger and submission tables grow.
 - Dashboard sessions are currently stored in backend process memory, so signing users out on backend restart is expected.
-- Passive message reward cooldowns are also stored in backend process memory, so cooldown state resets on backend restart.
+- Passive message reward cooldowns and role-based award/deduct cooldowns are also stored in backend process memory, so cooldown state resets on backend restart.
 - Because sessions and cooldowns are in memory, the current deployment model should be treated as single-instance. Do not scale the backend horizontally unless you first move that state into shared storage such as Redis or Postgres.
 - The bundled `postgres` service uses a Docker volume for persistence. That is convenient, but it is not a backup strategy; schedule regular `pg_dump` or volume snapshots if the data matters.
 - If you are renaming an existing `economy-rice` deployment in place, either keep `POSTGRES_VOLUME_NAME` pointed at the existing Docker volume for the first rollout or migrate the volume contents before switching names. If you reuse that existing Postgres data directory, keep `DATABASE_URL`, `POSTGRES_DB`, and `POSTGRES_USER` aligned with the legacy database and role until you perform an explicit database/user rename.

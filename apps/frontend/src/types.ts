@@ -25,6 +25,7 @@ export type RoleCapability = {
   canManageDashboard: boolean;
   canAward: boolean;
   maxAward: number | null;
+  actionCooldownSeconds: number | null;
   canDeduct: boolean;
   canMultiAward: boolean;
   canSell: boolean;

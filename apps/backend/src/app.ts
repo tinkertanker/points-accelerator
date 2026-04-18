@@ -52,6 +52,7 @@ const roleCapabilitySchema = z.object({
   canManageDashboard: z.boolean(),
   canAward: z.boolean(),
   maxAward: z.number().nonnegative().nullable(),
+  actionCooldownSeconds: z.number().int().nonnegative().nullable().optional(),
   canDeduct: z.boolean(),
   canMultiAward: z.boolean(),
   canSell: z.boolean(),
@@ -604,6 +605,7 @@ export function createApp(params: {
       capabilities: capabilities.map((capability) => ({
         ...capability,
         maxAward: capability.maxAward ? decimalToNumber(capability.maxAward) : null,
+        actionCooldownSeconds: capability.actionCooldownSeconds,
       })),
       groups: groups.map((group) => serialiseGroup(group)),
       shopItems: shopItems.map((item) => ({
@@ -639,6 +641,7 @@ export function createApp(params: {
     return capabilities.map((capability) => ({
       ...capability,
       maxAward: capability.maxAward ? decimalToNumber(capability.maxAward) : null,
+      actionCooldownSeconds: capability.actionCooldownSeconds,
     }));
   });
 
@@ -648,6 +651,7 @@ export function createApp(params: {
     return capabilities.map((capability) => ({
       ...capability,
       maxAward: capability.maxAward ? decimalToNumber(capability.maxAward) : null,
+      actionCooldownSeconds: capability.actionCooldownSeconds,
     }));
   });
 

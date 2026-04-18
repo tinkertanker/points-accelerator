@@ -39,6 +39,7 @@ function createRuntimeFixture() {
         .mockResolvedValue({ id: "group-1", displayName: "Gryffindor", roleId: "group-role" }),
     },
     economyService: {
+      getLeaderboard: vi.fn().mockResolvedValue([]),
       getLedger: vi.fn().mockResolvedValue([]),
       rewardPassiveMessage: vi.fn().mockResolvedValue({ id: "entry-1" }),
       getGroupBalance: vi.fn().mockResolvedValue({ pointsBalance: 12, currencyBalance: 0 }),
@@ -368,6 +369,233 @@ describe("bot runtime", () => {
     expect(reply).toHaveBeenCalledWith("Awarded 100 bananas 💲 to Alex Carter.");
   });
 
+  it("blocks repeated award commands during the configured role cooldown for non-admin members", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const nowSpy = vi.spyOn(Date, "now");
+    nowSpy.mockReturnValueOnce(1_000).mockReturnValueOnce(5_000);
+    services.roleCapabilityService.listForRoleIds.mockResolvedValue([
+      {
+        canManageDashboard: false,
+        canAward: true,
+        maxAward: 1000,
+        actionCooldownSeconds: 10,
+        canDeduct: true,
+        canMultiAward: true,
+        canSell: false,
+      },
+    ]);
+
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const fetchMember = vi.fn(async (userId: string) => {
+      if (userId === "staff-1") {
+        return {
+          roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 10 }]]) },
+          permissions: { has: vi.fn().mockReturnValue(false) },
+        };
+      }
+
+      if (userId === "student-1") {
+        return {
+          displayName: "Alex Carter",
+          roles: { cache: new Map([["group-role", { id: "group-role", rawPosition: 1 }]]) },
+          permissions: { has: vi.fn().mockReturnValue(false) },
+        };
+      }
+
+      return null;
+    });
+
+    const awardInteraction = {
+      commandName: "award",
+      guild: { members: { fetch: fetchMember } },
+      options: {
+        getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
+        getUser: vi.fn((name: string) =>
+          name === "member"
+            ? {
+                id: "student-1",
+                username: "discord-user",
+                globalName: "Alex Carter",
+              }
+            : null,
+        ),
+        getString: vi.fn().mockReturnValue("Great work"),
+      },
+      reply,
+      user: {
+        id: "staff-1",
+        username: "Mentor",
+      },
+    };
+
+    await (runtime as any).handleCommand(awardInteraction);
+
+    await expect(
+      (runtime as any).handleCommand({
+        commandName: "award",
+        guild: { members: { fetch: fetchMember } },
+        options: {
+          getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
+          getUser: vi.fn((name: string) =>
+            name === "member"
+              ? {
+                  id: "student-1",
+                  username: "discord-user",
+                  globalName: "Alex Carter",
+                }
+              : null,
+          ),
+          getString: vi.fn().mockReturnValue("Great work"),
+        },
+        reply,
+        user: {
+          id: "staff-1",
+          username: "Mentor",
+        },
+      }),
+    ).rejects.toThrow(/wait 6s before using another award command/i);
+
+    expect(services.participantCurrencyService.awardParticipants).toHaveBeenCalledTimes(1);
+    expect(services.listingService.create).not.toHaveBeenCalled();
+  });
+
+  it("does not apply the award cooldown to unrelated commands", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const nowSpy = vi.spyOn(Date, "now");
+    nowSpy.mockReturnValueOnce(1_000).mockReturnValueOnce(5_000);
+    services.roleCapabilityService.listForRoleIds.mockResolvedValue([
+      {
+        canManageDashboard: false,
+        canAward: true,
+        maxAward: 1000,
+        actionCooldownSeconds: 10,
+        canDeduct: true,
+        canMultiAward: true,
+        canSell: true,
+      },
+    ]);
+
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const fetchMember = vi.fn(async (userId: string) => {
+      if (userId === "staff-1") {
+        return {
+          roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 10 }]]) },
+          permissions: { has: vi.fn().mockReturnValue(false) },
+        };
+      }
+
+      if (userId === "student-1") {
+        return {
+          displayName: "Alex Carter",
+          roles: { cache: new Map([["group-role", { id: "group-role", rawPosition: 1 }]]) },
+          permissions: { has: vi.fn().mockReturnValue(false) },
+        };
+      }
+
+      return null;
+    });
+
+    await (runtime as any).handleCommand({
+      commandName: "award",
+      guild: { members: { fetch: fetchMember } },
+      options: {
+        getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
+        getUser: vi.fn((name: string) =>
+          name === "member"
+            ? {
+                id: "student-1",
+                username: "discord-user",
+                globalName: "Alex Carter",
+              }
+            : null,
+        ),
+        getString: vi.fn().mockReturnValue("Great work"),
+      },
+      reply,
+      user: {
+        id: "staff-1",
+        username: "Mentor",
+      },
+    });
+
+    await (runtime as any).handleCommand({
+      commandName: "sell",
+      guild: { members: { fetch: fetchMember } },
+      options: {
+        getString: vi.fn((name: string) => {
+          if (name === "title") return "Sticker";
+          if (name === "description") return "Limited run";
+          return null;
+        }),
+        getInteger: vi.fn().mockReturnValue(null),
+      },
+      reply,
+      user: {
+        id: "staff-1",
+        username: "Mentor",
+      },
+    });
+
+    expect(services.listingService.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets dashboard admins bypass the role cooldown", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const nowSpy = vi.spyOn(Date, "now");
+    nowSpy.mockReturnValueOnce(1_000).mockReturnValueOnce(5_000);
+    services.roleCapabilityService.listForRoleIds.mockResolvedValue([
+      {
+        canManageDashboard: true,
+        canAward: true,
+        maxAward: null,
+        actionCooldownSeconds: 10,
+        canDeduct: true,
+        canMultiAward: true,
+        canSell: true,
+      },
+    ]);
+
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const fetchMember = vi.fn(async (userId: string) => {
+      if (userId === "staff-1") {
+        return {
+          roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 10 }]]) },
+          permissions: { has: vi.fn().mockReturnValue(false) },
+        };
+      }
+
+      return null;
+    });
+
+    const awardInteraction = {
+      commandName: "award",
+      guild: { members: { fetch: fetchMember } },
+      options: {
+        getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
+        getUser: vi.fn((name: string) =>
+          name === "member"
+            ? {
+                id: "staff-1",
+                username: "Mentor",
+                globalName: "Mentor",
+              }
+            : null,
+        ),
+        getString: vi.fn().mockReturnValue("Great work"),
+      },
+      reply,
+      user: {
+        id: "staff-1",
+        username: "Mentor",
+      },
+    };
+
+    await (runtime as any).handleCommand(awardInteraction);
+    await (runtime as any).handleCommand(awardInteraction);
+
+    expect(services.participantCurrencyService.awardParticipants).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects /submissions for non-staff members", async () => {
     const { runtime } = createRuntimeFixture();
 
@@ -634,26 +862,19 @@ describe("bot runtime", () => {
     });
   });
 
-  it("shows the personal wallet leaderboard in Discord", async () => {
+  it("shows the group leaderboard in an embed card", async () => {
     const { runtime, services } = createRuntimeFixture();
-    services.participantService.getCurrencyLeaderboard.mockResolvedValue([
-      {
-        id: "participant-2",
-        discordUsername: "Bob",
-        indexId: "S002",
-        currencyBalance: 9,
-      },
-      {
-        id: "participant-1",
-        discordUsername: null,
-        indexId: "S001",
-        currencyBalance: 7,
-      },
+    services.economyService.getLeaderboard.mockResolvedValue([
+      { id: "group-1", displayName: "Gryffindor", pointsBalance: 12 },
+      { id: "group-2", displayName: "Ravenclaw", pointsBalance: 7 },
+      { id: "group-3", displayName: "Hufflepuff", pointsBalance: 6 },
+      { id: "group-4", displayName: "Slytherin", pointsBalance: 5 },
+      { id: "group-5", displayName: "Durmstrang", pointsBalance: 4 },
     ]);
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
-      commandName: "forbes",
+      commandName: "leaderboard",
       guild: {
         members: {
           fetch: vi.fn().mockResolvedValue({
@@ -669,10 +890,169 @@ describe("bot runtime", () => {
       },
     });
 
-    expect(services.participantService.getCurrencyLeaderboard).toHaveBeenCalledWith("guild-test");
-    expect(reply).toHaveBeenCalledWith({
-      content: "1. Bob: 9 bananas 💲\n2. S001: 7 bananas 💲",
+    expect(services.economyService.getLeaderboard).toHaveBeenCalledWith("guild-test");
+
+    const [{ embeds }] = reply.mock.calls[0] as [{ embeds: Array<{ toJSON(): Record<string, unknown> }> }];
+    expect(embeds).toHaveLength(1);
+
+    const embed = embeds[0]!.toJSON() as {
+      title?: string;
+      description?: string;
+      fields?: Array<{ name: string; value: string }>;
+    };
+
+    expect(embed.title).toBe("Group Leaderboard");
+    expect(embed.description).toContain("5 groups ranked by shared blorgshj");
+    expect(embed.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Standings",
+          value: expect.stringContaining("🥇 **Gryffindor**"),
+        }),
+        expect.objectContaining({
+          name: "Also ranked",
+          value: expect.stringContaining("#5 **Durmstrang**"),
+        }),
+        expect.objectContaining({
+          name: "Total in play",
+          value: "34 blorgshj 🏅",
+        }),
+      ]),
+    );
+  });
+
+  it("shows the personal wallet leaderboard in Discord", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.participantService.getCurrencyLeaderboard.mockResolvedValue([
+      {
+        id: "participant-2",
+        discordUserId: "student-2",
+        discordUsername: "Bob",
+        indexId: "S002",
+        currencyBalance: 9,
+      },
+      {
+        id: "participant-1",
+        discordUserId: "student-1",
+        discordUsername: null,
+        indexId: "S001",
+        currencyBalance: 7,
+      },
+      {
+        id: "participant-3",
+        discordUserId: "student-3",
+        discordUsername: "Charlie",
+        indexId: "S003",
+        currencyBalance: 6,
+      },
+      {
+        id: "participant-4",
+        discordUserId: "student-4",
+        discordUsername: "Delta",
+        indexId: "S004",
+        currencyBalance: 5,
+      },
+      {
+        id: "participant-5",
+        discordUserId: "student-5",
+        discordUsername: "Echo",
+        indexId: "S005",
+        currencyBalance: 4,
+      },
+    ]);
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const fetchMember = vi.fn(async (userId: string) => {
+      if (userId === "user-1") {
+        return {
+          roles: { cache: new Map([["group-role", {}]]) },
+        };
+      }
+
+      if (userId === "student-2") {
+        return {
+          displayName: "Bobby Tables",
+          user: { globalName: "Bob" },
+        };
+      }
+
+      if (userId === "student-1") {
+        return null;
+      }
+
+      if (userId === "student-3") {
+        return {
+          displayName: "Charlie",
+          user: { globalName: "Charlie" },
+        };
+      }
+
+      if (userId === "student-4") {
+        return {
+          displayName: "Delta",
+          user: { globalName: "Delta" },
+        };
+      }
+
+      if (userId === "student-5") {
+        return {
+          displayName: "Echo",
+          user: { globalName: "Echo" },
+        };
+      }
+
+      return null;
     });
+
+    await (runtime as any).handleCommand({
+      commandName: "forbes",
+      guild: {
+        members: {
+          fetch: fetchMember,
+        },
+      },
+      options: {},
+      reply,
+      user: {
+        id: "user-1",
+        username: "Alice",
+      },
+    });
+
+    expect(services.participantService.getCurrencyLeaderboard).toHaveBeenCalledWith("guild-test");
+
+    const [{ embeds }] = reply.mock.calls[0] as [{ embeds: Array<{ toJSON(): Record<string, unknown> }> }];
+    expect(embeds).toHaveLength(1);
+
+    const embed = embeds[0]!.toJSON() as {
+      title?: string;
+      description?: string;
+      fields?: Array<{ name: string; value: string }>;
+      footer?: { text?: string };
+    };
+
+    expect(embed.title).toBe("Forbes Wallet Board");
+    expect(embed.description).toContain("5 participants ranked by wallet bananas");
+    expect(embed.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Standings",
+          value: expect.stringContaining("🥇 **Bobby Tables**"),
+        }),
+        expect.objectContaining({
+          name: "Standings",
+          value: expect.stringContaining("🥈 **S001**"),
+        }),
+        expect.objectContaining({
+          name: "Also ranked",
+          value: expect.stringContaining("#5 **Echo**"),
+        }),
+        expect.objectContaining({
+          name: "Total held",
+          value: "31 bananas 💲",
+        }),
+      ]),
+    );
+    expect(embed.footer?.text).toContain("Server display names");
   });
 
   it("creates a group purchase from /buyforgroup", async () => {

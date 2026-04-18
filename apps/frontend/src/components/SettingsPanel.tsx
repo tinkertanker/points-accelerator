@@ -29,12 +29,29 @@ const EMPTY_ROLE_CAPABILITY: RoleCapability = {
   canManageDashboard: false,
   canAward: false,
   maxAward: null,
+  actionCooldownSeconds: null,
   canDeduct: false,
   canMultiAward: false,
   canSell: false,
   canReceiveAwards: true,
   isGroupRole: false,
 };
+
+const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
+
+function normaliseRoleCapability(role: RoleCapability): RoleCapability {
+  if (!role.canAward && !role.canDeduct) {
+    return {
+      ...role,
+      actionCooldownSeconds: null,
+    };
+  }
+
+  return {
+    ...role,
+    actionCooldownSeconds: role.actionCooldownSeconds ?? DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS,
+  };
+}
 
 type ChannelMultiSelectFieldProps = {
   label: string;
@@ -322,7 +339,7 @@ export default function SettingsPanel({
               />
             </label>
             <label>
-              Cooldown seconds
+              Passive cooldown (seconds)
               <input
                 type="number"
                 value={settingsDraft.passiveCooldownSeconds}
@@ -464,6 +481,8 @@ export default function SettingsPanel({
               <dd>Upper limit per award (blank = unlimited).</dd>
               <dt>Deduct</dt>
               <dd>Can subtract points from groups and handle staff-side currency corrections.</dd>
+              <dt>Cooldown</dt>
+              <dd>Seconds between award or deduct commands for that role. Defaults to 10 when enabled, and admins bypass it.</dd>
               <dt>Multi</dt>
               <dd>Can award multiple groups at once.</dd>
               <dt>Sell</dt>
@@ -489,6 +508,9 @@ export default function SettingsPanel({
                     <th scope="col" className="capability-table__max">
                       Max award
                     </th>
+                    <th scope="col" className="capability-table__cooldown">
+                      Cooldown
+                    </th>
                     {CAPABILITY_COLUMNS.map((column) => (
                       <th
                         key={column.key}
@@ -511,11 +533,11 @@ export default function SettingsPanel({
                           onChange={(event) => {
                             const selected = discordRoles.find((candidate) => candidate.id === event.target.value);
                             const next = [...roleDrafts];
-                            next[index] = {
+                            next[index] = normaliseRoleCapability({
                               ...role,
                               roleId: event.target.value,
                               roleName: selected?.name ?? role.roleName,
-                            };
+                            });
                             onRoleDraftsChange(next);
                           }}
                         >
@@ -533,7 +555,7 @@ export default function SettingsPanel({
                           aria-label="Role label"
                           onChange={(event) => {
                             const next = [...roleDrafts];
-                            next[index] = { ...role, roleName: event.target.value };
+                            next[index] = normaliseRoleCapability({ ...role, roleName: event.target.value });
                             onRoleDraftsChange(next);
                           }}
                           placeholder="Display label"
@@ -546,10 +568,31 @@ export default function SettingsPanel({
                           aria-label="Max award"
                           onChange={(event) => {
                             const next = [...roleDrafts];
-                            next[index] = { ...role, maxAward: event.target.value ? Number(event.target.value) : null };
+                            next[index] = normaliseRoleCapability({
+                              ...role,
+                              maxAward: event.target.value ? Number(event.target.value) : null,
+                            });
                             onRoleDraftsChange(next);
                           }}
                           placeholder="—"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          value={role.canAward || role.canDeduct ? (role.actionCooldownSeconds ?? DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS) : ""}
+                          aria-label="Action cooldown"
+                          onChange={(event) => {
+                            const next = [...roleDrafts];
+                            next[index] = normaliseRoleCapability({
+                              ...role,
+                              actionCooldownSeconds: event.target.value ? Number(event.target.value) : null,
+                            });
+                            onRoleDraftsChange(next);
+                          }}
+                          placeholder="—"
+                          disabled={!role.canAward && !role.canDeduct}
                         />
                       </td>
                       {CAPABILITY_COLUMNS.map((column) => (
@@ -560,7 +603,10 @@ export default function SettingsPanel({
                             aria-label={column.header}
                             onChange={(event) => {
                               const next = [...roleDrafts];
-                              next[index] = { ...role, [column.key]: event.target.checked };
+                              next[index] = normaliseRoleCapability({
+                                ...role,
+                                [column.key]: event.target.checked,
+                              });
                               onRoleDraftsChange(next);
                             }}
                           />

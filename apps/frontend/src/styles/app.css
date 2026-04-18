@@ -1095,6 +1095,14 @@ dl.stats-row {
   width: 100%;
 }
 
+.capability-table__cooldown {
+  width: 5.5rem;
+}
+
+.capability-table__cooldown input {
+  width: 100%;
+}
+
 .capability-table__cap {
   text-align: center;
   width: 2.75rem;

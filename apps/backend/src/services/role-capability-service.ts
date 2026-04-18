@@ -2,12 +2,15 @@ import type { PrismaClient } from "@prisma/client";
 
 import { decimal } from "../utils/decimal.js";
 
+const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
+
 export type RoleCapabilityInput = {
   roleId: string;
   roleName: string;
   canManageDashboard: boolean;
   canAward: boolean;
   maxAward: number | null;
+  actionCooldownSeconds?: number | null;
   canDeduct: boolean;
   canMultiAward: boolean;
   canSell: boolean;
@@ -49,6 +52,11 @@ export class RoleCapabilityService {
       });
 
       for (const capability of capabilities) {
+        const actionCooldownSeconds =
+          capability.canAward || capability.canDeduct
+            ? capability.actionCooldownSeconds ?? DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS
+            : null;
+
         await tx.discordRoleCapability.upsert({
           where: {
             guildId_roleId: {
@@ -63,6 +71,7 @@ export class RoleCapabilityService {
             canManageDashboard: capability.canManageDashboard,
             canAward: capability.canAward,
             maxAward: capability.maxAward === null ? null : decimal(capability.maxAward),
+            actionCooldownSeconds,
             canDeduct: capability.canDeduct,
             canMultiAward: capability.canMultiAward,
             canSell: capability.canSell,
@@ -74,6 +83,7 @@ export class RoleCapabilityService {
             canManageDashboard: capability.canManageDashboard,
             canAward: capability.canAward,
             maxAward: capability.maxAward === null ? null : decimal(capability.maxAward),
+            actionCooldownSeconds,
             canDeduct: capability.canDeduct,
             canMultiAward: capability.canMultiAward,
             canSell: capability.canSell,
@@ -102,4 +112,3 @@ export class RoleCapabilityService {
     });
   }
 }
-

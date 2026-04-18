@@ -1,6 +1,7 @@
 import {
   ChannelType,
   Client,
+  EmbedBuilder,
   GatewayIntentBits,
   Partials,
   PermissionFlagsBits,
@@ -24,8 +25,10 @@ type CooldownEntry = {
 };
 
 type CommandLedgerEntry = Awaited<ReturnType<AppServices["economyService"]["getLedger"]>>[number];
+type GroupLeaderboardEntry = Awaited<ReturnType<AppServices["economyService"]["getLeaderboard"]>>[number];
 type GuildConfig = Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>;
 type ActiveAssignment = Awaited<ReturnType<AppServices["assignmentService"]["listActive"]>>[number];
+type CurrencyLeaderboardEntry = Awaited<ReturnType<AppServices["participantService"]["getCurrencyLeaderboard"]>>[number];
 type AssignmentLookupResult =
   | { kind: "resolved"; assignment: ActiveAssignment }
   | { kind: "ambiguous"; matches: ActiveAssignment[] }
@@ -39,6 +42,11 @@ type AwardLikeCommandName =
   | "deductmixed";
 
 const MAX_LEDGER_LINE_LENGTH = 160;
+const LEADERBOARD_EMBED_LIMIT = 10;
+const LEADERBOARD_FEATURED_COUNT = 4;
+const GROUP_LEADERBOARD_COLOUR = 0xf59e0b;
+const FORBES_EMBED_COLOUR = 0x38bdf8;
+const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
 
 function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: string) {
   const isDeduction = commandName.startsWith("deduct");
@@ -135,7 +143,8 @@ function isDiscordUnknownMemberError(error: unknown): boolean {
 }
 
 export class BotRuntime {
-  private readonly cooldowns = new Map<string, CooldownEntry>();
+  private readonly passiveCooldowns = new Map<string, CooldownEntry>();
+  private readonly actionCooldowns = new Map<string, CooldownEntry>();
   private client: Client | null = null;
 
   public constructor(
@@ -378,6 +387,83 @@ export class BotRuntime {
     }
   }
 
+  private async canBypassActionCooldown(member: GuildMember | null, roleIds: string[]) {
+    if (!member) {
+      return false;
+    }
+
+    const hasPermission = (permission: bigint) => member.permissions?.has(permission) ?? false;
+
+    if (
+      hasPermission(PermissionFlagsBits.Administrator) ||
+      hasPermission(PermissionFlagsBits.ManageGuild)
+    ) {
+      return true;
+    }
+
+    const capabilities = await this.services.roleCapabilityService.listForRoleIds(this.env.GUILD_ID, roleIds);
+    const resolved = resolveCapabilities(capabilities);
+    return resolved.canManageDashboard;
+  }
+
+  private resolveRoleActionCooldownSeconds(params: {
+    capabilities: Awaited<ReturnType<AppServices["roleCapabilityService"]["listForRoleIds"]>>;
+    isDeduction: boolean;
+  }) {
+    const matchingCooldowns = params.capabilities
+      .filter((capability) => (params.isDeduction ? capability.canDeduct : capability.canAward))
+      .map((capability) => capability.actionCooldownSeconds ?? DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS);
+
+    if (matchingCooldowns.length === 0) {
+      return null;
+    }
+
+    return Math.min(...matchingCooldowns);
+  }
+
+  private async enforceAwardCommandCooldown(
+    params: {
+      member: GuildMember | null;
+      roleIds: string[];
+      userId: string;
+      isDeduction: boolean;
+    },
+  ) {
+    if (await this.canBypassActionCooldown(params.member, params.roleIds)) {
+      return null;
+    }
+
+    const capabilities = await this.services.roleCapabilityService.listForRoleIds(this.env.GUILD_ID, params.roleIds);
+    const cooldownSeconds = this.resolveRoleActionCooldownSeconds({
+      capabilities,
+      isDeduction: params.isDeduction,
+    });
+    if (cooldownSeconds === null || cooldownSeconds <= 0) {
+      return null;
+    }
+
+    const actionKind = params.isDeduction ? "deduct" : "award";
+    const cooldownKey = `${this.env.GUILD_ID}:${params.userId}:${actionKind}`;
+    const now = Date.now();
+    const previous = this.actionCooldowns.get(cooldownKey);
+    const cooldownMs = cooldownSeconds * 1000;
+
+    if (previous && now - previous.seenAt < cooldownMs) {
+      const remainingSeconds = Math.max(1, Math.ceil((cooldownMs - (now - previous.seenAt)) / 1000));
+      throw new AppError(`Wait ${remainingSeconds}s before using another ${actionKind} command.`, 429);
+    }
+
+    this.actionCooldowns.set(cooldownKey, { seenAt: now });
+
+    return () => {
+      if (previous) {
+        this.actionCooldowns.set(cooldownKey, previous);
+      } else {
+        this.actionCooldowns.delete(cooldownKey);
+      }
+    };
+  }
+
   private resolveActiveAssignment(assignments: ActiveAssignment[], identifier: string): AssignmentLookupResult {
     const value = identifier.trim();
     if (!value) {
@@ -416,6 +502,116 @@ export class BotRuntime {
 
   private formatGroupPurchaseProgress(approvalsCount: number, threshold: number) {
     return `${approvalsCount}/${threshold} approval${threshold === 1 ? "" : "s"}`;
+  }
+
+  private formatRankMarker(index: number) {
+    switch (index) {
+      case 0:
+        return "🥇";
+      case 1:
+        return "🥈";
+      case 2:
+        return "🥉";
+      default:
+        return `#${index + 1}`;
+    }
+  }
+
+  private buildGroupLeaderboardEmbed(leaderboard: GroupLeaderboardEntry[], config: GuildConfig) {
+    const rankedGroups = leaderboard.slice(0, LEADERBOARD_EMBED_LIMIT);
+    const featuredGroups = rankedGroups.slice(0, LEADERBOARD_FEATURED_COUNT);
+    const compactGroups = rankedGroups.slice(LEADERBOARD_FEATURED_COUNT);
+    const totalPoints = leaderboard.reduce((sum, group) => sum + group.pointsBalance, 0);
+    const standings = featuredGroups
+      .map(
+        (group, index) =>
+          `${this.formatRankMarker(index)} **${group.displayName}**\n${this.formatPointsAmount(group.pointsBalance, config)}`,
+      )
+      .join("\n\n");
+    const compactStandings = compactGroups
+      .map(
+        (group, index) =>
+          `#${LEADERBOARD_FEATURED_COUNT + index + 1} **${group.displayName}** · ${this.formatPointsAmount(group.pointsBalance, config)}`,
+      )
+      .join("\n");
+    const fields = [
+      { name: "Standings", value: standings, inline: false },
+      ...(compactStandings ? [{ name: "Also ranked", value: compactStandings, inline: false }] : []),
+      { name: "Groups", value: `${leaderboard.length}`, inline: true },
+      { name: "Total in play", value: this.formatPointsAmount(totalPoints, config), inline: true },
+    ];
+
+    return new EmbedBuilder()
+      .setColor(GROUP_LEADERBOARD_COLOUR)
+      .setTitle("Group Leaderboard")
+      .setDescription(
+        `${leaderboard.length} group${leaderboard.length === 1 ? "" : "s"} ranked by shared ${config.pointsName}.`,
+      )
+      .addFields(fields)
+      .setFooter({ text: `Shared ${config.pointsName} drive the public board and /buyforgroup.` });
+  }
+
+  private async resolveParticipantDisplayNames(
+    guild: ChatInputCommandInteraction["guild"],
+    participants: CurrencyLeaderboardEntry[],
+  ) {
+    const fallbackEntries = participants.map((participant) => [
+      participant.id,
+      participant.discordUsername ?? participant.indexId,
+    ] as const);
+    if (!guild) {
+      return new Map(fallbackEntries);
+    }
+
+    const resolvedEntries = await Promise.all(
+      participants.map(async (participant) => {
+        const member = await guild.members.fetch(participant.discordUserId).catch(() => null);
+        return [
+          participant.id,
+          member?.displayName || member?.user?.globalName || participant.discordUsername || participant.indexId,
+        ] as const;
+      }),
+    );
+
+    return new Map(resolvedEntries);
+  }
+
+  private buildForbesEmbed(
+    leaderboard: CurrencyLeaderboardEntry[],
+    displayNames: Map<string, string>,
+    config: GuildConfig,
+  ) {
+    const rankedParticipants = leaderboard.slice(0, LEADERBOARD_EMBED_LIMIT);
+    const featuredParticipants = rankedParticipants.slice(0, LEADERBOARD_FEATURED_COUNT);
+    const compactParticipants = rankedParticipants.slice(LEADERBOARD_FEATURED_COUNT);
+    const totalCurrency = leaderboard.reduce((sum, participant) => sum + participant.currencyBalance, 0);
+    const standings = featuredParticipants
+      .map((participant, index) => {
+        const displayName = displayNames.get(participant.id) ?? participant.discordUsername ?? participant.indexId;
+        return `${this.formatRankMarker(index)} **${displayName}**\n${this.formatCurrencyAmount(participant.currencyBalance, config)}`;
+      })
+      .join("\n\n");
+    const compactStandings = compactParticipants
+      .map((participant, index) => {
+        const displayName = displayNames.get(participant.id) ?? participant.discordUsername ?? participant.indexId;
+        return `#${LEADERBOARD_FEATURED_COUNT + index + 1} **${displayName}** · ${this.formatCurrencyAmount(participant.currencyBalance, config)}`;
+      })
+      .join("\n");
+    const fields = [
+      { name: "Standings", value: standings, inline: false },
+      ...(compactStandings ? [{ name: "Also ranked", value: compactStandings, inline: false }] : []),
+      { name: "Wallets tracked", value: `${leaderboard.length}`, inline: true },
+      { name: "Total held", value: this.formatCurrencyAmount(totalCurrency, config), inline: true },
+    ];
+
+    return new EmbedBuilder()
+      .setColor(FORBES_EMBED_COLOUR)
+      .setTitle("Forbes Wallet Board")
+      .setDescription(
+        `${leaderboard.length} participant${leaderboard.length === 1 ? "" : "s"} ranked by wallet ${config.currencyName}.`,
+      )
+      .addFields(fields)
+      .setFooter({ text: "Server display names are shown when Discord can resolve them." });
   }
 
   private async resolveActiveParticipant(params: {
@@ -518,7 +714,7 @@ export class BotRuntime {
     const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
     const cooldownKey = `${params.memberId}:${resolved.group.id}`;
     const now = Date.now();
-    const previous = this.cooldowns.get(cooldownKey);
+    const previous = this.passiveCooldowns.get(cooldownKey);
     if (previous && now - previous.seenAt < config.passiveCooldownSeconds * 1000) {
       return;
     }
@@ -536,7 +732,7 @@ export class BotRuntime {
     });
 
     if (entry) {
-      this.cooldowns.set(cooldownKey, { seenAt: now });
+      this.passiveCooldowns.set(cooldownKey, { seenAt: now });
     }
   }
 
@@ -737,24 +933,24 @@ export class BotRuntime {
       case "leaderboard": {
         const leaderboard = await this.services.economyService.getLeaderboard(this.env.GUILD_ID);
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-        const content = leaderboard
-          .slice(0, 10)
-          .map((group, index) => `${index + 1}. ${group.displayName}: ${this.formatPointsAmount(group.pointsBalance, config)}`)
-          .join("\n");
-        await interaction.reply({ content: content || "No groups yet." });
+        if (leaderboard.length === 0) {
+          await interaction.reply({ content: "No groups yet." });
+          return;
+        }
+
+        await interaction.reply({ embeds: [this.buildGroupLeaderboardEmbed(leaderboard, config)] });
         return;
       }
       case "forbes": {
         const leaderboard = await this.services.participantService.getCurrencyLeaderboard(this.env.GUILD_ID);
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-        const content = leaderboard
-          .slice(0, 10)
-          .map(
-            (participant, index) =>
-              `${index + 1}. ${participant.discordUsername ?? participant.indexId}: ${this.formatCurrencyAmount(participant.currencyBalance, config)}`,
-          )
-          .join("\n");
-        await interaction.reply({ content: content || "No participants yet." });
+        if (leaderboard.length === 0) {
+          await interaction.reply({ content: "No participants yet." });
+          return;
+        }
+
+        const displayNames = await this.resolveParticipantDisplayNames(interaction.guild, leaderboard);
+        await interaction.reply({ embeds: [this.buildForbesEmbed(leaderboard, displayNames, config)] });
         return;
       }
       case "balance": {
@@ -858,108 +1054,119 @@ export class BotRuntime {
         const { includesGroups, includesMember, isDeduction } = getAwardCommandConfig(
           interaction.commandName as AwardLikeCommandName,
         );
-        const groupAmountOptionName = interaction.commandName === "awardgroup" ? "amount" : "points";
-        const memberAmountOptionName = interaction.commandName === "award" ? "amount" : "currency";
-        const targets = includesGroups ? interaction.options.getString("targets", true) : null;
-        const points = includesGroups ? interaction.options.getNumber(groupAmountOptionName, true) : 0;
-        const currency = includesMember ? interaction.options.getNumber(memberAmountOptionName, true) : 0;
-        const targetMember = includesMember ? interaction.options.getUser("member", true) : null;
-        const reason =
-          interaction.options.getString("reason") ??
-          (isDeduction ? "Manual deduction via Discord command" : "Manual award via Discord command");
-        const sign = isDeduction ? -1 : 1;
+        const rollbackCooldown = await this.enforceAwardCommandCooldown({
+          member: member ?? null,
+          roleIds,
+          userId: interaction.user.id,
+          isDeduction,
+        });
+        try {
+          const groupAmountOptionName = interaction.commandName === "awardgroup" ? "amount" : "points";
+          const memberAmountOptionName = interaction.commandName === "award" ? "amount" : "currency";
+          const targets = includesGroups ? interaction.options.getString("targets", true) : null;
+          const points = includesGroups ? interaction.options.getNumber(groupAmountOptionName, true) : 0;
+          const currency = includesMember ? interaction.options.getNumber(memberAmountOptionName, true) : 0;
+          const targetMember = includesMember ? interaction.options.getUser("member", true) : null;
+          const reason =
+            interaction.options.getString("reason") ??
+            (isDeduction ? "Manual deduction via Discord command" : "Manual award via Discord command");
+          const sign = isDeduction ? -1 : 1;
 
-        const targetGroups =
-          points === 0
-            ? []
-            : await Promise.all(
-                (targets ?? "")
-                  .split(",")
-                  .map((segment) => segment.trim())
-                  .filter(Boolean)
-                  .map(async (segment) => {
-                    const group = await this.services.groupService.resolveGroupByIdentifier(this.env.GUILD_ID, segment);
-                    if (!group) {
-                      throw new AppError(`Could not resolve group: ${segment}`, 404);
-                    }
-                    return group;
-                  }),
-              );
+          const targetGroups =
+            points === 0
+              ? []
+              : await Promise.all(
+                  (targets ?? "")
+                    .split(",")
+                    .map((segment) => segment.trim())
+                    .filter(Boolean)
+                    .map(async (segment) => {
+                      const group = await this.services.groupService.resolveGroupByIdentifier(this.env.GUILD_ID, segment);
+                      if (!group) {
+                        throw new AppError(`Could not resolve group: ${segment}`, 404);
+                      }
+                      return group;
+                    }),
+                );
 
-        if (points !== 0 && targetGroups.length === 0) {
-          throw new AppError("Choose at least one target group when awarding or deducting points.", 400);
-        }
-
-        let currencyParticipant:
-          | Awaited<ReturnType<BotRuntime["resolveActiveParticipant"]>>["participant"]
-          | undefined;
-        let currencyMemberLabel: string | undefined;
-        if (currency !== 0) {
-          if (!targetMember) {
-            throw new AppError("Choose a member when awarding or deducting currency.", 400);
+          if (points !== 0 && targetGroups.length === 0) {
+            throw new AppError("Choose at least one target group when awarding or deducting points.", 400);
           }
 
-          const memberRecord = await interaction.guild?.members.fetch(targetMember.id).catch(() => null);
-          if (!memberRecord) {
-            throw new AppError("Selected member is not in this server.", 404);
+          let currencyParticipant:
+            | Awaited<ReturnType<BotRuntime["resolveActiveParticipant"]>>["participant"]
+            | undefined;
+          let currencyMemberLabel: string | undefined;
+          if (currency !== 0) {
+            if (!targetMember) {
+              throw new AppError("Choose a member when awarding or deducting currency.", 400);
+            }
+
+            const memberRecord = await interaction.guild?.members.fetch(targetMember.id).catch(() => null);
+            if (!memberRecord) {
+              throw new AppError("Selected member is not in this server.", 404);
+            }
+            currencyMemberLabel = memberRecord.displayName || targetMember.globalName || targetMember.username;
+
+            ({ participant: currencyParticipant } = await this.resolveActiveParticipant({
+              discordUserId: targetMember.id,
+              discordUsername: targetMember.username,
+              roleIds: Array.from(memberRecord.roles.cache.keys()),
+            }));
           }
-          currencyMemberLabel = memberRecord.displayName || targetMember.globalName || targetMember.username;
 
-          ({ participant: currencyParticipant } = await this.resolveActiveParticipant({
-            discordUserId: targetMember.id,
-            discordUsername: targetMember.username,
-            roleIds: Array.from(memberRecord.roles.cache.keys()),
-          }));
-        }
-
-        if (targetGroups.length > 0) {
-          await this.services.prisma.$transaction(async (tx) => {
-            await this.services.economyService.awardGroups({
-              guildId: this.env.GUILD_ID,
-              actor,
-              targetGroupIds: targetGroups.map((group) => group.id),
-              pointsDelta: points * sign,
-              currencyDelta: 0,
-              description: reason,
-              executor: tx,
-            });
-
-            if (currencyParticipant && currency !== 0) {
-              await this.services.participantCurrencyService.awardParticipants({
+          if (targetGroups.length > 0) {
+            await this.services.prisma.$transaction(async (tx) => {
+              await this.services.economyService.awardGroups({
                 guildId: this.env.GUILD_ID,
                 actor,
-                targetParticipantIds: [currencyParticipant.id],
-                currencyDelta: currency * sign,
+                targetGroupIds: targetGroups.map((group) => group.id),
+                pointsDelta: points * sign,
+                currencyDelta: 0,
                 description: reason,
                 executor: tx,
               });
-            }
-          });
-        } else if (currencyParticipant && currency !== 0) {
-          await this.services.participantCurrencyService.awardParticipants({
-            guildId: this.env.GUILD_ID,
-            actor,
-            targetParticipantIds: [currencyParticipant.id],
-            currencyDelta: currency * sign,
-            description: reason,
-          });
+
+              if (currencyParticipant && currency !== 0) {
+                await this.services.participantCurrencyService.awardParticipants({
+                  guildId: this.env.GUILD_ID,
+                  actor,
+                  targetParticipantIds: [currencyParticipant.id],
+                  currencyDelta: currency * sign,
+                  description: reason,
+                  executor: tx,
+                });
+              }
+            });
+          } else if (currencyParticipant && currency !== 0) {
+            await this.services.participantCurrencyService.awardParticipants({
+              guildId: this.env.GUILD_ID,
+              actor,
+              targetParticipantIds: [currencyParticipant.id],
+              currencyDelta: currency * sign,
+              description: reason,
+            });
+          }
+
+          const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+          const direction = isDeduction ? "from" : "to";
+          const summaries = [
+            targetGroups.length > 0
+              ? `${this.formatPointsAmount(Math.abs(points), config)} ${direction} ${targetGroups.map((group) => group.displayName).join(", ")}`
+              : null,
+            currencyParticipant && currency !== 0
+              ? `${this.formatCurrencyAmount(Math.abs(currency), config)} ${direction} ${
+                  currencyMemberLabel ?? currencyParticipant.discordUsername ?? currencyParticipant.indexId
+                }`
+              : null,
+          ].filter((value): value is string => value !== null);
+
+          await interaction.reply(`${isDeduction ? "Deducted" : "Awarded"} ${summaries.join(" and ")}.`);
+          return;
+        } catch (error) {
+          rollbackCooldown?.();
+          throw error;
         }
-
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-        const direction = isDeduction ? "from" : "to";
-        const summaries = [
-          targetGroups.length > 0
-            ? `${this.formatPointsAmount(Math.abs(points), config)} ${direction} ${targetGroups.map((group) => group.displayName).join(", ")}`
-            : null,
-          currencyParticipant && currency !== 0
-            ? `${this.formatCurrencyAmount(Math.abs(currency), config)} ${direction} ${
-                currencyMemberLabel ?? currencyParticipant.discordUsername ?? currencyParticipant.indexId
-              }`
-            : null,
-        ].filter((value): value is string => value !== null);
-
-        await interaction.reply(`${isDeduction ? "Deducted" : "Awarded"} ${summaries.join(" and ")}.`);
-        return;
       }
       case "awardmixed":
         throw new AppError("/awardmixed is disabled for now. Use /awardgroup and /award separately.", 400);
