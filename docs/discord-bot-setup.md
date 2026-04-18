@@ -69,8 +69,9 @@ After deployment:
 
 Run these in the test server before production rollout:
 
-- `/awardgroup`
-- `/award`
+- `/awardpoints`
+- `/awardcurrency`
+- `/awardcurrencybulk`
 - `/deductgroup`
 - `/deductmember`
 - `/deductmixed`
