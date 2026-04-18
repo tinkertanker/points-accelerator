@@ -31,7 +31,7 @@ type AssignmentLookupResult =
   | { kind: "missing" };
 type AwardLikeCommandName =
   | "awardgroup"
-  | "awardmember"
+  | "award"
   | "awardmixed"
   | "deductgroup"
   | "deductmember"
@@ -41,8 +41,10 @@ const MAX_LEDGER_LINE_LENGTH = 160;
 
 function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: string) {
   const isDeduction = commandName.startsWith("deduct");
-  const isGroupOnly = commandName.endsWith("group");
-  const isMemberOnly = commandName.endsWith("member");
+  const isGroupOnly = commandName === "awardgroup" || commandName === "deductgroup";
+  const isMemberOnly = commandName === "award" || commandName === "deductmember";
+  const groupAmountOptionName = commandName === "awardgroup" ? "amount" : "points";
+  const memberAmountOptionName = commandName === "award" ? "amount" : "currency";
 
   const builder = new SlashCommandBuilder()
     .setName(commandName)
@@ -54,7 +56,11 @@ function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: s
         option.setName("targets").setDescription("Comma-separated group aliases or role mentions").setRequired(true),
       )
       .addNumberOption((option) =>
-        option.setName("points").setDescription("Points delta for the target groups").setRequired(true).setMinValue(0.01),
+        option
+          .setName(groupAmountOptionName)
+          .setDescription("Points delta for the target groups")
+          .setRequired(true)
+          .setMinValue(0.01),
       );
   }
 
@@ -64,7 +70,11 @@ function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: s
         option.setName("member").setDescription("Member whose wallet should change").setRequired(true),
       )
       .addNumberOption((option) =>
-        option.setName("currency").setDescription("Currency delta for the selected member").setRequired(true).setMinValue(0.01),
+        option
+          .setName(memberAmountOptionName)
+          .setDescription("Currency delta for the selected member")
+          .setRequired(true)
+          .setMinValue(0.01),
       );
   }
 
@@ -81,8 +91,16 @@ function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: s
 function getAwardCommandConfig(commandName: AwardLikeCommandName) {
   return {
     isDeduction: commandName.startsWith("deduct"),
-    includesGroups: commandName.endsWith("group") || commandName.endsWith("mixed"),
-    includesMember: commandName.endsWith("member") || commandName.endsWith("mixed"),
+    includesGroups:
+      commandName === "awardgroup" ||
+      commandName === "deductgroup" ||
+      commandName === "awardmixed" ||
+      commandName === "deductmixed",
+    includesMember:
+      commandName === "award" ||
+      commandName === "deductmember" ||
+      commandName === "awardmixed" ||
+      commandName === "deductmixed",
   };
 }
 
@@ -816,17 +834,18 @@ export class BotRuntime {
         return;
       }
       case "awardgroup":
-      case "awardmember":
-      case "awardmixed":
+      case "award":
       case "deductgroup":
       case "deductmember":
       case "deductmixed": {
         const { includesGroups, includesMember, isDeduction } = getAwardCommandConfig(
           interaction.commandName as AwardLikeCommandName,
         );
+        const groupAmountOptionName = interaction.commandName === "awardgroup" ? "amount" : "points";
+        const memberAmountOptionName = interaction.commandName === "award" ? "amount" : "currency";
         const targets = includesGroups ? interaction.options.getString("targets", true) : null;
-        const points = includesGroups ? interaction.options.getNumber("points", true) : 0;
-        const currency = includesMember ? interaction.options.getNumber("currency", true) : 0;
+        const points = includesGroups ? interaction.options.getNumber(groupAmountOptionName, true) : 0;
+        const currency = includesMember ? interaction.options.getNumber(memberAmountOptionName, true) : 0;
         const targetMember = includesMember ? interaction.options.getUser("member", true) : null;
         const reason =
           interaction.options.getString("reason") ??
@@ -922,6 +941,8 @@ export class BotRuntime {
         await interaction.reply(`${isDeduction ? "Deducted" : "Awarded"} ${summaries.join(" and ")}.`);
         return;
       }
+      case "awardmixed":
+        throw new AppError("/awardmixed is disabled for now. Use /awardgroup and /award separately.", 400);
       case "sell": {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const title = interaction.options.getString("title", true);
@@ -1378,8 +1399,8 @@ export class BotRuntime {
         .setDescription("Convert your wallet currency into group points.")
         .addNumberOption((option) => option.setName("amount").setDescription("Currency amount").setRequired(true)),
       buildAwardLikeCommand("awardgroup", "Award group points."),
-      buildAwardLikeCommand("awardmember", "Award participant currency."),
-      buildAwardLikeCommand("awardmixed", "Award group points and participant currency together."),
+      buildAwardLikeCommand("award", "Award participant currency."),
+      // buildAwardLikeCommand("awardmixed", "Award group points and participant currency together."),
       buildAwardLikeCommand("deductgroup", "Deduct group points."),
       buildAwardLikeCommand("deductmember", "Deduct participant currency."),
       buildAwardLikeCommand("deductmixed", "Deduct group points and participant currency together."),

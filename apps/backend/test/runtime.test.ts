@@ -662,74 +662,30 @@ describe("bot runtime", () => {
     );
   });
 
-  it("awards group points and participant currency together", async () => {
+  it("rejects /awardmixed while the command is disabled", async () => {
     const { runtime, services } = createRuntimeFixture();
-    services.participantService.ensureForGroup.mockResolvedValueOnce({
-      id: "participant-2",
-      indexId: "AUTOUSER2",
-      discordUsername: "Bob",
-      groupId: "group-1",
-      group: { id: "group-1", displayName: "Gryffindor", slug: "gryffindor" },
-    });
-    const reply = vi.fn().mockResolvedValue(undefined);
 
-    await (runtime as any).handleCommand({
-      commandName: "awardmixed",
-      guild: {
-        members: {
-          fetch: vi.fn((userId?: string) =>
-            Promise.resolve({
-              roles: { cache: new Map([[userId === "user-2" ? "group-role-2" : "group-role", {}]]) },
+    await expect(
+      (runtime as any).handleCommand({
+        commandName: "awardmixed",
+        guild: {
+          members: {
+            fetch: vi.fn().mockResolvedValue({
+              roles: { cache: new Map([["group-role", {}]]) },
             }),
-          ),
+          },
         },
-      },
-      options: {
-        getString: vi.fn((name: string) => {
-          if (name === "targets") return "@gryffindor";
-          if (name === "reason") return "Great teamwork";
-          return null;
-        }),
-        getNumber: vi.fn((name: string) => {
-          if (name === "points") return 5;
-          if (name === "currency") return 3;
-          return null;
-        }),
-        getUser: vi.fn((name: string) => (name === "member" ? { id: "user-2", username: "Bob" } : null)),
-      },
-      reply,
-      user: {
-        id: "staff-1",
-        username: "Mentor",
-      },
-    });
+        options: {},
+        reply: vi.fn(),
+        user: {
+          id: "staff-1",
+          username: "Mentor",
+        },
+      }),
+    ).rejects.toThrow(/disabled for now/i);
 
-    expect(services.economyService.awardGroups).toHaveBeenCalledWith({
-      guildId: "guild-test",
-      actor: {
-        userId: "staff-1",
-        username: "Mentor",
-        roleIds: ["group-role"],
-      },
-      targetGroupIds: ["group-1"],
-      pointsDelta: 5,
-      currencyDelta: 0,
-      description: "Great teamwork",
-      executor: {},
-    });
-    expect(services.participantCurrencyService.awardParticipants).toHaveBeenCalledWith({
-      guildId: "guild-test",
-      actor: {
-        userId: "staff-1",
-        username: "Mentor",
-        roleIds: ["group-role"],
-      },
-      targetParticipantIds: ["participant-2"],
-      currencyDelta: 3,
-      description: "Great teamwork",
-      executor: {},
-    });
-    expect(reply).toHaveBeenCalledWith("Awarded 5 points to Gryffindor and 3 currency to Bob.");
+    expect(services.economyService.awardGroups).not.toHaveBeenCalled();
+    expect(services.participantCurrencyService.awardParticipants).not.toHaveBeenCalled();
   });
 
   it("registers required award and deduct command options", async () => {
@@ -751,33 +707,25 @@ describe("bot runtime", () => {
       }>;
     }>;
     const awardGroupCommand = commands.find((command) => command.name === "awardgroup");
-    const awardMemberCommand = commands.find((command) => command.name === "awardmember");
+    const awardCommand = commands.find((command) => command.name === "award");
     const awardMixedCommand = commands.find((command) => command.name === "awardmixed");
     const deductMixedCommand = commands.find((command) => command.name === "deductmixed");
 
     expect(awardGroupCommand?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "targets", required: true }),
-        expect.objectContaining({ name: "points", required: true, min_value: 0.01 }),
+        expect.objectContaining({ name: "amount", required: true, min_value: 0.01 }),
         expect.objectContaining({ name: "reason", required: false }),
       ]),
     );
-    expect(awardMemberCommand?.options).toEqual(
+    expect(awardCommand?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "member", required: true }),
-        expect.objectContaining({ name: "currency", required: true, min_value: 0.01 }),
+        expect.objectContaining({ name: "amount", required: true, min_value: 0.01 }),
         expect.objectContaining({ name: "reason", required: false }),
       ]),
     );
-    expect(awardMixedCommand?.options).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: "targets", required: true }),
-        expect.objectContaining({ name: "points", required: true, min_value: 0.01 }),
-        expect.objectContaining({ name: "member", required: true }),
-        expect.objectContaining({ name: "currency", required: true, min_value: 0.01 }),
-        expect.objectContaining({ name: "reason", required: false }),
-      ]),
-    );
+    expect(awardMixedCommand).toBeUndefined();
     expect(deductMixedCommand?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "targets", required: true }),

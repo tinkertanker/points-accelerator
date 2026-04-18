@@ -50,4 +50,4 @@ Set these in your `.env` file before deploying:
 3. Create group mappings for the Discord roles that represent teams.
 4. Set listing, redemption, and log channels if you want channel output.
 5. Create shop items.
-6. Test `/awardgroup`, `/awardmember`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, and `/sell` in the class server.
+6. Test `/awardgroup`, `/award`, `/deductgroup`, `/deductmember`, `/deductmixed`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, and `/sell` in the class server.

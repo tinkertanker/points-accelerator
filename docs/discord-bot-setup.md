@@ -70,8 +70,7 @@ After deployment:
 Run these in the test server before production rollout:
 
 - `/awardgroup`
-- `/awardmember`
-- `/awardmixed`
+- `/award`
 - `/deductgroup`
 - `/deductmember`
 - `/deductmixed`
