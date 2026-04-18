@@ -295,6 +295,76 @@ describe("bot runtime", () => {
     expect(content).toContain("...");
   });
 
+  it("uses the Discord display name in /award replies for member currency awards", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.participantService.ensureForGroup.mockResolvedValue({
+      id: "participant-2",
+      indexId: "dffrffcrc67",
+      discordUsername: null,
+      groupId: "group-1",
+      group: { id: "group-1", displayName: "Gryffindor", slug: "gryffindor" },
+    });
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const fetchMember = vi.fn(async (userId: string) => {
+      if (userId === "staff-1") {
+        return {
+          roles: { cache: new Map([["staff-role", {}]]) },
+          permissions: { has: vi.fn().mockReturnValue(false) },
+        };
+      }
+
+      if (userId === "student-1") {
+        return {
+          displayName: "Alex Carter",
+          roles: { cache: new Map([["group-role", {}]]) },
+          permissions: { has: vi.fn().mockReturnValue(false) },
+        };
+      }
+
+      return null;
+    });
+
+    await (runtime as any).handleCommand({
+      commandName: "award",
+      guild: {
+        members: {
+          fetch: fetchMember,
+        },
+      },
+      options: {
+        getNumber: vi.fn((name: string) => (name === "amount" ? 100 : null)),
+        getUser: vi.fn((name: string) =>
+          name === "member"
+            ? {
+                id: "student-1",
+                username: "discord-user",
+                globalName: "Alex Carter",
+              }
+            : null,
+        ),
+        getString: vi.fn().mockReturnValue("Great work"),
+      },
+      reply,
+      user: {
+        id: "staff-1",
+        username: "Mentor",
+      },
+    });
+
+    expect(services.participantCurrencyService.awardParticipants).toHaveBeenCalledWith({
+      guildId: "guild-test",
+      actor: {
+        userId: "staff-1",
+        username: "Mentor",
+        roleIds: ["staff-role"],
+      },
+      targetParticipantIds: ["participant-2"],
+      currencyDelta: 100,
+      description: "Great work",
+    });
+    expect(reply).toHaveBeenCalledWith("Awarded 100 currency to Alex Carter.");
+  });
+
   it("rejects /submissions for non-staff members", async () => {
     const { runtime } = createRuntimeFixture();
 

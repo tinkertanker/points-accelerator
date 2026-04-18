@@ -876,6 +876,7 @@ export class BotRuntime {
         let currencyParticipant:
           | Awaited<ReturnType<BotRuntime["resolveActiveParticipant"]>>["participant"]
           | undefined;
+        let currencyMemberLabel: string | undefined;
         if (currency !== 0) {
           if (!targetMember) {
             throw new AppError("Choose a member when awarding or deducting currency.", 400);
@@ -885,6 +886,7 @@ export class BotRuntime {
           if (!memberRecord) {
             throw new AppError("Selected member is not in this server.", 404);
           }
+          currencyMemberLabel = memberRecord.displayName || targetMember.globalName || targetMember.username;
 
           ({ participant: currencyParticipant } = await this.resolveActiveParticipant({
             discordUserId: targetMember.id,
@@ -933,7 +935,7 @@ export class BotRuntime {
             : null,
           currencyParticipant && currency !== 0
             ? `${Math.abs(currency)} currency ${direction} ${
-                currencyParticipant.discordUsername ?? currencyParticipant.indexId
+                currencyMemberLabel ?? currencyParticipant.discordUsername ?? currencyParticipant.indexId
               }`
             : null,
         ].filter((value): value is string => value !== null);
