@@ -62,6 +62,7 @@ function createRuntimeFixture() {
         }),
       setApprovalMessage: vi.fn().mockResolvedValue(undefined),
       approveGroupPurchase: vi.fn().mockResolvedValue({ executed: false, approvalsCount: 1, threshold: 2 }),
+      getRedemption: vi.fn().mockResolvedValue(null),
     },
     participantService: {
       findByDiscordUser: vi.fn(),

@@ -77,7 +77,7 @@ describe("ShopPanel", () => {
       "Cost",
       "Stock",
       "Fulfilment",
-      "Owner Discord ID",
+      "Owner",
       "Enabled",
     ]);
 

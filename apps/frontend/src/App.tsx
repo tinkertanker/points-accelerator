@@ -468,6 +468,7 @@ export default function App() {
           <ShopPanel
             shopDrafts={shopDrafts}
             isBusy={isMutating}
+            participants={bootstrap.participants}
             createShopDraft={() => toShopItemDraft()}
             onShopDraftsChange={setShopDrafts}
             onSaveShop={handleSaveShop}
