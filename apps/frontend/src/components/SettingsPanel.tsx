@@ -1,3 +1,5 @@
+import { useId, useState } from "react";
+
 import type { DiscordOption, RoleCapability, Settings } from "../types";
 
 type CapabilityToggleKey = keyof Pick<
@@ -34,6 +36,156 @@ const EMPTY_ROLE_CAPABILITY: RoleCapability = {
   isGroupRole: false,
 };
 
+type ChannelMultiSelectFieldProps = {
+  label: string;
+  selectedIds: string[];
+  channels: DiscordOption[];
+  hint: string;
+  emptyState: string;
+  placeholder: string;
+  onChange: (nextIds: string[]) => void;
+};
+
+function getChannelDisplayName(channel: DiscordOption | undefined, channelId: string) {
+  return channel ? `#${channel.name}` : `Unknown channel (${channelId})`;
+}
+
+function ChannelMultiSelectField({
+  label,
+  selectedIds,
+  channels,
+  hint,
+  emptyState,
+  placeholder,
+  onChange,
+}: ChannelMultiSelectFieldProps) {
+  const inputId = useId();
+  const hintId = useId();
+  const [query, setQuery] = useState("");
+
+  const selectedChannelIds = new Set(selectedIds);
+  const trimmedQuery = query.trim();
+  const normalizedQuery = trimmedQuery.toLowerCase();
+
+  const selectedChannels = selectedIds.map((channelId) => ({
+    id: channelId,
+    option: channels.find((channel) => channel.id === channelId),
+  }));
+
+  const matchingChannels = trimmedQuery
+    ? channels.filter(
+        (channel) =>
+          !selectedChannelIds.has(channel.id) &&
+          (channel.name.toLowerCase().includes(normalizedQuery) || channel.id.toLowerCase().includes(normalizedQuery)),
+      )
+    : [];
+
+  const addChannel = (channelId: string) => {
+    if (selectedChannelIds.has(channelId)) {
+      setQuery("");
+      return;
+    }
+
+    onChange([...selectedIds, channelId]);
+    setQuery("");
+  };
+
+  const removeChannel = (channelId: string) => {
+    onChange(selectedIds.filter((candidate) => candidate !== channelId));
+  };
+
+  const findBestMatch = () => {
+    if (!trimmedQuery) {
+      return null;
+    }
+
+    const exactMatch = channels.find(
+      (channel) =>
+        !selectedChannelIds.has(channel.id) &&
+        (channel.id === trimmedQuery ||
+          channel.name.toLowerCase() === normalizedQuery ||
+          `#${channel.name}`.toLowerCase() === normalizedQuery),
+    );
+
+    return exactMatch ?? matchingChannels[0] ?? null;
+  };
+
+  const handleAddFromQuery = () => {
+    const match = findBestMatch();
+    if (!match) {
+      return;
+    }
+
+    addChannel(match.id);
+  };
+
+  return (
+    <div className="span-2 channel-picker-field">
+      <label htmlFor={inputId}>{label}</label>
+      <div className="channel-picker">
+        <div className="channel-picker__selected" aria-live="polite">
+          {selectedChannels.length > 0 ? (
+            selectedChannels.map(({ id, option }) => (
+              <button
+                key={id}
+                className="channel-picker__chip"
+                type="button"
+                onClick={() => removeChannel(id)}
+                title={`Remove ${getChannelDisplayName(option, id)}`}
+              >
+                <span>{getChannelDisplayName(option, id)}</span>
+                <span aria-hidden="true">x</span>
+              </button>
+            ))
+          ) : (
+            <p className="channel-picker__empty">{emptyState}</p>
+          )}
+        </div>
+        <div className="channel-picker__controls">
+          <input
+            id={inputId}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === ",") {
+                event.preventDefault();
+                handleAddFromQuery();
+                return;
+              }
+
+              if (event.key === "Backspace" && !query && selectedIds.length > 0) {
+                removeChannel(selectedIds[selectedIds.length - 1]);
+              }
+            }}
+            placeholder={placeholder}
+            aria-describedby={hintId}
+          />
+          <button type="button" onClick={handleAddFromQuery} disabled={!findBestMatch()}>
+            Add
+          </button>
+        </div>
+        {matchingChannels.length > 0 ? (
+          <ul className="channel-picker__matches" role="listbox" aria-label={`${label} suggestions`}>
+            {matchingChannels.slice(0, 8).map((channel) => (
+              <li key={channel.id}>
+                <button type="button" onClick={() => addChannel(channel.id)}>
+                  <span className="channel-picker__match-name">#{channel.name}</span>
+                  <span className="channel-picker__match-id">{channel.id}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : trimmedQuery ? (
+          <p className="channel-picker__no-match">No channels match that search.</p>
+        ) : null}
+        <p id={hintId} className="channel-picker__hint">
+          {hint}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 type SettingsPanelProps = {
   settingsDraft: Settings;
   roleDrafts: RoleCapability[];
@@ -57,6 +209,8 @@ export default function SettingsPanel({
   onSaveSettings,
   onSaveRoles,
 }: SettingsPanelProps) {
+  const sortedDiscordChannels = [...discordChannels].sort((left, right) => left.name.localeCompare(right.name));
+
   return (
     <div className="panel-stack">
       <section className="panel-stack">
@@ -275,38 +429,34 @@ export default function SettingsPanel({
                 ))}
               </select>
             </label>
-            <label className="span-2">
-              Allowed passive channels
-              <input
-                value={settingsDraft.passiveAllowedChannelIds.join(", ")}
-                onChange={(event) =>
-                  onSettingsChange({
-                    ...settingsDraft,
-                    passiveAllowedChannelIds: event.target.value
-                      .split(",")
-                      .map((value) => value.trim())
-                      .filter(Boolean),
-                  })
-                }
-                placeholder="comma-separated channel ids"
-              />
-            </label>
-            <label className="span-2">
-              Denied passive channels
-              <input
-                value={settingsDraft.passiveDeniedChannelIds.join(", ")}
-                onChange={(event) =>
-                  onSettingsChange({
-                    ...settingsDraft,
-                    passiveDeniedChannelIds: event.target.value
-                      .split(",")
-                      .map((value) => value.trim())
-                      .filter(Boolean),
-                  })
-                }
-                placeholder="comma-separated channel ids"
-              />
-            </label>
+            <ChannelMultiSelectField
+              label="Allowed passive channels"
+              selectedIds={settingsDraft.passiveAllowedChannelIds}
+              channels={sortedDiscordChannels}
+              emptyState="All channels are currently allowed."
+              hint="Leave this empty to allow passive rewards in every channel. Add channels here only if you want a strict allow-list."
+              placeholder="Type a channel name or ID"
+              onChange={(passiveAllowedChannelIds) =>
+                onSettingsChange({
+                  ...settingsDraft,
+                  passiveAllowedChannelIds,
+                })
+              }
+            />
+            <ChannelMultiSelectField
+              label="Denied passive channels"
+              selectedIds={settingsDraft.passiveDeniedChannelIds}
+              channels={sortedDiscordChannels}
+              emptyState="No channels are currently denied."
+              hint="Leave this empty to deny none. Denied channels always block passive rewards, even if they also appear in the allowed list."
+              placeholder="Type a channel name or ID"
+              onChange={(passiveDeniedChannelIds) =>
+                onSettingsChange({
+                  ...settingsDraft,
+                  passiveDeniedChannelIds,
+                })
+              }
+            />
           </div>
         </article>
 
