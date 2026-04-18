@@ -87,8 +87,8 @@ export default function ShopPanel({
                           onShopDraftsChange(next);
                         }}
                       >
-                        <option value="INDIVIDUAL">Personal</option>
-                        <option value="GROUP">Group</option>
+                        <option value="INDIVIDUAL">👤</option>
+                        <option value="GROUP">👥</option>
                       </select>
                     </td>
                     <td className="col-cost">
@@ -153,6 +153,33 @@ export default function ShopPanel({
           >
             + Add shop item
           </button>
+
+          <details className="capability-help">
+            <summary>What do these shop columns mean?</summary>
+            <dl>
+              <dt>Name</dt>
+              <dd>The item title shown in the shop and purchase flows.</dd>
+              <dt>Description</dt>
+              <dd>Short copy explaining what the student or group is buying.</dd>
+              <dt>Audience</dt>
+              <dd>
+                <strong>👤 Personal</strong> items are bought with <code>/buyforme</code> using participant currency.
+                <strong> 👥 Group</strong> items are bought with <code>/buyforgroup</code> using shared group points and
+                approvals.
+              </dd>
+              <dt>Cost</dt>
+              <dd>The amount charged per purchase in the selected audience&apos;s economy.</dd>
+              <dt>Stock</dt>
+              <dd>Leave blank for unlimited supply. Set a number to cap how many times the item can be redeemed.</dd>
+              <dt>Fulfilment</dt>
+              <dd>
+                What happens after purchase: for example, &ldquo;show this receipt to a mentor&rdquo; or
+                &ldquo;collect from the staff desk&rdquo;.
+              </dd>
+              <dt>Enabled</dt>
+              <dd>Turn items on or off without deleting them from the catalogue.</dd>
+            </dl>
+          </details>
         </div>
       </article>
     </div>
