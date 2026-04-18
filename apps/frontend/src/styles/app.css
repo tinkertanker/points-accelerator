@@ -5,6 +5,7 @@
   --bg: #fefcf9;
   --bg-elevated: #ffffff;
   --bg-input: #fefefe;
+  --bg-panel: #fffaf0;
   --border: #e8ddd0;
   --border-focus: #FB753A;
   --text: #1a1a1a;
@@ -29,6 +30,7 @@ html[data-theme="dark"] {
   --bg: #0c0a09;
   --bg-elevated: #1c1917;
   --bg-input: #231f1b;
+  --bg-panel: #302820;
   --border: #3d3530;
   --border-focus: #FB753A;
   --text: #fafaf9;
@@ -692,8 +694,10 @@ dl.stats-row {
 }
 
 .settings-field-pair,
-.settings-section {
-  border: 1px solid var(--border);
+.settings-section,
+.role-checklist {
+  background: var(--bg-panel);
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
   border-radius: 0.75rem;
   margin: 0;
   min-width: 0;
@@ -811,7 +815,8 @@ dl.stats-row {
 }
 
 .channel-picker {
-  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   border-radius: 0.75rem;
   display: grid;
   gap: 0.75rem;
