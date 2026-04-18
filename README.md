@@ -56,15 +56,15 @@ The bot also supports participant-wallet betting: students can place double-or-n
 
 ## Phase 1 command set
 
-- Staff roles such as admins or alumni: `/awardgroup`, `/award`, `/deductgroup`, `/deductmember`, `/deductmixed`
+- Staff roles such as admins or alumni: `/awardpoints`, `/awardcurrency`, `/awardcurrencybulk`, `/deductgroup`, `/deductmember`, `/deductmixed`
 - Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`
 - Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`, `/bet`, `/betstats`
 
 The award and deduct flows use separate commands so Discord enforces the required fields:
 
-- `/awardgroup` or `/deductgroup` for group points
-- `/award` or `/deductmember` for participant wallet currency
-- `/awardmixed` is disabled for now; use `/awardgroup` and `/award` separately when both should change
+- `/awardpoints` or `/deductgroup` for group points
+- `/awardcurrency`, `/awardcurrencybulk`, or `/deductmember` for participant wallet currency
+- `/awardmixed` is disabled for now; use `/awardpoints` and `/awardcurrency` separately when both should change
 - `/deductmixed` when both group points and participant currency should change together
 - `reason` is optional on each command; the target and amount fields are required
 

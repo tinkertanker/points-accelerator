@@ -29,13 +29,17 @@ type GroupLeaderboardEntry = Awaited<ReturnType<AppServices["economyService"]["g
 type GuildConfig = Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>;
 type ActiveAssignment = Awaited<ReturnType<AppServices["assignmentService"]["listActive"]>>[number];
 type CurrencyLeaderboardEntry = Awaited<ReturnType<AppServices["participantService"]["getCurrencyLeaderboard"]>>[number];
+type GuildMemberCollection = Awaited<
+  ReturnType<NonNullable<ChatInputCommandInteraction["guild"]>["members"]["fetch"]>
+>;
 type AssignmentLookupResult =
   | { kind: "resolved"; assignment: ActiveAssignment }
   | { kind: "ambiguous"; matches: ActiveAssignment[] }
   | { kind: "missing" };
 type AwardLikeCommandName =
-  | "awardgroup"
-  | "award"
+  | "awardpoints"
+  | "awardcurrency"
+  | "awardcurrencybulk"
   | "awardmixed"
   | "deductgroup"
   | "deductmember"
@@ -49,48 +53,53 @@ const FORBES_EMBED_COLOUR = 0x38bdf8;
 const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
 
 function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: string) {
-  const isDeduction = commandName.startsWith("deduct");
-  const isGroupOnly = commandName === "awardgroup" || commandName === "deductgroup";
-  const isMemberOnly = commandName === "award" || commandName === "deductmember";
-  const groupAmountOptionName = commandName === "awardgroup" ? "amount" : "points";
-  const memberAmountOptionName = commandName === "award" ? "amount" : "currency";
+  const config = getAwardCommandConfig(commandName);
 
   const builder = new SlashCommandBuilder()
     .setName(commandName)
     .setDescription(description);
 
-  if (!isMemberOnly) {
+  if (config.includesGroupTargets) {
     builder
       .addStringOption((option) =>
         option.setName("targets").setDescription("Comma-separated group aliases or role mentions").setRequired(true),
-      )
-      .addNumberOption((option) =>
-        option
-          .setName(groupAmountOptionName)
-          .setDescription("Points delta for the target groups")
-          .setRequired(true)
-          .setMinValue(0.01),
       );
   }
 
-  if (!isGroupOnly) {
-    builder
-      .addUserOption((option) =>
-        option.setName("member").setDescription("Member whose wallet should change").setRequired(true),
-      )
-      .addNumberOption((option) =>
-        option
-          .setName(memberAmountOptionName)
-          .setDescription("Currency delta for the selected member")
-          .setRequired(true)
-          .setMinValue(0.01),
-      );
+  if (config.includesGroupPoints && config.groupAmountOptionName) {
+    builder.addNumberOption((option) =>
+      option
+        .setName(config.groupAmountOptionName)
+        .setDescription("Points delta for the target groups")
+        .setRequired(true)
+        .setMinValue(0.01),
+    );
+  }
+
+  if (config.includesSingleMemberCurrency) {
+    builder.addUserOption((option) =>
+      option.setName("member").setDescription("Member whose wallet should change").setRequired(true),
+    );
+  }
+
+  if ((config.includesSingleMemberCurrency || config.includesBulkMemberCurrency) && config.memberAmountOptionName) {
+    builder.addNumberOption((option) =>
+      option
+        .setName(config.memberAmountOptionName)
+        .setDescription(
+          config.includesBulkMemberCurrency
+            ? "Currency delta for each eligible member in the selected groups"
+            : "Currency delta for the selected member",
+        )
+        .setRequired(true)
+        .setMinValue(0.01),
+    );
   }
 
   builder.addStringOption((option) =>
     option
       .setName("reason")
-      .setDescription(`${isDeduction ? "Deduction" : "Award"} reason`)
+      .setDescription(`${config.isDeduction ? "Deduction" : "Award"} reason`)
       .setRequired(false),
   );
 
@@ -98,19 +107,78 @@ function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: s
 }
 
 function getAwardCommandConfig(commandName: AwardLikeCommandName) {
-  return {
-    isDeduction: commandName.startsWith("deduct"),
-    includesGroups:
-      commandName === "awardgroup" ||
-      commandName === "deductgroup" ||
-      commandName === "awardmixed" ||
-      commandName === "deductmixed",
-    includesMember:
-      commandName === "award" ||
-      commandName === "deductmember" ||
-      commandName === "awardmixed" ||
-      commandName === "deductmixed",
-  };
+  switch (commandName) {
+    case "awardpoints":
+      return {
+        isDeduction: false,
+        includesGroupTargets: true,
+        includesGroupPoints: true,
+        includesSingleMemberCurrency: false,
+        includesBulkMemberCurrency: false,
+        groupAmountOptionName: "amount",
+        memberAmountOptionName: null,
+      };
+    case "awardcurrency":
+      return {
+        isDeduction: false,
+        includesGroupTargets: false,
+        includesGroupPoints: false,
+        includesSingleMemberCurrency: true,
+        includesBulkMemberCurrency: false,
+        groupAmountOptionName: null,
+        memberAmountOptionName: "amount",
+      };
+    case "awardcurrencybulk":
+      return {
+        isDeduction: false,
+        includesGroupTargets: true,
+        includesGroupPoints: false,
+        includesSingleMemberCurrency: false,
+        includesBulkMemberCurrency: true,
+        groupAmountOptionName: null,
+        memberAmountOptionName: "amount",
+      };
+    case "awardmixed":
+      return {
+        isDeduction: false,
+        includesGroupTargets: true,
+        includesGroupPoints: true,
+        includesSingleMemberCurrency: true,
+        includesBulkMemberCurrency: false,
+        groupAmountOptionName: "points",
+        memberAmountOptionName: "currency",
+      };
+    case "deductgroup":
+      return {
+        isDeduction: true,
+        includesGroupTargets: true,
+        includesGroupPoints: true,
+        includesSingleMemberCurrency: false,
+        includesBulkMemberCurrency: false,
+        groupAmountOptionName: "points",
+        memberAmountOptionName: null,
+      };
+    case "deductmember":
+      return {
+        isDeduction: true,
+        includesGroupTargets: false,
+        includesGroupPoints: false,
+        includesSingleMemberCurrency: true,
+        includesBulkMemberCurrency: false,
+        groupAmountOptionName: null,
+        memberAmountOptionName: "currency",
+      };
+    case "deductmixed":
+      return {
+        isDeduction: true,
+        includesGroupTargets: true,
+        includesGroupPoints: true,
+        includesSingleMemberCurrency: true,
+        includesBulkMemberCurrency: false,
+        groupAmountOptionName: "points",
+        memberAmountOptionName: "currency",
+      };
+  }
 }
 
 export type DashboardMember = {
@@ -642,13 +710,14 @@ export class BotRuntime {
     groupId: string;
     roleId: string;
     guild: ChatInputCommandInteraction["guild"];
+    prefetchedMembers?: GuildMemberCollection;
   }) {
     const guild = params.guild;
     if (!guild) {
       return [];
     }
 
-    const members = await guild.members.fetch();
+    const members = params.prefetchedMembers ?? (await guild.members.fetch());
     const candidates = Array.from(members.values()).filter(
       (candidate) => !candidate.user.bot && candidate.roles.cache.has(params.roleId),
     );
@@ -670,18 +739,20 @@ export class BotRuntime {
     groupId: string;
     roleId: string;
     guild: ChatInputCommandInteraction["guild"];
+    prefetchedMembers?: GuildMemberCollection;
   }) {
     const guild = params.guild;
     if (!guild) {
       return {
         count: 0,
         discordUserIds: [] as string[],
+        participantIds: [] as string[],
       };
     }
 
     const eligibleMembers = await this.getEligibleGroupMembers(params);
 
-    await Promise.all(
+    const participants = await Promise.all(
       eligibleMembers.map((candidate) =>
         this.services.participantService.ensureForGroup({
           guildId: this.env.GUILD_ID,
@@ -695,7 +766,26 @@ export class BotRuntime {
     return {
       count: eligibleMembers.length,
       discordUserIds: eligibleMembers.map((member) => member.user.id),
+      participantIds: participants.map((participant) => participant.id),
     };
+  }
+
+  private async resolveTargetGroups(targets: string) {
+    const resolvedGroups = await Promise.all(
+      targets
+        .split(",")
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .map(async (segment) => {
+          const group = await this.services.groupService.resolveGroupByIdentifier(this.env.GUILD_ID, segment);
+          if (!group) {
+            throw new AppError(`Could not resolve group: ${segment}`, 404);
+          }
+          return group;
+        }),
+    );
+
+    return Array.from(new Map(resolvedGroups.map((group) => [group.id, group])).values());
   }
 
   private async handlePassiveMessage(params: {
@@ -1060,86 +1150,119 @@ export class BotRuntime {
         );
         return;
       }
-      case "awardgroup":
-      case "award":
+      case "awardpoints":
+      case "awardcurrency":
+      case "awardcurrencybulk":
       case "deductgroup":
       case "deductmember":
       case "deductmixed": {
-        const { includesGroups, includesMember, isDeduction } = getAwardCommandConfig(
+        const commandConfig = getAwardCommandConfig(
           interaction.commandName as AwardLikeCommandName,
         );
         const rollbackCooldown = await this.enforceAwardCommandCooldown({
           member: member ?? null,
           roleIds,
           userId: interaction.user.id,
-          isDeduction,
+          isDeduction: commandConfig.isDeduction,
         });
         try {
-          const groupAmountOptionName = interaction.commandName === "awardgroup" ? "amount" : "points";
-          const memberAmountOptionName = interaction.commandName === "award" ? "amount" : "currency";
-          const targets = includesGroups ? interaction.options.getString("targets", true) : null;
-          const points = includesGroups ? interaction.options.getNumber(groupAmountOptionName, true) : 0;
-          const currency = includesMember ? interaction.options.getNumber(memberAmountOptionName, true) : 0;
-          const targetMember = includesMember ? interaction.options.getUser("member", true) : null;
+          const targets = commandConfig.includesGroupTargets ? interaction.options.getString("targets", true) : null;
+          const points =
+            commandConfig.includesGroupPoints && commandConfig.groupAmountOptionName
+              ? interaction.options.getNumber(commandConfig.groupAmountOptionName, true)
+              : 0;
+          const currency =
+            (commandConfig.includesSingleMemberCurrency || commandConfig.includesBulkMemberCurrency) &&
+            commandConfig.memberAmountOptionName
+              ? interaction.options.getNumber(commandConfig.memberAmountOptionName, true)
+              : 0;
+          const targetMember = commandConfig.includesSingleMemberCurrency
+            ? interaction.options.getUser("member", true)
+            : null;
           const reason =
             interaction.options.getString("reason") ??
-            (isDeduction ? "Manual deduction via Discord command" : "Manual award via Discord command");
-          const sign = isDeduction ? -1 : 1;
+            (commandConfig.isDeduction ? "Manual deduction via Discord command" : "Manual award via Discord command");
+          const sign = commandConfig.isDeduction ? -1 : 1;
+          const targetGroups = commandConfig.includesGroupTargets ? await this.resolveTargetGroups(targets ?? "") : [];
 
-          const targetGroups =
-            points === 0
-              ? []
-              : await Promise.all(
-                  (targets ?? "")
-                    .split(",")
-                    .map((segment) => segment.trim())
-                    .filter(Boolean)
-                    .map(async (segment) => {
-                      const group = await this.services.groupService.resolveGroupByIdentifier(this.env.GUILD_ID, segment);
-                      if (!group) {
-                        throw new AppError(`Could not resolve group: ${segment}`, 404);
-                      }
-                      return group;
-                    }),
-                );
+          if (commandConfig.includesGroupTargets && targetGroups.length === 0) {
+            throw new AppError("Choose at least one target group.", 400);
+          }
 
-          if (points !== 0 && targetGroups.length === 0) {
-            throw new AppError("Choose at least one target group when awarding or deducting points.", 400);
+          if (commandConfig.includesGroupPoints && points === 0) {
+            throw new AppError("Points delta must be greater than zero.", 400);
           }
 
           let currencyParticipant:
             | Awaited<ReturnType<BotRuntime["resolveActiveParticipant"]>>["participant"]
             | undefined;
           let currencyMemberLabel: string | undefined;
+          let bulkCurrencyParticipantIds: string[] = [];
+          let bulkCurrencyGroupSummary = "";
           if (currency !== 0) {
-            if (!targetMember) {
+            if (commandConfig.includesSingleMemberCurrency && !targetMember) {
               throw new AppError("Choose a member when awarding or deducting currency.", 400);
             }
 
-            const memberRecord = await interaction.guild?.members.fetch(targetMember.id).catch(() => null);
-            if (!memberRecord) {
-              throw new AppError("Selected member is not in this server.", 404);
-            }
-            currencyMemberLabel = memberRecord.displayName || targetMember.globalName || targetMember.username;
+            if (commandConfig.includesSingleMemberCurrency && targetMember) {
+              const memberRecord = await interaction.guild?.members.fetch(targetMember.id).catch(() => null);
+              if (!memberRecord) {
+                throw new AppError("Selected member is not in this server.", 404);
+              }
+              currencyMemberLabel = memberRecord.displayName || targetMember.globalName || targetMember.username;
 
-            ({ participant: currencyParticipant } = await this.resolveActiveParticipant({
-              discordUserId: targetMember.id,
-              discordUsername: targetMember.username,
-              roleIds: Array.from(memberRecord.roles.cache.keys()),
-            }));
+              ({ participant: currencyParticipant } = await this.resolveActiveParticipant({
+                discordUserId: targetMember.id,
+                discordUsername: targetMember.username,
+                roleIds: Array.from(memberRecord.roles.cache.keys()),
+              }));
+            }
+          }
+
+          if (commandConfig.includesBulkMemberCurrency) {
+            if (!interaction.guild) {
+              throw new AppError("This command is only available in a server.", 400);
+            }
+
+            const prefetchedMembers = await interaction.guild.members.fetch();
+            const syncedTargetGroups = await Promise.all(
+              targetGroups.map((group) =>
+                this.syncGroupParticipantsFromGuild({
+                  groupId: group.id,
+                  roleId: group.roleId,
+                  guild: interaction.guild,
+                  prefetchedMembers,
+                }),
+              ),
+            );
+
+            bulkCurrencyParticipantIds = Array.from(
+              new Set(syncedTargetGroups.flatMap((syncedGroup) => syncedGroup.participantIds)),
+            );
+            bulkCurrencyGroupSummary = syncedTargetGroups
+              .map((syncedGroup, index) => ({ displayName: targetGroups[index]!.displayName, count: syncedGroup.count }))
+              .filter((group) => group.count > 0)
+              .map((group) => `${group.displayName} (${group.count})`)
+              .join(", ");
+
+            if (bulkCurrencyParticipantIds.length === 0) {
+              throw new AppError("No eligible members found for the selected groups.", 404);
+            }
           }
 
           if (targetGroups.length > 0) {
             await this.services.prisma.$transaction(async (tx) => {
-              await this.services.economyService.awardGroups({
-                guildId: this.env.GUILD_ID,
-                actor,
-                targetGroupIds: targetGroups.map((group) => group.id),
-                pointsDelta: points * sign,
-                currencyDelta: 0,
-                description: reason,
-                executor: tx,
-              });
+              if (commandConfig.includesGroupPoints) {
+                await this.services.economyService.awardGroups({
+                  guildId: this.env.GUILD_ID,
+                  actor,
+                  targetGroupIds: targetGroups.map((group) => group.id),
+                  pointsDelta: points * sign,
+                  currencyDelta: 0,
+                  description: reason,
+                  executor: tx,
+                });
+              }
 
               if (currencyParticipant && currency !== 0) {
                 await this.services.participantCurrencyService.awardParticipants({
@@ -1151,21 +1274,34 @@ export class BotRuntime {
                   executor: tx,
                 });
               }
+
+              if (bulkCurrencyParticipantIds.length > 0 && currency !== 0) {
+                await this.services.participantCurrencyService.awardParticipants({
+                  guildId: this.env.GUILD_ID,
+                  actor,
+                  targetParticipantIds: bulkCurrencyParticipantIds,
+                  currencyDelta: currency * sign,
+                  description: reason,
+                  executor: tx,
+                });
+              }
             });
-          } else if (currencyParticipant && currency !== 0) {
-            await this.services.participantCurrencyService.awardParticipants({
-              guildId: this.env.GUILD_ID,
-              actor,
-              targetParticipantIds: [currencyParticipant.id],
-              currencyDelta: currency * sign,
-              description: reason,
-            });
+          } else if (currency !== 0) {
+            if (currencyParticipant) {
+              await this.services.participantCurrencyService.awardParticipants({
+                guildId: this.env.GUILD_ID,
+                actor,
+                targetParticipantIds: [currencyParticipant.id],
+                currencyDelta: currency * sign,
+                description: reason,
+              });
+            }
           }
 
           const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-          const direction = isDeduction ? "from" : "to";
+          const direction = commandConfig.isDeduction ? "from" : "to";
           const summaries = [
-            targetGroups.length > 0
+            commandConfig.includesGroupPoints && targetGroups.length > 0
               ? `${this.formatPointsAmount(Math.abs(points), config)} ${direction} ${targetGroups.map((group) => group.displayName).join(", ")}`
               : null,
             currencyParticipant && currency !== 0
@@ -1173,9 +1309,14 @@ export class BotRuntime {
                   currencyMemberLabel ?? currencyParticipant.discordUsername ?? currencyParticipant.indexId
                 }`
               : null,
+            bulkCurrencyParticipantIds.length > 0 && currency !== 0
+              ? `${this.formatCurrencyAmount(Math.abs(currency), config)} each ${direction} ${bulkCurrencyParticipantIds.length} member${
+                  bulkCurrencyParticipantIds.length === 1 ? "" : "s"
+                } across ${bulkCurrencyGroupSummary}`
+              : null,
           ].filter((value): value is string => value !== null);
 
-          await interaction.reply(`${isDeduction ? "Deducted" : "Awarded"} ${summaries.join(" and ")}.`);
+          await interaction.reply(`${commandConfig.isDeduction ? "Deducted" : "Awarded"} ${summaries.join(" and ")}.`);
           return;
         } catch (error) {
           rollbackCooldown?.();
@@ -1183,7 +1324,7 @@ export class BotRuntime {
         }
       }
       case "awardmixed":
-        throw new AppError("/awardmixed is disabled for now. Use /awardgroup and /award separately.", 400);
+        throw new AppError("/awardmixed is disabled for now. Use /awardpoints and /awardcurrency separately.", 400);
       case "sell": {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const title = interaction.options.getString("title", true);
@@ -1661,8 +1802,9 @@ export class BotRuntime {
         .setName("donate")
         .setDescription("Convert your wallet currency into group points.")
         .addNumberOption((option) => option.setName("amount").setDescription("Currency amount").setRequired(true)),
-      buildAwardLikeCommand("awardgroup", "Award group points."),
-      buildAwardLikeCommand("award", "Award participant currency."),
+      buildAwardLikeCommand("awardpoints", "Award group points."),
+      buildAwardLikeCommand("awardcurrency", "Award participant currency."),
+      buildAwardLikeCommand("awardcurrencybulk", "Award participant currency to every eligible member in selected groups."),
       // buildAwardLikeCommand("awardmixed", "Award group points and participant currency together."),
       buildAwardLikeCommand("deductgroup", "Deduct group points."),
       buildAwardLikeCommand("deductmember", "Deduct participant currency."),

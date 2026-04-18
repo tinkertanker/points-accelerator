@@ -299,7 +299,7 @@ describe("bot runtime", () => {
     expect(content).toContain("...");
   });
 
-  it("uses the Discord display name in /award replies for member currency awards", async () => {
+  it("uses the Discord display name in /awardcurrency replies for member currency awards", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.participantService.ensureForGroup.mockResolvedValue({
       id: "participant-2",
@@ -329,7 +329,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
-      commandName: "award",
+      commandName: "awardcurrency",
       guild: {
         members: {
           fetch: fetchMember,
@@ -369,6 +369,111 @@ describe("bot runtime", () => {
     expect(reply).toHaveBeenCalledWith("Awarded 100 bananas 💲 to Alex Carter.");
   });
 
+  it("awards currency in bulk to eligible members across selected groups", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.groupService.resolveGroupByIdentifier.mockImplementation(async (_guildId: string, identifier: string) => {
+      if (identifier === "gryff" || identifier === "<@&group-role>") {
+        return { id: "group-1", displayName: "Gryffindor", roleId: "group-role" };
+      }
+
+      return null;
+    });
+    services.groupService.resolveGroupFromRoleIds.mockImplementation(async (_guildId: string, roleIds: string[]) => {
+      if (roleIds.includes("group-role")) {
+        return { id: "group-1", displayName: "Gryffindor", roleId: "group-role" };
+      }
+
+      throw new Error("group not found");
+    });
+    services.participantService.ensureForGroup.mockImplementation(
+      async ({ discordUserId, discordUsername, groupId }: { discordUserId: string; discordUsername: string; groupId: string }) => ({
+        id: `participant-${discordUserId}`,
+        indexId: `IDX-${discordUserId}`,
+        discordUsername,
+        groupId,
+        group: { id: groupId, displayName: "Gryffindor", slug: "gryffindor" },
+      }),
+    );
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const fetchMember = vi.fn(async (userId?: string) => {
+      if (userId === "staff-1") {
+        return {
+          roles: { cache: new Map([["staff-role", {}]]) },
+          permissions: { has: vi.fn().mockReturnValue(false) },
+        };
+      }
+
+      if (userId) {
+        return null;
+      }
+
+      return new Map([
+        [
+          "staff-1",
+          {
+            user: { id: "staff-1", username: "Mentor", bot: false },
+            roles: { cache: new Map([["staff-role", {}]]) },
+          },
+        ],
+        [
+          "student-1",
+          {
+            displayName: "Alex Carter",
+            user: { id: "student-1", username: "alex", bot: false },
+            roles: { cache: new Map([["group-role", {}]]) },
+          },
+        ],
+        [
+          "student-2",
+          {
+            displayName: "Bailey Kim",
+            user: { id: "student-2", username: "bailey", bot: false },
+            roles: { cache: new Map([["group-role", {}]]) },
+          },
+        ],
+        [
+          "student-bot",
+          {
+            user: { id: "student-bot", username: "helper-bot", bot: true },
+            roles: { cache: new Map([["group-role", {}]]) },
+          },
+        ],
+      ]);
+    });
+
+    await (runtime as any).handleCommand({
+      commandName: "awardcurrencybulk",
+      guild: {
+        members: {
+          fetch: fetchMember,
+        },
+      },
+      options: {
+        getNumber: vi.fn((name: string) => (name === "amount" ? 15 : null)),
+        getString: vi.fn((name: string) => (name === "targets" ? "gryff" : "Team effort")),
+      },
+      reply,
+      user: {
+        id: "staff-1",
+        username: "Mentor",
+      },
+    });
+
+    expect(services.participantCurrencyService.awardParticipants).toHaveBeenCalledWith({
+      guildId: "guild-test",
+      actor: {
+        userId: "staff-1",
+        username: "Mentor",
+        roleIds: ["staff-role"],
+      },
+      targetParticipantIds: ["participant-student-1", "participant-student-2"],
+      currencyDelta: 15,
+      description: "Team effort",
+      executor: {},
+    });
+    expect(reply).toHaveBeenCalledWith("Awarded 15 bananas 💲 each to 2 members across Gryffindor (2).");
+  });
+
   it("blocks repeated award commands during the configured role cooldown for non-admin members", async () => {
     const { runtime, services } = createRuntimeFixture();
     const nowSpy = vi.spyOn(Date, "now");
@@ -406,7 +511,7 @@ describe("bot runtime", () => {
     });
 
     const awardInteraction = {
-      commandName: "award",
+      commandName: "awardcurrency",
       guild: { members: { fetch: fetchMember } },
       options: {
         getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
@@ -432,7 +537,7 @@ describe("bot runtime", () => {
 
     await expect(
       (runtime as any).handleCommand({
-        commandName: "award",
+        commandName: "awardcurrency",
         guild: { members: { fetch: fetchMember } },
         options: {
           getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
@@ -496,7 +601,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
-      commandName: "award",
+      commandName: "awardcurrency",
       guild: { members: { fetch: fetchMember } },
       options: {
         getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
@@ -568,7 +673,7 @@ describe("bot runtime", () => {
     });
 
     const awardInteraction = {
-      commandName: "award",
+      commandName: "awardcurrency",
       guild: { members: { fetch: fetchMember } },
       options: {
         getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
@@ -1242,26 +1347,37 @@ describe("bot runtime", () => {
         options?: Array<{ name: string; required?: boolean; min_value?: number }>;
       }>;
     }>;
-    const awardGroupCommand = commands.find((command) => command.name === "awardgroup");
-    const awardCommand = commands.find((command) => command.name === "award");
+    const awardPointsCommand = commands.find((command) => command.name === "awardpoints");
+    const awardCurrencyCommand = commands.find((command) => command.name === "awardcurrency");
+    const awardCurrencyBulkCommand = commands.find((command) => command.name === "awardcurrencybulk");
     const awardMixedCommand = commands.find((command) => command.name === "awardmixed");
     const deductMixedCommand = commands.find((command) => command.name === "deductmixed");
     const forbesCommand = commands.find((command) => command.name === "forbes");
 
     expect(forbesCommand).toEqual(expect.objectContaining({ name: "forbes" }));
-    expect(awardGroupCommand?.options).toEqual(
+    expect(awardPointsCommand?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "targets", required: true }),
         expect.objectContaining({ name: "amount", required: true, min_value: 0.01 }),
         expect.objectContaining({ name: "reason", required: false }),
       ]),
     );
-    expect(awardCommand?.options).toEqual(
+    expect(awardCurrencyCommand?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "member", required: true }),
         expect.objectContaining({ name: "amount", required: true, min_value: 0.01 }),
         expect.objectContaining({ name: "reason", required: false }),
       ]),
+    );
+    expect(awardCurrencyBulkCommand?.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "targets", required: true }),
+        expect.objectContaining({ name: "amount", required: true, min_value: 0.01 }),
+        expect.objectContaining({ name: "reason", required: false }),
+      ]),
+    );
+    expect(awardCurrencyBulkCommand?.options).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "member" })]),
     );
     expect(awardMixedCommand).toBeUndefined();
     expect(deductMixedCommand?.options).toEqual(
