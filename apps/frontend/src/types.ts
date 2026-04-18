@@ -1,7 +1,9 @@
 export type Settings = {
   appName: string;
   pointsName: string;
+  pointsSymbol: string;
   currencyName: string;
+  currencySymbol: string;
   groupPointsPerCurrencyDonation: number;
   mentorRoleIds: string[];
   passivePointsReward: number;

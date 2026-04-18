@@ -76,7 +76,9 @@ describe("points accelerator API", () => {
       payload: {
         appName: "points accelerator",
         pointsName: "beans",
+        pointsSymbol: "🏅",
         currencyName: "rice",
+        currencySymbol: "💲",
         mentorRoleIds: [],
         passivePointsReward: 2,
         passiveCurrencyReward: 1,

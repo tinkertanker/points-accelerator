@@ -84,10 +84,24 @@ export default function SettingsPanel({
               />
             </label>
             <label>
+              Points symbol
+              <input
+                value={settingsDraft.pointsSymbol}
+                onChange={(event) => onSettingsChange({ ...settingsDraft, pointsSymbol: event.target.value })}
+              />
+            </label>
+            <label>
               Currency label
               <input
                 value={settingsDraft.currencyName}
                 onChange={(event) => onSettingsChange({ ...settingsDraft, currencyName: event.target.value })}
+              />
+            </label>
+            <label>
+              Currency symbol
+              <input
+                value={settingsDraft.currencySymbol}
+                onChange={(event) => onSettingsChange({ ...settingsDraft, currencySymbol: event.target.value })}
               />
             </label>
             <label>

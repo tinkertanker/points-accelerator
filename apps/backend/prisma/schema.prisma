@@ -68,7 +68,9 @@ model GuildConfig {
   guildId                      String                @unique
   appName                      String                @default("points accelerator")
   pointsName                   String                @default("points")
+  pointsSymbol                 String                @default("🏅")
   currencyName                 String                @default("rice")
+  currencySymbol               String                @default("💲")
   groupPointsPerCurrencyDonation Decimal             @default(10) @db.Decimal(18, 6)
   mentorRoleIds                String[]              @default([])
   publicLeaderboardToken       String?               @unique

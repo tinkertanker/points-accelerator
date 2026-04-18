@@ -1,0 +1,3 @@
+ALTER TABLE "GuildConfig"
+ADD COLUMN "pointsSymbol" TEXT NOT NULL DEFAULT '🏅',
+ADD COLUMN "currencySymbol" TEXT NOT NULL DEFAULT '💲';

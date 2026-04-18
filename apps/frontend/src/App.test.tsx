@@ -83,7 +83,9 @@ const bootstrapPayload = {
   settings: {
     appName: "points accelerator",
     pointsName: "beans",
+    pointsSymbol: "🏅",
     currencyName: "rice",
+    currencySymbol: "💲",
     groupPointsPerCurrencyDonation: 10,
     mentorRoleIds: ["role-mentor"],
     passivePointsReward: 1,

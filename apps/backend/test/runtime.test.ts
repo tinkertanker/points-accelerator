@@ -14,12 +14,14 @@ function createRuntimeFixture() {
   });
 
   const config = {
-    currencyName: "rice",
+    currencyName: "bananas",
+    currencySymbol: "💲",
     groupPointsPerCurrencyDonation: {
       toNumber: () => 10,
     },
     passiveCooldownSeconds: 120,
-    pointsName: "points",
+    pointsName: "blorgshj",
+    pointsSymbol: "🏅",
   };
   const services = {
     prisma: {
@@ -241,7 +243,7 @@ describe("bot runtime", () => {
     );
     expect(reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining("Gryffindor +5 points"),
+        content: expect.stringContaining("Gryffindor +5 blorgshj 🏅"),
       }),
     );
   });
@@ -362,7 +364,7 @@ describe("bot runtime", () => {
       currencyDelta: 100,
       description: "Great work",
     });
-    expect(reply).toHaveBeenCalledWith("Awarded 100 currency to Alex Carter.");
+    expect(reply).toHaveBeenCalledWith("Awarded 100 bananas 💲 to Alex Carter.");
   });
 
   it("rejects /submissions for non-staff members", async () => {
@@ -626,7 +628,7 @@ describe("bot runtime", () => {
       groupId: "group-1",
     });
     expect(reply).toHaveBeenCalledWith({
-      content: "Gryffindor: 12 points available for the leaderboard and /buyforgroup. Your wallet: 7 rice.",
+      content: "Gryffindor: 12 blorgshj 🏅 available for the leaderboard and /buyforgroup. Your wallet: 7 bananas 💲.",
       ephemeral: true,
     });
   });

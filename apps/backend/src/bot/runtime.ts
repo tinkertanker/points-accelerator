@@ -24,6 +24,7 @@ type CooldownEntry = {
 };
 
 type CommandLedgerEntry = Awaited<ReturnType<AppServices["economyService"]["getLedger"]>>[number];
+type GuildConfig = Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>;
 type ActiveAssignment = Awaited<ReturnType<AppServices["assignmentService"]["listActive"]>>[number];
 type AssignmentLookupResult =
   | { kind: "resolved"; assignment: ActiveAssignment }
@@ -738,7 +739,7 @@ export class BotRuntime {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const content = leaderboard
           .slice(0, 10)
-          .map((group, index) => `${index + 1}. ${group.displayName}: ${group.pointsBalance} ${config.pointsName}`)
+          .map((group, index) => `${index + 1}. ${group.displayName}: ${this.formatPointsAmount(group.pointsBalance, config)}`)
           .join("\n");
         await interaction.reply({ content: content || "No groups yet." });
         return;
@@ -753,7 +754,7 @@ export class BotRuntime {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const walletBalance = await this.services.participantCurrencyService.getParticipantBalance(participant.id);
         await interaction.reply({
-          content: `${group.displayName}: ${balance.pointsBalance} ${config.pointsName} available for the leaderboard and /buyforgroup. Your wallet: ${walletBalance} ${config.currencyName}.`,
+          content: `${group.displayName}: ${this.formatPointsAmount(balance.pointsBalance, config)} available for the leaderboard and /buyforgroup. Your wallet: ${this.formatCurrencyAmount(walletBalance, config)}.`,
           ephemeral: true,
         });
         return;
@@ -786,6 +787,7 @@ export class BotRuntime {
       case "transfer": {
         const targetUser = interaction.options.getUser("member", true);
         const amount = interaction.options.getNumber("amount", true);
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const { participant: sourceParticipant } = await this.resolveActiveParticipant({
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
@@ -808,7 +810,9 @@ export class BotRuntime {
           amount,
           description: `${interaction.user.username} transferred ${amount} to ${targetUser.username}`,
         });
-        await interaction.reply(`${interaction.user.username} transferred ${amount} to ${targetUser.username}.`);
+        await interaction.reply(
+          `${interaction.user.username} transferred ${this.formatCurrencyAmount(amount, config)} to ${targetUser.username}.`,
+        );
         return;
       }
       case "donate": {
@@ -826,10 +830,10 @@ export class BotRuntime {
           groupId: group.id,
           amount,
           conversionRate: config.groupPointsPerCurrencyDonation.toNumber(),
-          description: `${interaction.user.username} donated ${amount} ${config.currencyName} to ${group.displayName}`,
+          description: `${interaction.user.username} donated ${this.formatCurrencyAmount(amount, config)} to ${group.displayName}`,
         });
         await interaction.reply(
-          `${interaction.user.username} donated ${amount} ${config.currencyName} to ${group.displayName}, adding ${donation.groupPointsAward} ${config.pointsName}.`,
+          `${interaction.user.username} donated ${this.formatCurrencyAmount(amount, config)} to ${group.displayName}, adding ${this.formatPointsAmount(donation.groupPointsAward, config)}.`,
         );
         return;
       }
@@ -928,13 +932,14 @@ export class BotRuntime {
           });
         }
 
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const direction = isDeduction ? "from" : "to";
         const summaries = [
           targetGroups.length > 0
-            ? `${Math.abs(points)} points ${direction} ${targetGroups.map((group) => group.displayName).join(", ")}`
+            ? `${this.formatPointsAmount(Math.abs(points), config)} ${direction} ${targetGroups.map((group) => group.displayName).join(", ")}`
             : null,
           currencyParticipant && currency !== 0
-            ? `${Math.abs(currency)} currency ${direction} ${
+            ? `${this.formatCurrencyAmount(Math.abs(currency), config)} ${direction} ${
                 currencyMemberLabel ?? currencyParticipant.discordUsername ?? currencyParticipant.indexId
               }`
             : null,
@@ -977,10 +982,10 @@ export class BotRuntime {
         const enabledItems = items.filter((item) => item.enabled).slice(0, 20);
         const personalLines = enabledItems
           .filter((item) => item.audience === "INDIVIDUAL")
-          .map((item) => `${item.id}: ${item.name} (${item.cost.toString()} ${config.currencyName})`);
+          .map((item) => `${item.id}: ${item.name} (${this.formatCurrencyAmount(item.cost.toString(), config)})`);
         const groupLines = enabledItems
           .filter((item) => item.audience === "GROUP")
-          .map((item) => `${item.id}: ${item.name} (${item.cost.toString()} ${config.pointsName})`);
+          .map((item) => `${item.id}: ${item.name} (${this.formatPointsAmount(item.cost.toString(), config)})`);
         const sections = [
           personalLines.length > 0 ? `Personal items:\n${personalLines.join("\n")}` : null,
           groupLines.length > 0 ? `Group items:\n${groupLines.join("\n")}` : null,
@@ -988,7 +993,7 @@ export class BotRuntime {
         await interaction.reply({
           content:
             sections.length > 0
-              ? `${sections.join("\n\n")}\nUse /buyforme for personal wallet purchases, /buyforgroup for shared group-point purchases, and /donate to convert wallet currency into group points.`
+              ? `${sections.join("\n\n")}\nUse /buyforme for personal wallet purchases, /buyforgroup for shared ${config.pointsName} purchases, and /donate to convert ${config.currencyName} into ${config.pointsName}.`
               : "Store is empty.",
           ephemeral: true,
         });
@@ -996,6 +1001,7 @@ export class BotRuntime {
       }
       case "buyforme":
       case "buyforgroup": {
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const itemId = interaction.options.getString("item_id", true);
         const quantity = interaction.options.getInteger("quantity") ?? 1;
         const purchaseMode = interaction.commandName === "buyforgroup" ? "GROUP" : "INDIVIDUAL";
@@ -1025,7 +1031,6 @@ export class BotRuntime {
         });
         let sharedMessageSuffix = "";
         if (purchaseMode === "GROUP") {
-          const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
           const announcementChannelId = config.redemptionChannelId ?? interaction.channelId;
           const posted = announcementChannelId
             ? await this.postListing(
@@ -1046,13 +1051,14 @@ export class BotRuntime {
         await interaction.reply({
           content:
             purchaseMode === "GROUP"
-              ? `Group purchase request created for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase.${sharedMessageSuffix}`
-              : `Purchase recorded for ${quantity} item(s). Request ID: ${redemption.id}`,
+              ? `Group purchase request created for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase and spend shared ${config.pointsName} if it passes.${sharedMessageSuffix}`
+              : `Purchase recorded for ${quantity} item(s). Request ID: ${redemption.id}. Cost uses your ${config.currencyName}.`,
           ephemeral: true,
         });
         return;
       }
       case "approve_purchase": {
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const purchaseId = interaction.options.getString("purchase_id", true);
         const { group, participant } = await this.resolveActiveParticipant({
           discordUserId: interaction.user.id,
@@ -1078,7 +1084,7 @@ export class BotRuntime {
         const progress = this.formatGroupPurchaseProgress(result.approvalsCount, result.threshold);
         const blockingSuffix =
           "blockingGroup" in result && result.blockingGroup
-            ? ` ${result.blockingGroup} does not currently have enough group points, so the request stays open until more points are earned or donated.`
+            ? ` ${result.blockingGroup} does not currently have enough ${config.pointsName}, so the request stays open until more are earned or donated.`
             : "";
 
         await interaction.reply({
@@ -1285,11 +1291,11 @@ export class BotRuntime {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         if (result.won) {
           await interaction.reply(
-            `🎉 **You won!** You bet ${amount} ${config.currencyName} from your wallet and won. New balance: ${result.newCurrencyBalance} ${config.currencyName}.`,
+            `🎉 **You won!** You bet ${this.formatCurrencyAmount(amount, config)} from your wallet and won. New balance: ${this.formatCurrencyAmount(result.newCurrencyBalance, config)}.`,
           );
         } else {
           await interaction.reply(
-            `💸 **You lost!** You bet ${amount} ${config.currencyName} from your wallet and lost. New balance: ${result.newCurrencyBalance} ${config.currencyName}.`,
+            `💸 **You lost!** You bet ${this.formatCurrencyAmount(amount, config)} from your wallet and lost. New balance: ${this.formatCurrencyAmount(result.newCurrencyBalance, config)}.`,
           );
         }
         return;
@@ -1315,9 +1321,9 @@ export class BotRuntime {
           `📊 **${label} betting stats:**`,
           `Total bets: ${stats.totalBets}`,
           `Wins: ${stats.wins} / Losses: ${stats.losses} (${winRate}% win rate)`,
-          `Total won: ${stats.totalWon} ${config.currencyName}`,
-          `Total lost: ${stats.totalLost} ${config.currencyName}`,
-          `Net gain: ${stats.netGain >= 0 ? "+" : ""}${stats.netGain} ${config.currencyName}`,
+          `Total won: ${this.formatCurrencyAmount(stats.totalWon, config)}`,
+          `Total lost: ${this.formatCurrencyAmount(stats.totalLost, config)}`,
+          `Net gain: ${this.formatSignedCurrencyAmount(stats.netGain, config)}`,
         ];
 
         await interaction.reply({ content: lines.join("\n"), ephemeral: true });
@@ -1330,7 +1336,7 @@ export class BotRuntime {
 
   private formatLedgerResponse(
     entries: CommandLedgerEntry[],
-    config: Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>,
+    config: GuildConfig,
     page: number,
     offset: number,
   ) {
@@ -1343,15 +1349,15 @@ export class BotRuntime {
 
   private formatLedgerLine(
     entry: CommandLedgerEntry,
-    config: Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>,
+    config: GuildConfig,
     index: number,
   ) {
     const timestamp = Math.floor(new Date(entry.createdAt).getTime() / 1000);
     const splitSummary = entry.splits
       .map((split) => {
         const deltas = [
-          split.pointsDelta === 0 ? null : `${this.formatSignedNumber(split.pointsDelta)} ${config.pointsName}`,
-          split.currencyDelta === 0 ? null : `${this.formatSignedNumber(split.currencyDelta)} ${config.currencyName}`,
+          split.pointsDelta === 0 ? null : this.formatSignedPointsAmount(split.pointsDelta, config),
+          split.currencyDelta === 0 ? null : this.formatSignedCurrencyAmount(split.currencyDelta, config),
         ].filter((value): value is string => value !== null);
 
         return `${split.group.displayName} ${deltas.join(" / ")}`;
@@ -1366,6 +1372,26 @@ export class BotRuntime {
 
   private formatSignedNumber(value: number) {
     return `${value >= 0 ? "+" : ""}${value}`;
+  }
+
+  private formatNamedAmount(amount: number | string, label: string, symbol: string) {
+    return `${amount} ${label} ${symbol}`;
+  }
+
+  private formatPointsAmount(amount: number | string, config: GuildConfig) {
+    return this.formatNamedAmount(amount, config.pointsName, config.pointsSymbol);
+  }
+
+  private formatCurrencyAmount(amount: number | string, config: GuildConfig) {
+    return this.formatNamedAmount(amount, config.currencyName, config.currencySymbol);
+  }
+
+  private formatSignedPointsAmount(amount: number, config: GuildConfig) {
+    return this.formatPointsAmount(this.formatSignedNumber(amount), config);
+  }
+
+  private formatSignedCurrencyAmount(amount: number, config: GuildConfig) {
+    return this.formatCurrencyAmount(this.formatSignedNumber(amount), config);
   }
 
   private truncateText(value: string, maxLength: number) {

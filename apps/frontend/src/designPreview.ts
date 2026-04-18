@@ -118,7 +118,9 @@ function createInitialBootstrap(): BootstrapPayload {
     settings: {
       appName: "points accelerator",
       pointsName: "beans",
+      pointsSymbol: "🏅",
       currencyName: "rice",
+      currencySymbol: "💲",
       groupPointsPerCurrencyDonation: 10,
       mentorRoleIds: ["role-staff"],
       passivePointsReward: 1,

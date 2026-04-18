@@ -16,7 +16,9 @@ async function seedSettingsAndGroup() {
     payload: {
       appName: "points accelerator",
       pointsName: "points",
+      pointsSymbol: "🏅",
       currencyName: "rice",
+      currencySymbol: "💲",
       groupPointsPerCurrencyDonation: 10,
       mentorRoleIds: [],
       passivePointsReward: 1,
@@ -280,7 +282,9 @@ describe("betting system", () => {
       payload: {
         appName: "points accelerator",
         pointsName: "points",
+        pointsSymbol: "🏅",
         currencyName: "rice",
+        currencySymbol: "💲",
         groupPointsPerCurrencyDonation: 10,
         mentorRoleIds: [],
         passivePointsReward: 1,

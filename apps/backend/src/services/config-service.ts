@@ -5,7 +5,9 @@ import { decimal } from "../utils/decimal.js";
 export type GuildConfigUpdateInput = {
   appName?: string;
   pointsName?: string;
+  pointsSymbol?: string;
   currencyName?: string;
+  currencySymbol?: string;
   groupPointsPerCurrencyDonation?: number;
   mentorRoleIds?: string[];
   passivePointsReward?: number;
@@ -45,7 +47,9 @@ export class ConfigService {
       data: {
         appName: input.appName,
         pointsName: input.pointsName,
+        pointsSymbol: input.pointsSymbol,
         currencyName: input.currencyName,
+        currencySymbol: input.currencySymbol,
         groupPointsPerCurrencyDonation:
           input.groupPointsPerCurrencyDonation === undefined ? undefined : decimal(input.groupPointsPerCurrencyDonation),
         mentorRoleIds: input.mentorRoleIds,

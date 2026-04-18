@@ -29,7 +29,9 @@ const OAUTH_STATE_TTL_SECONDS = 60 * 10;
 const settingsSchema = z.object({
   appName: z.string().min(1),
   pointsName: z.string().min(1),
+  pointsSymbol: z.string().min(1),
   currencyName: z.string().min(1),
+  currencySymbol: z.string().min(1),
   groupPointsPerCurrencyDonation: z.number().positive(),
   mentorRoleIds: z.array(z.string()),
   passivePointsReward: z.number().nonnegative(),
@@ -372,7 +374,9 @@ export function createApp(params: {
   const serialiseSettings = (settings: Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>) => ({
     appName: settings.appName,
     pointsName: settings.pointsName,
+    pointsSymbol: settings.pointsSymbol,
     currencyName: settings.currencyName,
+    currencySymbol: settings.currencySymbol,
     groupPointsPerCurrencyDonation: decimalToNumber(settings.groupPointsPerCurrencyDonation),
     mentorRoleIds: settings.mentorRoleIds,
     passivePointsReward: decimalToNumber(settings.passivePointsReward),

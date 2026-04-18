@@ -75,7 +75,9 @@ async function seedSettings(overrides: Partial<{ mentorRoleIds: string[] }> = {}
     payload: {
       appName: "points accelerator",
       pointsName: "points",
+      pointsSymbol: "🏅",
       currencyName: "rice",
+      currencySymbol: "💲",
       groupPointsPerCurrencyDonation: 10,
       mentorRoleIds: overrides.mentorRoleIds ?? [],
       passivePointsReward: 1,
