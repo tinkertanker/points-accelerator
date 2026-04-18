@@ -85,6 +85,8 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
       stock: null,
       enabled: true,
       fulfillmentInstructions: "",
+      ownerUserId: null,
+      ownerUsername: null,
     };
   }
 
@@ -97,6 +99,8 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
     stock: item.stock,
     enabled: item.enabled,
     fulfillmentInstructions: item.fulfillmentInstructions,
+    ownerUserId: item.ownerUserId,
+    ownerUsername: item.ownerUsername,
   };
 }
 

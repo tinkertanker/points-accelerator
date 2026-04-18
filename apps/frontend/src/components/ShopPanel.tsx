@@ -146,6 +146,9 @@ export default function ShopPanel({
                     <th scope="col" className="col-fulfil">
                       Fulfilment
                     </th>
+                    <th scope="col" className="col-owner">
+                      Owner Discord ID
+                    </th>
                     <th scope="col" className="matrix-table__th--center col-enabled">Enabled</th>
                   </tr>
                 </thead>
@@ -214,6 +217,19 @@ export default function ShopPanel({
                             updateShopDraft(index, { ...item, fulfillmentInstructions: event.target.value })
                           }
                           placeholder="How to redeem"
+                        />
+                      </td>
+                      <td className="col-owner">
+                        <input
+                          value={item.ownerUserId ?? ""}
+                          aria-label="Owner Discord user ID"
+                          onChange={(event) =>
+                            updateShopDraft(index, {
+                              ...item,
+                              ownerUserId: event.target.value ? event.target.value : null,
+                            })
+                          }
+                          placeholder="Discord user ID"
                         />
                       </td>
                       <td className="col-enabled">
@@ -307,6 +323,20 @@ export default function ShopPanel({
                       placeholder="How to redeem"
                     />
                   </label>
+                  <label className="shop-field shop-field--full">
+                    <span className="shop-field__label">Owner Discord ID</span>
+                    <input
+                      value={item.ownerUserId ?? ""}
+                      aria-label="Owner Discord user ID"
+                      onChange={(event) =>
+                        updateShopDraft(index, {
+                          ...item,
+                          ownerUserId: event.target.value ? event.target.value : null,
+                        })
+                      }
+                      placeholder="Pinged on purchase"
+                    />
+                  </label>
                   <label className="shop-field shop-field--checkbox shop-field--full">
                     <span className="shop-field__label">Enabled</span>
                     <input
@@ -349,6 +379,11 @@ export default function ShopPanel({
               <dd>
                 What happens after purchase: for example, &ldquo;show this receipt to a mentor&rdquo; or
                 &ldquo;collect from the staff desk&rdquo;.
+              </dd>
+              <dt>Owner Discord ID</dt>
+              <dd>
+                Optional Discord user ID of the person responsible for fulfilling purchases. They will be pinged in the
+                redemption channel with fulfil and refund buttons when someone buys this item.
               </dd>
               <dt>Enabled</dt>
               <dd>Turn items on or off without deleting them from the catalogue.</dd>

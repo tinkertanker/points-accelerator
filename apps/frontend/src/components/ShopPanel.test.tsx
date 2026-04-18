@@ -14,6 +14,8 @@ const shopDrafts: ShopItemDraft[] = [
     stock: 10,
     enabled: true,
     fulfillmentInstructions: "Collect from the desk",
+    ownerUserId: null,
+    ownerUsername: null,
   },
   {
     id: "group-apple",
@@ -24,6 +26,8 @@ const shopDrafts: ShopItemDraft[] = [
     stock: 3,
     enabled: true,
     fulfillmentInstructions: "Ask a mentor",
+    ownerUserId: null,
+    ownerUsername: null,
   },
   {
     id: "personal-apple",
@@ -34,6 +38,8 @@ const shopDrafts: ShopItemDraft[] = [
     stock: null,
     enabled: false,
     fulfillmentInstructions: null,
+    ownerUserId: null,
+    ownerUsername: null,
   },
 ];
 
@@ -55,6 +61,8 @@ describe("ShopPanel", () => {
           stock: null,
           enabled: true,
           fulfillmentInstructions: "",
+          ownerUserId: null,
+          ownerUsername: null,
         })}
         onShopDraftsChange={vi.fn()}
         onSaveShop={vi.fn(async () => undefined)}
@@ -69,6 +77,7 @@ describe("ShopPanel", () => {
       "Cost",
       "Stock",
       "Fulfilment",
+      "Owner Discord ID",
       "Enabled",
     ]);
 
@@ -91,6 +100,8 @@ describe("ShopPanel", () => {
           stock: null,
           enabled: true,
           fulfillmentInstructions: "",
+          ownerUserId: null,
+          ownerUsername: null,
         })}
         onShopDraftsChange={vi.fn()}
         onSaveShop={vi.fn(async () => undefined)}

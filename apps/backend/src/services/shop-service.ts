@@ -15,6 +15,8 @@ export type ShopItemInput = {
   stock: number | null;
   enabled: boolean;
   fulfillmentInstructions?: string | null;
+  ownerUserId?: string | null;
+  ownerUsername?: string | null;
 };
 
 type PurchaseMode = "INDIVIDUAL" | "GROUP";
@@ -39,6 +41,9 @@ type GroupPurchaseRedemption = ShopRedemption & {
     stock: number | null;
     audience: ShopItemAudience;
     cost: Prisma.Decimal;
+    fulfillmentInstructions: string | null;
+    ownerUserId: string | null;
+    ownerUsername: string | null;
   };
   group: {
     id: string;
@@ -80,6 +85,8 @@ const redemptionInclude = {
   },
 } satisfies Prisma.ShopRedemptionInclude;
 
+type FullRedemption = Prisma.ShopRedemptionGetPayload<{ include: typeof redemptionInclude }>;
+
 export class ShopService {
   public constructor(
     private readonly prisma: PrismaClient,
@@ -96,6 +103,9 @@ export class ShopService {
   }
 
   public async upsert(guildId: string, input: ShopItemInput) {
+    const ownerUserId = input.ownerUserId?.trim() ? input.ownerUserId.trim() : null;
+    const ownerUsername = input.ownerUsername?.trim() ? input.ownerUsername.trim() : null;
+
     const item = input.id
       ? await this.prisma.shopItem.update({
           where: { id: input.id },
@@ -107,6 +117,8 @@ export class ShopService {
             stock: input.stock,
             enabled: input.enabled,
             fulfillmentInstructions: input.fulfillmentInstructions ?? null,
+            ownerUserId,
+            ownerUsername,
           },
         })
       : await this.prisma.shopItem.create({
@@ -119,6 +131,8 @@ export class ShopService {
             stock: input.stock,
             enabled: input.enabled,
             fulfillmentInstructions: input.fulfillmentInstructions ?? null,
+            ownerUserId,
+            ownerUsername,
           },
         });
 
@@ -366,6 +380,7 @@ export class ShopService {
       if (redemption.status === params.status) {
         return {
           changed: false,
+          refunded: false,
           previousStatus: redemption.status,
           redemption,
         };
@@ -377,20 +392,25 @@ export class ShopService {
         }
       }
 
+      let refunded = false;
       if (params.status === "CANCELED") {
         if (redemption.status === "FULFILLED") {
           throw new AppError("Fulfilled purchases cannot be canceled.", 409);
         }
 
-        if (redemption.status === "PENDING") {
-          throw new AppError(
-            "Charged purchases cannot be canceled from the fulfilment queue. Use a separate correction entry if needed.",
-            409,
-          );
+        if (redemption.status !== "PENDING" && redemption.status !== "AWAITING_APPROVAL") {
+          throw new AppError("Only open purchases can be canceled.", 409);
         }
 
-        if (redemption.status !== "AWAITING_APPROVAL") {
-          throw new AppError("Only open approval requests can be canceled.", 409);
+        if (redemption.status === "PENDING") {
+          await this.refundRedemption({
+            tx,
+            guildId: params.guildId,
+            redemption,
+            actorUserId: params.actorUserId,
+            actorUsername: params.actorUsername,
+          });
+          refunded = true;
         }
       }
 
@@ -402,6 +422,7 @@ export class ShopService {
 
       return {
         changed: true,
+        refunded,
         previousStatus: redemption.status,
         redemption: updatedRedemption,
       };
@@ -421,11 +442,78 @@ export class ShopService {
           purchaseMode: result.redemption.purchaseMode,
           quantity: result.redemption.quantity,
           totalCost: decimalToNumber(result.redemption.totalCost),
+          refunded: result.refunded,
         },
       });
     }
 
     return result.redemption;
+  }
+
+  private async refundRedemption(params: {
+    tx: Prisma.TransactionClient;
+    guildId: string;
+    redemption: FullRedemption;
+    actorUserId: string;
+    actorUsername?: string;
+  }) {
+    const { tx, redemption } = params;
+    const totalCost = decimalToNumber(redemption.totalCost);
+
+    if (totalCost <= 0) {
+      return;
+    }
+
+    if (redemption.purchaseMode === "INDIVIDUAL") {
+      if (!redemption.requestedByParticipantId) {
+        throw new AppError("Cannot refund: original participant is missing.", 409);
+      }
+
+      await this.participantCurrencyService.recordEntry({
+        guildId: params.guildId,
+        actor: {
+          userId: params.actorUserId,
+          username: params.actorUsername,
+          roleIds: [],
+        },
+        type: "CORRECTION",
+        description: `Refund: ${redemption.shopItem.name} (cancelled redemption ${redemption.id})`,
+        splits: [{ participantId: redemption.requestedByParticipantId, currencyDelta: totalCost }],
+        systemAction: true,
+        executor: tx,
+        externalRef: redemption.id,
+        auditAction: "shop.redemption.refunded",
+        auditPayload: {
+          redemptionId: redemption.id,
+          participantId: redemption.requestedByParticipantId,
+          amount: totalCost,
+        },
+      });
+    } else {
+      await this.economyService.awardGroups({
+        guildId: params.guildId,
+        actor: {
+          userId: params.actorUserId,
+          username: params.actorUsername,
+          roleIds: [],
+        },
+        type: "CORRECTION",
+        description: `Refund: group purchase ${redemption.shopItem.name} (cancelled redemption ${redemption.id})`,
+        targetGroupIds: [redemption.groupId],
+        pointsDelta: totalCost,
+        currencyDelta: 0,
+        systemAction: true,
+        executor: tx,
+        externalRef: redemption.id,
+      });
+    }
+
+    if (redemption.shopItem.stock !== null) {
+      await tx.shopItem.update({
+        where: { id: redemption.shopItemId },
+        data: { stock: { increment: redemption.quantity } },
+      });
+    }
   }
 
   private async redeemIndividual(params: {

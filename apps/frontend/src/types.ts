@@ -63,6 +63,8 @@ export type ShopItem = {
   stock: number | null;
   enabled: boolean;
   fulfillmentInstructions: string | null;
+  ownerUserId: string | null;
+  ownerUsername: string | null;
 };
 
 export type ShopItemDraft = Omit<ShopItem, "id"> & { id?: string };
@@ -88,6 +90,8 @@ export type ShopRedemption = {
     name: string;
     audience: "INDIVIDUAL" | "GROUP";
     fulfillmentInstructions: string | null;
+    ownerUserId: string | null;
+    ownerUsername: string | null;
   };
   group: {
     id: string;

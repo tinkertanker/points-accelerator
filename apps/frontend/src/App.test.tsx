@@ -165,6 +165,8 @@ const fulfilmentPayload = [
       name: "Sticker pack",
       audience: "INDIVIDUAL" as const,
       fulfillmentInstructions: "Show this to staff.",
+      ownerUserId: null,
+      ownerUsername: null,
     },
     group: {
       id: "group-1",

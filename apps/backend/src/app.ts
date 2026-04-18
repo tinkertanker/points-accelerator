@@ -79,6 +79,8 @@ const shopItemSchema = z.object({
   stock: z.number().int().nonnegative().nullable(),
   enabled: z.boolean(),
   fulfillmentInstructions: z.string().nullable().optional(),
+  ownerUserId: z.string().nullable().optional(),
+  ownerUsername: z.string().nullable().optional(),
 });
 
 const listingSchema = z.object({
@@ -430,6 +432,8 @@ export function createApp(params: {
         name: redemption.shopItem.name,
         audience: redemption.shopItem.audience,
         fulfillmentInstructions: redemption.shopItem.fulfillmentInstructions,
+        ownerUserId: redemption.shopItem.ownerUserId,
+        ownerUsername: redemption.shopItem.ownerUsername,
       },
       group: {
         id: redemption.group.id,

@@ -187,6 +187,8 @@ model ShopItem {
   stock                  Int?
   enabled                Boolean           @default(true)
   fulfillmentInstructions String?
+  ownerUserId            String?
+  ownerUsername          String?
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
   guild                  GuildConfig       @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
