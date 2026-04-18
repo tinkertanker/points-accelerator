@@ -871,19 +871,22 @@ describe("bot runtime", () => {
       { id: "group-4", displayName: "Slytherin", pointsBalance: 5 },
       { id: "group-5", displayName: "Durmstrang", pointsBalance: 4 },
     ]);
-    const reply = vi.fn().mockResolvedValue(undefined);
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const fetchMember = vi.fn().mockResolvedValue({
+      roles: { cache: new Map([["group-role", {}]]) },
+    });
 
     await (runtime as any).handleCommand({
       commandName: "leaderboard",
       guild: {
         members: {
-          fetch: vi.fn().mockResolvedValue({
-            roles: { cache: new Map([["group-role", {}]]) },
-          }),
+          fetch: fetchMember,
         },
       },
       options: {},
-      reply,
+      deferReply,
+      editReply,
       user: {
         id: "user-1",
         username: "Alice",
@@ -891,8 +894,10 @@ describe("bot runtime", () => {
     });
 
     expect(services.economyService.getLeaderboard).toHaveBeenCalledWith("guild-test");
+    expect(deferReply).toHaveBeenCalledWith();
+    expect(fetchMember).not.toHaveBeenCalled();
 
-    const [{ embeds }] = reply.mock.calls[0] as [{ embeds: Array<{ toJSON(): Record<string, unknown> }> }];
+    const [{ embeds }] = editReply.mock.calls[0] as [{ embeds: Array<{ toJSON(): Record<string, unknown> }> }];
     expect(embeds).toHaveLength(1);
 
     const embed = embeds[0]!.toJSON() as {
@@ -960,14 +965,9 @@ describe("bot runtime", () => {
         currencyBalance: 4,
       },
     ]);
-    const reply = vi.fn().mockResolvedValue(undefined);
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
     const fetchMember = vi.fn(async (userId: string) => {
-      if (userId === "user-1") {
-        return {
-          roles: { cache: new Map([["group-role", {}]]) },
-        };
-      }
-
       if (userId === "student-2") {
         return {
           displayName: "Bobby Tables",
@@ -1011,7 +1011,8 @@ describe("bot runtime", () => {
         },
       },
       options: {},
-      reply,
+      deferReply,
+      editReply,
       user: {
         id: "user-1",
         username: "Alice",
@@ -1019,8 +1020,9 @@ describe("bot runtime", () => {
     });
 
     expect(services.participantService.getCurrencyLeaderboard).toHaveBeenCalledWith("guild-test");
+    expect(deferReply).toHaveBeenCalledWith();
 
-    const [{ embeds }] = reply.mock.calls[0] as [{ embeds: Array<{ toJSON(): Record<string, unknown> }> }];
+    const [{ embeds }] = editReply.mock.calls[0] as [{ embeds: Array<{ toJSON(): Record<string, unknown> }> }];
     expect(embeds).toHaveLength(1);
 
     const embed = embeds[0]!.toJSON() as {

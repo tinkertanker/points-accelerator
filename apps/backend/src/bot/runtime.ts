@@ -205,11 +205,16 @@ export class BotRuntime {
       try {
         await this.handleCommand(interaction);
       } catch (error) {
+        console.error("Command handling failed", error);
         const message = error instanceof AppError ? error.message : "Unexpected command error.";
-        if (interaction.replied || interaction.deferred) {
-          await interaction.editReply({ content: message });
-        } else {
-          await interaction.reply({ content: message, ephemeral: true });
+        try {
+          if (interaction.replied || interaction.deferred) {
+            await interaction.editReply({ content: message });
+          } else {
+            await interaction.reply({ content: message, ephemeral: true });
+          }
+        } catch (replyError) {
+          console.error("Failed to send interaction error response", replyError);
         }
       }
     });
@@ -921,6 +926,33 @@ export class BotRuntime {
   }
 
   private async handleCommand(interaction: ChatInputCommandInteraction) {
+    if (interaction.commandName === "leaderboard") {
+      await interaction.deferReply();
+      const leaderboard = await this.services.economyService.getLeaderboard(this.env.GUILD_ID);
+      const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+      if (leaderboard.length === 0) {
+        await interaction.editReply({ content: "No groups yet." });
+        return;
+      }
+
+      await interaction.editReply({ embeds: [this.buildGroupLeaderboardEmbed(leaderboard, config)] });
+      return;
+    }
+
+    if (interaction.commandName === "forbes") {
+      await interaction.deferReply();
+      const leaderboard = await this.services.participantService.getCurrencyLeaderboard(this.env.GUILD_ID);
+      const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+      if (leaderboard.length === 0) {
+        await interaction.editReply({ content: "No participants yet." });
+        return;
+      }
+
+      const displayNames = await this.resolveParticipantDisplayNames(interaction.guild, leaderboard);
+      await interaction.editReply({ embeds: [this.buildForbesEmbed(leaderboard, displayNames, config)] });
+      return;
+    }
+
     const member = await interaction.guild?.members.fetch(interaction.user.id);
     const roleIds = member ? Array.from(member.roles.cache.keys()) : [];
     const actor = {
@@ -930,29 +962,6 @@ export class BotRuntime {
     };
 
     switch (interaction.commandName) {
-      case "leaderboard": {
-        const leaderboard = await this.services.economyService.getLeaderboard(this.env.GUILD_ID);
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-        if (leaderboard.length === 0) {
-          await interaction.reply({ content: "No groups yet." });
-          return;
-        }
-
-        await interaction.reply({ embeds: [this.buildGroupLeaderboardEmbed(leaderboard, config)] });
-        return;
-      }
-      case "forbes": {
-        const leaderboard = await this.services.participantService.getCurrencyLeaderboard(this.env.GUILD_ID);
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-        if (leaderboard.length === 0) {
-          await interaction.reply({ content: "No participants yet." });
-          return;
-        }
-
-        const displayNames = await this.resolveParticipantDisplayNames(interaction.guild, leaderboard);
-        await interaction.reply({ embeds: [this.buildForbesEmbed(leaderboard, displayNames, config)] });
-        return;
-      }
       case "balance": {
         const { group, participant } = await this.resolveActiveParticipant({
           discordUserId: interaction.user.id,
