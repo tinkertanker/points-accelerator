@@ -83,9 +83,9 @@ export default function GuidePanel() {
                 </li>
               </ol>
               <p className="walkthrough-commands">
-                <code>/award targets:@gryffindor points:5 reason:&quot;helped another group&quot;</code>
-                <code>/award member:@harry currency:3 reason:&quot;great explanation&quot;</code>
-                <code>/deduct targets:@gryffindor points:2 reason:&quot;late submission&quot;</code>
+                <code>/awardgroup targets:@gryffindor points:5 reason:&quot;helped another group&quot;</code>
+                <code>/awardmember member:@harry currency:3</code>
+                <code>/deductgroup targets:@gryffindor points:2 reason:&quot;late submission&quot;</code>
                 <code>/balance</code>
                 <code>/transfer member:@harry amount:3</code>
                 <code>/donate amount:2</code>
@@ -120,9 +120,10 @@ export default function GuidePanel() {
 
               <h3>Earning actively</h3>
               <p>
-                Staff use <code>/award</code> and <code>/deduct</code> to adjust group points. To adjust personal
-                wallets, include the <code>member:</code> and <code>currency:</code> options. Approved assignment
-                submissions also award both points and currency automatically.
+                Staff use <code>/awardgroup</code> and <code>/deductgroup</code> to adjust group points,
+                {" "}<code>/awardmember</code> and <code>/deductmember</code> for personal wallets, and{" "}
+                <code>/awardmixed</code> or <code>/deductmixed</code> when both balances should change together.
+                Approved assignment submissions also award both points and currency automatically.
               </p>
 
               <h3>The donation bridge</h3>
@@ -134,9 +135,9 @@ export default function GuidePanel() {
 
               <h3>How balances flow</h3>
               <dl className="guide-flow">
-                <dt><code>/award targets:@team points:5</code></dt>
+                <dt><code>/awardgroup targets:@team points:5</code></dt>
                 <dd>Adds 5 to the team&rsquo;s group points</dd>
-                <dt><code>/award member:@alice currency:3</code></dt>
+                <dt><code>/awardmember member:@alice currency:3</code></dt>
                 <dd>Adds 3 to Alice&rsquo;s personal wallet</dd>
                 <dt><code>/transfer member:@bob amount:2</code></dt>
                 <dd>Moves 2 currency from your wallet to Bob&rsquo;s</dd>
@@ -165,16 +166,16 @@ export default function GuidePanel() {
                       <td colSpan={4} className="guide-group-heading">Staff commands</td>
                     </tr>
                     <tr>
-                      <td><code>/award</code></td>
+                      <td><code>/awardgroup</code>, <code>/awardmember</code>, <code>/awardmixed</code></td>
                       <td>Staff</td>
-                      <td><code>targets</code> <code>points</code> <code>member</code> <code>currency</code> <code>reason</code></td>
-                      <td>Award group points and/or personal currency</td>
+                      <td><code>targets</code> + <code>points</code>, or <code>member</code> + <code>currency</code>, with optional <code>reason</code></td>
+                      <td>Award group points, personal currency, or both with command-specific required options</td>
                     </tr>
                     <tr>
-                      <td><code>/deduct</code></td>
+                      <td><code>/deductgroup</code>, <code>/deductmember</code>, <code>/deductmixed</code></td>
                       <td>Staff</td>
-                      <td><code>targets</code> <code>points</code> <code>member</code> <code>currency</code> <code>reason</code></td>
-                      <td>Deduct group points and/or personal currency</td>
+                      <td><code>targets</code> + <code>points</code>, or <code>member</code> + <code>currency</code>, with optional <code>reason</code></td>
+                      <td>Deduct group points, personal currency, or both with command-specific required options</td>
                     </tr>
                     <tr>
                       <td><code>/sell</code></td>
@@ -313,11 +314,11 @@ export default function GuidePanel() {
               </p>
               <dl className="guide-flow">
                 <dt>canAward / canDeduct</dt>
-                <dd>Allow this role to use <code>/award</code> and <code>/deduct</code>.</dd>
+                <dd>Allow this role to use the award and deduct slash commands.</dd>
                 <dt>maxAward</dt>
                 <dd>Cap the amount that can be awarded or deducted in a single command. Leave blank for no limit.</dd>
                 <dt>canMultiAward</dt>
-                <dd>Allow targeting multiple groups in one <code>/award</code> or <code>/deduct</code>.</dd>
+                <dd>Allow targeting multiple groups in one group award or deduction command.</dd>
                 <dt>canSell</dt>
                 <dd>Allow creating marketplace listings via <code>/sell</code>.</dd>
                 <dt>canReceiveAwards</dt>
@@ -417,7 +418,7 @@ export default function GuidePanel() {
               <h3>What are aliases for?</h3>
               <p>
                 Groups can have comma-separated aliases so staff can use shorthand in commands — for
-                example, <code>/award targets:alpha points:5 reason:&quot;well done&quot;</code> instead of mentioning
+                example, <code>/awardgroup targets:alpha points:5 reason:&quot;well done&quot;</code> instead of mentioning
                 the full Discord role.
               </p>
 

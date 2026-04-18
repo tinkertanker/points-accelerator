@@ -29,8 +29,62 @@ type AssignmentLookupResult =
   | { kind: "resolved"; assignment: ActiveAssignment }
   | { kind: "ambiguous"; matches: ActiveAssignment[] }
   | { kind: "missing" };
+type AwardLikeCommandName =
+  | "awardgroup"
+  | "awardmember"
+  | "awardmixed"
+  | "deductgroup"
+  | "deductmember"
+  | "deductmixed";
 
 const MAX_LEDGER_LINE_LENGTH = 160;
+
+function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: string) {
+  const isDeduction = commandName.startsWith("deduct");
+  const isGroupOnly = commandName.endsWith("group");
+  const isMemberOnly = commandName.endsWith("member");
+
+  const builder = new SlashCommandBuilder()
+    .setName(commandName)
+    .setDescription(description);
+
+  if (!isMemberOnly) {
+    builder
+      .addStringOption((option) =>
+        option.setName("targets").setDescription("Comma-separated group aliases or role mentions").setRequired(true),
+      )
+      .addNumberOption((option) =>
+        option.setName("points").setDescription("Points delta for the target groups").setRequired(true).setMinValue(0.01),
+      );
+  }
+
+  if (!isGroupOnly) {
+    builder
+      .addUserOption((option) =>
+        option.setName("member").setDescription("Member whose wallet should change").setRequired(true),
+      )
+      .addNumberOption((option) =>
+        option.setName("currency").setDescription("Currency delta for the selected member").setRequired(true).setMinValue(0.01),
+      );
+  }
+
+  builder.addStringOption((option) =>
+    option
+      .setName("reason")
+      .setDescription(`${isDeduction ? "Deduction" : "Award"} reason`)
+      .setRequired(false),
+  );
+
+  return builder;
+}
+
+function getAwardCommandConfig(commandName: AwardLikeCommandName) {
+  return {
+    isDeduction: commandName.startsWith("deduct"),
+    includesGroups: commandName.endsWith("group") || commandName.endsWith("mixed"),
+    includesMember: commandName.endsWith("member") || commandName.endsWith("mixed"),
+  };
+}
 
 export type DashboardMember = {
   userId: string;
@@ -761,17 +815,23 @@ export class BotRuntime {
         );
         return;
       }
-      case "award":
-      case "deduct": {
-        const targets = interaction.options.getString("targets");
-        const points = interaction.options.getNumber("points") ?? 0;
-        const currency = interaction.options.getNumber("currency") ?? 0;
-        const targetMember = interaction.options.getUser("member");
-        const reason = interaction.options.getString("reason", true);
-        const sign = interaction.commandName === "award" ? 1 : -1;
-        if (points === 0 && currency === 0) {
-          throw new AppError("Add a non-zero points or currency amount.", 400);
-        }
+      case "awardgroup":
+      case "awardmember":
+      case "awardmixed":
+      case "deductgroup":
+      case "deductmember":
+      case "deductmixed": {
+        const { includesGroups, includesMember, isDeduction } = getAwardCommandConfig(
+          interaction.commandName as AwardLikeCommandName,
+        );
+        const targets = includesGroups ? interaction.options.getString("targets", true) : null;
+        const points = includesGroups ? interaction.options.getNumber("points", true) : 0;
+        const currency = includesMember ? interaction.options.getNumber("currency", true) : 0;
+        const targetMember = includesMember ? interaction.options.getUser("member", true) : null;
+        const reason =
+          interaction.options.getString("reason") ??
+          (isDeduction ? "Manual deduction via Discord command" : "Manual award via Discord command");
+        const sign = isDeduction ? -1 : 1;
 
         const targetGroups =
           points === 0
@@ -847,21 +907,19 @@ export class BotRuntime {
           });
         }
 
-        const actionLabel = interaction.commandName === "award" ? "Awarded" : "Deducted";
+        const direction = isDeduction ? "from" : "to";
         const summaries = [
           targetGroups.length > 0
-            ? `${Math.abs(points)} points ${interaction.commandName === "award" ? "to" : "from"} ${targetGroups
-                .map((group) => group.displayName)
-                .join(", ")}`
+            ? `${Math.abs(points)} points ${direction} ${targetGroups.map((group) => group.displayName).join(", ")}`
             : null,
           currencyParticipant && currency !== 0
-            ? `${Math.abs(currency)} currency ${interaction.commandName === "award" ? "to" : "from"} ${
+            ? `${Math.abs(currency)} currency ${direction} ${
                 currencyParticipant.discordUsername ?? currencyParticipant.indexId
               }`
             : null,
         ].filter((value): value is string => value !== null);
 
-        await interaction.reply(`${actionLabel} ${summaries.join(" and ")}.`);
+        await interaction.reply(`${isDeduction ? "Deducted" : "Awarded"} ${summaries.join(" and ")}.`);
         return;
       }
       case "sell": {
@@ -1319,22 +1377,12 @@ export class BotRuntime {
         .setName("donate")
         .setDescription("Convert your wallet currency into group points.")
         .addNumberOption((option) => option.setName("amount").setDescription("Currency amount").setRequired(true)),
-      new SlashCommandBuilder()
-        .setName("award")
-        .setDescription("Award group points, participant currency, or both.")
-        .addStringOption((option) => option.setName("reason").setDescription("Award reason").setRequired(true))
-        .addStringOption((option) => option.setName("targets").setDescription("Comma-separated group aliases or role mentions").setRequired(false))
-        .addNumberOption((option) => option.setName("points").setDescription("Points delta for the target groups").setRequired(false))
-        .addUserOption((option) => option.setName("member").setDescription("Member whose wallet should change").setRequired(false))
-        .addNumberOption((option) => option.setName("currency").setDescription("Currency delta for the selected member").setRequired(false)),
-      new SlashCommandBuilder()
-        .setName("deduct")
-        .setDescription("Deduct group points, participant currency, or both.")
-        .addStringOption((option) => option.setName("reason").setDescription("Deduction reason").setRequired(true))
-        .addStringOption((option) => option.setName("targets").setDescription("Comma-separated group aliases or role mentions").setRequired(false))
-        .addNumberOption((option) => option.setName("points").setDescription("Points delta for the target groups").setRequired(false))
-        .addUserOption((option) => option.setName("member").setDescription("Member whose wallet should change").setRequired(false))
-        .addNumberOption((option) => option.setName("currency").setDescription("Currency delta for the selected member").setRequired(false)),
+      buildAwardLikeCommand("awardgroup", "Award group points."),
+      buildAwardLikeCommand("awardmember", "Award participant currency."),
+      buildAwardLikeCommand("awardmixed", "Award group points and participant currency together."),
+      buildAwardLikeCommand("deductgroup", "Deduct group points."),
+      buildAwardLikeCommand("deductmember", "Deduct participant currency."),
+      buildAwardLikeCommand("deductmixed", "Deduct group points and participant currency together."),
       new SlashCommandBuilder()
         .setName("store")
         .setDescription("Browse the custom shop."),

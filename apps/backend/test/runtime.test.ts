@@ -1,3 +1,4 @@
+import { REST } from "discord.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BotRuntime } from "../src/bot/runtime.js";
@@ -673,7 +674,7 @@ describe("bot runtime", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
-      commandName: "award",
+      commandName: "awardmixed",
       guild: {
         members: {
           fetch: vi.fn((userId?: string) =>
@@ -729,6 +730,63 @@ describe("bot runtime", () => {
       executor: {},
     });
     expect(reply).toHaveBeenCalledWith("Awarded 5 points to Gryffindor and 3 currency to Bob.");
+  });
+
+  it("registers required award and deduct command options", async () => {
+    const putSpy = vi.spyOn(REST.prototype, "put").mockResolvedValue({} as never);
+    const { runtime } = createRuntimeFixture();
+    (runtime as any).env.DISCORD_BOT_TOKEN = "bot-token";
+    (runtime as any).env.DISCORD_APPLICATION_ID = "app-123";
+    (runtime as any).env.DISCORD_GUILD_ID = "guild-123";
+
+    await (runtime as any).registerCommands();
+
+    expect(putSpy).toHaveBeenCalledTimes(1);
+    const [, payload] = putSpy.mock.calls[0]!;
+    const commands = payload.body as Array<{
+      name: string;
+      options?: Array<{
+        name: string;
+        options?: Array<{ name: string; required?: boolean; min_value?: number }>;
+      }>;
+    }>;
+    const awardGroupCommand = commands.find((command) => command.name === "awardgroup");
+    const awardMemberCommand = commands.find((command) => command.name === "awardmember");
+    const awardMixedCommand = commands.find((command) => command.name === "awardmixed");
+    const deductMixedCommand = commands.find((command) => command.name === "deductmixed");
+
+    expect(awardGroupCommand?.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "targets", required: true }),
+        expect.objectContaining({ name: "points", required: true, min_value: 0.01 }),
+        expect.objectContaining({ name: "reason", required: false }),
+      ]),
+    );
+    expect(awardMemberCommand?.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "member", required: true }),
+        expect.objectContaining({ name: "currency", required: true, min_value: 0.01 }),
+        expect.objectContaining({ name: "reason", required: false }),
+      ]),
+    );
+    expect(awardMixedCommand?.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "targets", required: true }),
+        expect.objectContaining({ name: "points", required: true, min_value: 0.01 }),
+        expect.objectContaining({ name: "member", required: true }),
+        expect.objectContaining({ name: "currency", required: true, min_value: 0.01 }),
+        expect.objectContaining({ name: "reason", required: false }),
+      ]),
+    );
+    expect(deductMixedCommand?.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "targets", required: true }),
+        expect.objectContaining({ name: "points", required: true, min_value: 0.01 }),
+        expect.objectContaining({ name: "member", required: true }),
+        expect.objectContaining({ name: "currency", required: true, min_value: 0.01 }),
+        expect.objectContaining({ name: "reason", required: false }),
+      ]),
+    );
   });
 
   it("recomputes group member count when approving a purchase", async () => {

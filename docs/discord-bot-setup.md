@@ -68,8 +68,12 @@ After deployment:
 
 Run these in the test server before production rollout:
 
-- `/award`
-- `/deduct`
+- `/awardgroup`
+- `/awardmember`
+- `/awardmixed`
+- `/deductgroup`
+- `/deductmember`
+- `/deductmixed`
 - `/leaderboard`
 - `/balance`
 - `/ledger`
