@@ -270,6 +270,30 @@ html[data-theme="dark"] .theme-toggle {
   margin: 0;
 }
 
+.brand-title {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.65rem;
+}
+
+.brand-title__icon {
+  border-radius: 0.5rem;
+  box-shadow: 0 8px 24px rgba(109, 28, 156, 0.18);
+  flex: 0 0 auto;
+  height: 2rem;
+  width: 2rem;
+}
+
+.brand-title__icon--hero {
+  border-radius: 0.75rem;
+  height: clamp(2.5rem, 5vw, 3.35rem);
+  width: clamp(2.5rem, 5vw, 3.35rem);
+}
+
+.brand-title--compact {
+  gap: 0.5rem;
+}
+
 .topbar-brand h1 {
   font-size: 1.2rem;
   font-weight: 700;
