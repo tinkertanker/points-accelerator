@@ -21,9 +21,26 @@ export class ParticipantService {
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async getCurrencyLeaderboard(guildId: string) {
-    const participants = await this.list(guildId);
+    const participants = await this.prisma.participant.findMany({
+      where: { guildId },
+      select: {
+        id: true,
+        guildId: true,
+        discordUserId: true,
+        discordUsername: true,
+        indexId: true,
+        groupId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    const balances = await this.getCurrencyBalanceMap(participants.map((participant) => participant.id));
+    const leaderboard = participants.map((participant) => ({
+      ...participant,
+      currencyBalance: balances[participant.id] ?? 0,
+    }));
 
-    return participants.sort((left, right) => {
+    return leaderboard.sort((left, right) => {
       if (right.currencyBalance !== left.currencyBalance) {
         return right.currencyBalance - left.currencyBalance;
       }

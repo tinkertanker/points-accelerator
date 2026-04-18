@@ -1057,6 +1057,46 @@ describe("bot runtime", () => {
     expect(embed.footer?.text).toContain("Server display names");
   });
 
+  it("only resolves display names for the visible Forbes ranks", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.participantService.getCurrencyLeaderboard.mockResolvedValue(
+      Array.from({ length: 12 }, (_, index) => ({
+        id: `participant-${index + 1}`,
+        discordUserId: `student-${index + 1}`,
+        discordUsername: `User ${index + 1}`,
+        indexId: `S${String(index + 1).padStart(3, "0")}`,
+        currencyBalance: 120 - index,
+      })),
+    );
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const fetchMember = vi.fn(async (userId: string) => ({
+      displayName: `Display ${userId}`,
+      user: { globalName: `Display ${userId}` },
+    }));
+
+    await (runtime as any).handleCommand({
+      commandName: "forbes",
+      guild: {
+        members: {
+          fetch: fetchMember,
+        },
+      },
+      options: {},
+      deferReply,
+      editReply,
+      user: {
+        id: "user-1",
+        username: "Alice",
+      },
+    });
+
+    expect(deferReply).toHaveBeenCalledWith();
+    expect(fetchMember).toHaveBeenCalledTimes(10);
+    expect(fetchMember).not.toHaveBeenCalledWith("student-11");
+    expect(fetchMember).not.toHaveBeenCalledWith("student-12");
+  });
+
   it("creates a group purchase from /buyforgroup", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.groupService.resolveGroupFromRoleIds.mockImplementation(async (_guildId: string, roleIds: string[]) => {

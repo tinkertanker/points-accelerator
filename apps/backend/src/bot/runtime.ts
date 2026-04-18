@@ -928,8 +928,10 @@ export class BotRuntime {
   private async handleCommand(interaction: ChatInputCommandInteraction) {
     if (interaction.commandName === "leaderboard") {
       await interaction.deferReply();
-      const leaderboard = await this.services.economyService.getLeaderboard(this.env.GUILD_ID);
-      const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+      const [leaderboard, config] = await Promise.all([
+        this.services.economyService.getLeaderboard(this.env.GUILD_ID),
+        this.services.configService.getOrCreate(this.env.GUILD_ID),
+      ]);
       if (leaderboard.length === 0) {
         await interaction.editReply({ content: "No groups yet." });
         return;
@@ -941,14 +943,17 @@ export class BotRuntime {
 
     if (interaction.commandName === "forbes") {
       await interaction.deferReply();
-      const leaderboard = await this.services.participantService.getCurrencyLeaderboard(this.env.GUILD_ID);
-      const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+      const [leaderboard, config] = await Promise.all([
+        this.services.participantService.getCurrencyLeaderboard(this.env.GUILD_ID),
+        this.services.configService.getOrCreate(this.env.GUILD_ID),
+      ]);
       if (leaderboard.length === 0) {
         await interaction.editReply({ content: "No participants yet." });
         return;
       }
 
-      const displayNames = await this.resolveParticipantDisplayNames(interaction.guild, leaderboard);
+      const visibleParticipants = leaderboard.slice(0, LEADERBOARD_EMBED_LIMIT);
+      const displayNames = await this.resolveParticipantDisplayNames(interaction.guild, visibleParticipants);
       await interaction.editReply({ embeds: [this.buildForbesEmbed(leaderboard, displayNames, config)] });
       return;
     }
