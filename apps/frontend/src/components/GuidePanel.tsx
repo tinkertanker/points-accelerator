@@ -61,9 +61,11 @@ export default function GuidePanel() {
                 <li>
                   <h3>Map every student team to a Discord role</h3>
                   <p>
-                    In <strong>Groups → Role mapping</strong>, create one group per student role. Students can only use{" "}
-                    <code>/balance</code> when their Discord role maps to exactly one active group, and their wallet is
-                    created automatically the first time they interact with the bot.
+                    In <strong>Settings → Capability matrix</strong>, turn on both <strong>Group role</strong> and{" "}
+                    <strong>Receivable</strong> for each student role that should act as a group. Then use{" "}
+                    <strong>Groups → Aliases</strong> to add shorthand names. Students can only use <code>/balance</code>{" "}
+                    when their Discord roles resolve to exactly one active group, and their wallet is created
+                    automatically the first time they interact with the bot.
                   </p>
                 </li>
                 <li>
@@ -299,7 +301,7 @@ export default function GuidePanel() {
                 <dt>Settings</dt>
                 <dd>Economy shape (names, conversion rate, passive rewards), mentor roles, log channels, and the capability matrix.</dd>
                 <dt>Groups</dt>
-                <dd>Map Discord roles to student teams. Set display names, aliases, and mentor names.</dd>
+                <dd>Manage aliases for synced group roles that can receive points, and review participants.</dd>
                 <dt>Shop</dt>
                 <dd>Create and manage items students can buy with points or currency.</dd>
                 <dt>Assignments</dt>

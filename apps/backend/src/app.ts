@@ -586,7 +586,7 @@ export function createApp(params: {
         services.configService.getOrCreate(params.env.GUILD_ID),
         services.economyService.getLeaderboard(params.env.GUILD_ID),
         canManageAdminPages ? services.roleCapabilityService.list(params.env.GUILD_ID) : Promise.resolve([]),
-        canManageAdminPages ? services.groupService.list(params.env.GUILD_ID) : Promise.resolve([]),
+        canManageAdminPages ? services.groupService.list(params.env.GUILD_ID, { includeInactive: true }) : Promise.resolve([]),
         canManageMentorPages ? services.shopService.list(params.env.GUILD_ID) : Promise.resolve([]),
         canManageAdminPages ? services.listingService.list(params.env.GUILD_ID) : Promise.resolve([]),
         canManageAdminPages ? services.economyService.getLedger(params.env.GUILD_ID, 25) : Promise.resolve([]),
@@ -650,7 +650,7 @@ export function createApp(params: {
   });
 
   app.get("/api/groups", { preHandler: requireAdmin }, async () => {
-    const groups = await services.groupService.list(params.env.GUILD_ID);
+    const groups = await services.groupService.list(params.env.GUILD_ID, { includeInactive: true });
     return groups.map((group) => serialiseGroup(group));
   });
 

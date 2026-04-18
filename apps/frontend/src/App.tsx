@@ -54,27 +54,25 @@ function slugify(value: string): string {
     .replace(/^-|-$/g, "");
 }
 
-function toGroupDraft(group?: Group): GroupDraft {
-  if (!group) {
-    return {
-      displayName: "",
-      slug: "",
-      mentorName: "",
-      roleId: "",
-      aliasesText: "",
-      active: true,
-    };
-  }
-
+function toGroupDraft(group: Group | undefined, capability: RoleCapability): GroupDraft {
   return {
-    id: group.id,
-    displayName: group.displayName,
-    slug: group.slug,
-    mentorName: group.mentorName,
-    roleId: group.roleId,
-    aliasesText: group.aliases.map((alias) => alias.value).join(", "),
-    active: group.active,
+    id: group?.id,
+    displayName: group?.displayName ?? capability.roleName,
+    slug: group?.slug ?? slugify(capability.roleName),
+    mentorName: group?.mentorName ?? "",
+    roleId: capability.roleId,
+    aliasesText: group?.aliases.map((alias) => alias.value).join(", ") ?? "",
+    active: group?.active ?? true,
   };
+}
+
+function toSyncedGroupDrafts(groups: Group[], capabilities: RoleCapability[]): GroupDraft[] {
+  const groupsByRoleId = new Map(groups.map((group) => [group.roleId, group]));
+
+  return capabilities
+    .filter((capability) => capability.isGroupRole && capability.canReceiveAwards)
+    .sort((left, right) => left.roleName.localeCompare(right.roleName))
+    .map((capability) => toGroupDraft(groupsByRoleId.get(capability.roleId), capability));
 }
 
 function toShopItemDraft(item?: ShopItem): ShopItemDraft {
@@ -141,7 +139,7 @@ function tabFromHash(): TabId | null {
 const DASHBOARD_TABS: TabDefinition[] = [
   { id: "overview", label: "Overview", description: "At-a-glance totals" },
   { id: "settings", label: "Settings", description: "Economy rules and role capabilities" },
-  { id: "groups", label: "Groups", description: "Team mapping and participants" },
+  { id: "groups", label: "Groups", description: "Aliases and participants" },
   { id: "shop", label: "Shop", description: "Catalogue, pricing, and fulfilment" },
   { id: "fulfilment", label: "Fulfilment", description: "Redemption queue and handover status" },
   { id: "assignments", label: "Assignments", description: "Prompts and submission review" },
@@ -255,7 +253,7 @@ export default function App() {
       setBootstrap(payload);
       setSettingsDraft(payload.settings);
       setRoleDrafts(payload.capabilities);
-      setGroupDrafts([...payload.groups.map((group) => toGroupDraft(group)), toGroupDraft()]);
+      setGroupDrafts(toSyncedGroupDrafts(payload.groups, payload.capabilities));
       setShopDrafts([...payload.shopItems.map((item) => toShopItemDraft(item)), toShopItemDraft()]);
       setAssignmentDrafts([...payload.assignments.map((assignment) => toAssignmentDraft(assignment)), toAssignmentDraft()]);
     });
@@ -453,10 +451,7 @@ export default function App() {
           <GroupsPanel
             participants={bootstrap.participants}
             groupDrafts={groupDrafts}
-            discordRoles={discordRoles}
             isBusy={isMutating}
-            createGroupDraft={() => toGroupDraft()}
-            slugify={slugify}
             onGroupDraftsChange={setGroupDrafts}
             onSaveGroups={handleSaveGroups}
           />
@@ -534,13 +529,11 @@ export default function App() {
   };
 
   const handleSaveGroups = async () => {
-    const validGroups = groupDrafts.filter(
-      (group) => group.displayName.trim().length > 0 && group.roleId.trim().length > 0,
-    );
+    const validGroups = groupDrafts.filter((group) => group.roleId.trim().length > 0);
     await withMutation(
       () => Promise.all(validGroups.map((group) => api.saveGroup(group))),
-      `Saved ${validGroups.length} group${validGroups.length === 1 ? "" : "s"}.`,
-      "Failed to save groups.",
+      "Aliases saved.",
+      "Failed to save aliases.",
     );
   };
 

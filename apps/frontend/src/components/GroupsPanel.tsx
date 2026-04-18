@@ -1,12 +1,9 @@
-import type { DiscordOption, GroupDraft, Participant } from "../types";
+import type { GroupDraft, Participant } from "../types";
 
 type GroupsPanelProps = {
   participants: Participant[];
   groupDrafts: GroupDraft[];
-  discordRoles: DiscordOption[];
   isBusy: boolean;
-  createGroupDraft: () => GroupDraft;
-  slugify: (value: string) => string;
   onGroupDraftsChange: (next: GroupDraft[]) => void;
   onSaveGroups: () => Promise<void>;
 };
@@ -14,10 +11,7 @@ type GroupsPanelProps = {
 export default function GroupsPanel({
   participants,
   groupDrafts,
-  discordRoles,
   isBusy,
-  createGroupDraft,
-  slugify,
   onGroupDraftsChange,
   onSaveGroups,
 }: GroupsPanelProps) {
@@ -26,9 +20,15 @@ export default function GroupsPanel({
       <section className="panel-stack">
         <article className="section">
           <header className="section-header">
-            <h2>Map Discord roles to student groups</h2>
+            <div>
+              <h2>Aliases</h2>
+              <p className="section-help">
+                Any role marked as both Group role and Receivable in Settings is synced here automatically. Add aliases
+                so staff can target groups with shorthand in commands.
+              </p>
+            </div>
             <button className="primary-action" type="button" onClick={() => void onSaveGroups()} disabled={isBusy}>
-              Save Groups
+              Save Aliases
             </button>
           </header>
           <div className="group-mapping-matrix">
@@ -36,11 +36,8 @@ export default function GroupsPanel({
               <table className="matrix-table group-table">
                 <thead>
                   <tr>
-                    <th scope="col" className="col-role">
-                      Discord role
-                    </th>
                     <th scope="col" className="col-display">
-                      Display name
+                      Group
                     </th>
                     <th scope="col" className="col-aliases">
                       Aliases
@@ -51,82 +48,47 @@ export default function GroupsPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {groupDrafts.map((group, index) => (
-                    <tr key={`${group.id ?? "new"}-${index}`}>
-                      <td className="col-role">
-                        <select
-                          value={group.roleId}
-                          aria-label="Discord role"
-                          onChange={(event) => {
-                            const selected = discordRoles.find((candidate) => candidate.id === event.target.value);
-                            const next = [...groupDrafts];
-                            const displayName = selected?.name ?? group.displayName;
-                            const slug = group.slug || slugify(displayName);
-                            next[index] = {
-                              ...group,
-                              roleId: event.target.value,
-                              displayName,
-                              slug,
-                            };
-                            onGroupDraftsChange(next);
-                          }}
-                        >
-                          <option value="">Select role</option>
-                          {discordRoles.map((role) => (
-                            <option key={role.id} value={role.id}>
-                              {role.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="col-display">
-                        <input
-                          value={group.displayName}
-                          aria-label="Display name"
-                          onChange={(event) => {
-                            const next = [...groupDrafts];
-                            next[index] = { ...group, displayName: event.target.value };
-                            onGroupDraftsChange(next);
-                          }}
-                          placeholder="Team name"
-                        />
-                      </td>
-                      <td className="col-aliases">
-                        <input
-                          value={group.aliasesText}
-                          aria-label="Aliases"
-                          onChange={(event) => {
-                            const next = [...groupDrafts];
-                            next[index] = { ...group, aliasesText: event.target.value };
-                            onGroupDraftsChange(next);
-                          }}
-                          placeholder="comma separated"
-                        />
-                      </td>
-                      <td className="col-active">
-                        <input
-                          type="checkbox"
-                          checked={group.active}
-                          aria-label="Active"
-                          onChange={(event) => {
-                            const next = [...groupDrafts];
-                            next[index] = { ...group, active: event.target.checked };
-                            onGroupDraftsChange(next);
-                          }}
-                        />
+                  {groupDrafts.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="empty-cell">
+                        No point-receiving group roles configured yet. Turn on Group role and Receivable in Settings
+                        first.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    groupDrafts.map((group, index) => (
+                      <tr key={`${group.id ?? group.roleId}-${index}`}>
+                        <td className="col-display">{group.displayName}</td>
+                        <td className="col-aliases">
+                          <input
+                            value={group.aliasesText}
+                            aria-label={`Aliases for ${group.displayName}`}
+                            onChange={(event) => {
+                              const next = [...groupDrafts];
+                              next[index] = { ...group, aliasesText: event.target.value };
+                              onGroupDraftsChange(next);
+                            }}
+                            placeholder="comma separated"
+                          />
+                        </td>
+                        <td className="col-active">
+                          <input
+                            type="checkbox"
+                            checked={group.active}
+                            aria-label={`Active for ${group.displayName}`}
+                            onChange={(event) => {
+                              const next = [...groupDrafts];
+                              next[index] = { ...group, active: event.target.checked };
+                              onGroupDraftsChange(next);
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
-            <button
-              type="button"
-              className="matrix-add-row"
-              onClick={() => onGroupDraftsChange([...groupDrafts, createGroupDraft()])}
-            >
-              + Add group
-            </button>
           </div>
         </article>
 

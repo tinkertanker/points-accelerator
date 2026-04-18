@@ -25,9 +25,20 @@ type ResolvedGroup = {
 export class GroupService {
   public constructor(private readonly prisma: PrismaClient) {}
 
-  public async list(guildId: string) {
+  public async list(guildId: string, options: { includeInactive?: boolean } = {}) {
+    const awardableRoleIds = await this.syncAwardableRoleGroups(guildId);
+    if (awardableRoleIds.length === 0) {
+      return [];
+    }
+
     const groups = await this.prisma.group.findMany({
-      where: { guildId },
+      where: {
+        guildId,
+        roleId: {
+          in: awardableRoleIds,
+        },
+        ...(options.includeInactive ? {} : { active: true }),
+      },
       include: {
         aliases: true,
       },
@@ -114,10 +125,7 @@ export class GroupService {
           isGroupRole: true,
           canReceiveAwards: true,
         },
-        update: {
-          roleName: input.displayName,
-          isGroupRole: true,
-        },
+        update: {},
       }),
     ]);
 
@@ -128,11 +136,22 @@ export class GroupService {
   }
 
   public async resolveGroupByIdentifier(guildId: string, identifier: string) {
+    const awardableRoleIds = await this.syncAwardableRoleGroups(guildId);
+    if (awardableRoleIds.length === 0) {
+      return null;
+    }
+
     const roleId = parseRoleMention(identifier);
     const normalized = normalizeIdentifier(identifier);
 
     const groups = await this.prisma.group.findMany({
-      where: { guildId, active: true },
+      where: {
+        guildId,
+        active: true,
+        roleId: {
+          in: awardableRoleIds,
+        },
+      },
       include: { aliases: true },
     });
 
@@ -147,11 +166,13 @@ export class GroupService {
   }
 
   public async resolveGroupFromRoleIds(guildId: string, roleIds: string[]): Promise<ResolvedGroup> {
+    const awardableRoleIds = await this.syncAwardableRoleGroups(guildId);
+
     const groups = await this.prisma.group.findMany({
       where: {
         guildId,
         roleId: {
-          in: roleIds,
+          in: roleIds.filter((roleId) => awardableRoleIds.includes(roleId)),
         },
         active: true,
       },
@@ -204,5 +225,80 @@ export class GroupService {
         },
       ]),
     );
+  }
+
+  private async syncAwardableRoleGroups(guildId: string) {
+    const awardableRoles = await this.prisma.discordRoleCapability.findMany({
+      where: {
+        guildId,
+        isGroupRole: true,
+        canReceiveAwards: true,
+      },
+      orderBy: { roleName: "asc" },
+    });
+
+    if (awardableRoles.length === 0) {
+      return [];
+    }
+
+    const existingGroups = await this.prisma.group.findMany({
+      where: {
+        guildId,
+      },
+      select: {
+        roleId: true,
+        slug: true,
+        displayName: true,
+      },
+    });
+
+    const existingGroupsByRoleId = new Map(existingGroups.map((group) => [group.roleId, group]));
+    const usedSlugs = new Set(existingGroups.map((group) => group.slug));
+
+    await this.prisma.$transaction(
+      awardableRoles.map((role) =>
+        this.prisma.group.upsert({
+          where: {
+            guildId_roleId: {
+              guildId,
+              roleId: role.roleId,
+            },
+          },
+          create: {
+            guildId,
+            displayName: role.roleName,
+            slug: this.createUniqueSyncedSlug(role.roleName, role.roleId, usedSlugs),
+            mentorName: null,
+            roleId: role.roleId,
+            active: true,
+          },
+          update: {},
+        }),
+      ),
+    );
+
+    return awardableRoles.map((role) => role.roleId);
+  }
+
+  private createUniqueSyncedSlug(roleName: string, roleId: string, usedSlugs: Set<string>) {
+    const baseSlug = slugify(roleName) || "group";
+    const roleSuffix = slugify(roleId).replace(/[^a-z0-9-]+/g, "") || "role";
+
+    const candidates = [baseSlug, `${baseSlug}-${roleSuffix}`];
+    for (const candidate of candidates) {
+      if (!usedSlugs.has(candidate)) {
+        usedSlugs.add(candidate);
+        return candidate;
+      }
+    }
+
+    let counter = 2;
+    while (usedSlugs.has(`${baseSlug}-${roleSuffix}-${counter}`)) {
+      counter += 1;
+    }
+
+    const slug = `${baseSlug}-${roleSuffix}-${counter}`;
+    usedSlugs.add(slug);
+    return slug;
   }
 }

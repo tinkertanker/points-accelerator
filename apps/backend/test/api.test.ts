@@ -179,6 +179,196 @@ describe("points accelerator API", () => {
     await expect(ctx.services.participantCurrencyService.getParticipantBalance(participant.id)).resolves.toBe(4);
   });
 
+  it("syncs groups for roles that can receive awards", async () => {
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-alpha",
+          roleName: "Alpha",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: true,
+        },
+      ],
+    });
+
+    const response = await ctx.app.inject({
+      method: "GET",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      expect.objectContaining({
+        displayName: "Alpha",
+        roleId: "role-alpha",
+        active: true,
+      }),
+    ]);
+  });
+
+  it("drops stale synced groups from live queries when the role stops qualifying", async () => {
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-alpha",
+          roleName: "Alpha",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: true,
+        },
+      ],
+    });
+
+    await ctx.app.inject({
+      method: "GET",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [],
+    });
+
+    const groupsResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+    expect(groupsResponse.statusCode).toBe(200);
+    expect(groupsResponse.json()).toEqual([]);
+
+    const leaderboardResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/leaderboard",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+    expect(leaderboardResponse.statusCode).toBe(200);
+    expect(leaderboardResponse.json()).toEqual([]);
+
+    await expect(ctx.services.groupService.resolveGroupFromRoleIds(ctx.env.GUILD_ID, ["role-alpha"])).rejects.toThrow(
+      /not mapped to an active group/i,
+    );
+  });
+
+  it("preserves a stored group display name when syncing capability labels", async () => {
+    const createResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        displayName: "Red Team",
+        slug: "red-team",
+        mentorName: null,
+        roleId: "role-alpha",
+        aliases: ["red"],
+        active: true,
+      },
+    });
+    expect(createResponse.statusCode).toBe(200);
+
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-alpha",
+          roleName: "Alpha",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: true,
+        },
+      ],
+    });
+
+    const response = await ctx.app.inject({
+      method: "GET",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      expect.objectContaining({
+        displayName: "Red Team",
+        roleId: "role-alpha",
+        slug: "red-team",
+      }),
+    ]);
+  });
+
+  it("assigns unique slugs when synced role names normalise to the same value", async () => {
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-a",
+          roleName: "Team A",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: true,
+        },
+        {
+          roleId: "role-b",
+          roleName: "Team-A",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: true,
+        },
+      ],
+    });
+
+    const response = await ctx.app.inject({
+      method: "GET",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const groups = response.json() as Array<{ slug: string; roleId: string }>;
+    expect(groups).toHaveLength(2);
+    expect(new Set(groups.map((group) => group.slug)).size).toBe(2);
+    expect(groups.map((group) => group.roleId)).toEqual(["role-a", "role-b"]);
+  });
+
   it("rejects awards above the configured role cap", async () => {
     await ctx.app.inject({
       method: "PUT",

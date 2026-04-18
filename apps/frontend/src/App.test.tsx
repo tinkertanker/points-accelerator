@@ -98,8 +98,32 @@ const bootstrapPayload = {
     economyMode: "SIMPLE" as const,
     betWinChance: 50,
   },
-  capabilities: [],
-  groups: [],
+  capabilities: [
+    {
+      roleId: "role-alpha",
+      roleName: "Alpha",
+      canManageDashboard: false,
+      canAward: false,
+      maxAward: null,
+      canDeduct: false,
+      canMultiAward: false,
+      canSell: false,
+      canReceiveAwards: true,
+      isGroupRole: true,
+    },
+  ],
+  groups: [
+    {
+      id: "group-1",
+      displayName: "Alpha",
+      slug: "alpha",
+      mentorName: null,
+      roleId: "role-alpha",
+      active: true,
+      aliases: [{ value: "a-team" }],
+      pointsBalance: 99,
+    },
+  ],
   shopItems: [],
   listings: [],
   leaderboard: [
@@ -239,6 +263,85 @@ describe("App", () => {
       expect.stringMatching(/\/api\/shop-redemptions$/),
       expect.objectContaining({ method: "GET" }),
     );
+
+    fireEvent.click(screen.getByRole("tab", { name: /groups/i }));
+
+    expect(await screen.findByRole("heading", { name: /aliases/i })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("a-team")).toBeInTheDocument();
+  });
+
+  it("preserves the stored group name when saving aliases", async () => {
+    const customBootstrap = {
+      ...bootstrapPayload,
+      capabilities: [
+        {
+          roleId: "role-alpha",
+          roleName: "Alpha",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: true,
+        },
+      ],
+      groups: [
+        {
+          id: "group-1",
+          displayName: "Red Team",
+          slug: "red-team",
+          mentorName: null,
+          roleId: "role-alpha",
+          active: true,
+          aliases: [{ value: "red" }],
+          pointsBalance: 99,
+        },
+      ],
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(authenticatedSession), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(customBootstrap), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(customBootstrap), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    render(<App />);
+
+    expect(await screen.findByRole("tab", { name: /overview/i, selected: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /groups/i }));
+    expect(await screen.findByRole("heading", { name: /aliases/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /save aliases/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+
+    const saveCall = fetchMock.mock.calls[2];
+    expect(String(saveCall?.[0])).toContain("/api/groups");
+    const payload = JSON.parse(String((saveCall?.[1] as RequestInit | undefined)?.body));
+    expect(payload.displayName).toBe("Red Team");
+    expect(payload.roleId).toBe("role-alpha");
   });
 
   it("shows only mentor tabs for an authenticated mentor", async () => {

@@ -160,6 +160,19 @@ function createInitialBootstrap(): BootstrapPayload {
         canReceiveAwards: true,
         isGroupRole: true,
       },
+      {
+        id: "cap-3",
+        roleId: "role-beta",
+        roleName: "Team Beta",
+        canManageDashboard: false,
+        canAward: false,
+        maxAward: null,
+        canDeduct: false,
+        canMultiAward: false,
+        canSell: false,
+        canReceiveAwards: true,
+        isGroupRole: true,
+      },
     ],
     groups: [
       {
@@ -470,6 +483,7 @@ export function designPreviewSaveCapabilities(capabilities: RoleCapability[]): R
     id: capability.id ?? `cap-${index + 1}`,
   }));
   mockBootstrap.capabilities = next;
+  syncMockGroupsFromCapabilities();
   return next;
 }
 
@@ -479,6 +493,35 @@ function slugify(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+function syncMockGroupsFromCapabilities() {
+  const existingGroupsByRoleId = new Map(mockBootstrap.groups.map((group) => [group.roleId, group]));
+
+  mockBootstrap.groups = mockBootstrap.capabilities
+    .filter((capability) => capability.isGroupRole && capability.canReceiveAwards)
+    .sort((left, right) => left.roleName.localeCompare(right.roleName))
+    .map((capability) => {
+      const existing = existingGroupsByRoleId.get(capability.roleId);
+      return {
+        id: existing?.id ?? `group-${capability.roleId}`,
+        displayName: existing?.displayName ?? capability.roleName,
+        slug: existing?.slug ?? slugify(capability.roleName),
+        mentorName: existing?.mentorName ?? null,
+        roleId: capability.roleId,
+        active: existing?.active ?? true,
+        aliases: existing?.aliases ?? [],
+        pointsBalance: existing?.pointsBalance ?? 0,
+      };
+    });
+
+  mockBootstrap.leaderboard = [...mockBootstrap.groups]
+    .sort((a, b) => b.pointsBalance - a.pointsBalance)
+    .map((entry) => ({
+      id: entry.id,
+      displayName: entry.displayName,
+      pointsBalance: entry.pointsBalance,
+    }));
 }
 
 export function designPreviewSaveGroup(draft: GroupDraft): Group {
@@ -507,13 +550,7 @@ export function designPreviewSaveGroup(draft: GroupDraft): Group {
     mockBootstrap.groups.push(group);
   }
 
-  mockBootstrap.leaderboard = [...mockBootstrap.groups]
-    .sort((a, b) => b.pointsBalance - a.pointsBalance)
-    .map((entry) => ({
-      id: entry.id,
-      displayName: entry.displayName,
-      pointsBalance: entry.pointsBalance,
-    }));
+  syncMockGroupsFromCapabilities();
 
   return group;
 }
