@@ -6,6 +6,7 @@ import type {
   GroupDraft,
   RoleCapability,
   Settings,
+  ShopRedemption,
   ShopItem,
   ShopItemDraft,
 } from "./types";
@@ -204,6 +205,130 @@ function createInitialBootstrap(): BootstrapPayload {
         fulfillmentInstructions: "Coordinate with the staff desk.",
       },
     ],
+    redemptions: [
+      {
+        id: "redeem-1",
+        purchaseMode: "INDIVIDUAL",
+        quantity: 1,
+        totalCost: 15,
+        approvalThreshold: null,
+        status: "PENDING",
+        notes: null,
+        createdAt: new Date(Date.now() - 45 * 60_000).toISOString(),
+        updatedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+        requestedByUserId: "preview-student-1",
+        requestedByUsername: "Ava",
+        approvalMessageChannelId: null,
+        approvalMessageId: null,
+        shopItem: {
+          id: "shop-1",
+          name: "Sticker pack",
+          audience: "INDIVIDUAL",
+          fulfillmentInstructions: "DM the bot with your email.",
+        },
+        group: {
+          id: "group-1",
+          displayName: "Team Alpha",
+        },
+        requestedByParticipant: {
+          id: "participant-1",
+          discordUserId: "preview-student-1",
+          discordUsername: "Ava",
+          indexId: "A001",
+        },
+        approvals: [],
+      },
+      {
+        id: "redeem-2",
+        purchaseMode: "GROUP",
+        quantity: 1,
+        totalCost: 50,
+        approvalThreshold: 2,
+        status: "AWAITING_APPROVAL",
+        notes: null,
+        createdAt: new Date(Date.now() - 3 * 60 * 60_000).toISOString(),
+        updatedAt: new Date(Date.now() - 75 * 60_000).toISOString(),
+        requestedByUserId: "preview-student-2",
+        requestedByUsername: "Mika",
+        approvalMessageChannelId: "ch-redeem",
+        approvalMessageId: "message-22",
+        shopItem: {
+          id: "shop-2",
+          name: "Shared pizza run",
+          audience: "GROUP",
+          fulfillmentInstructions: "Coordinate with the staff desk.",
+        },
+        group: {
+          id: "group-2",
+          displayName: "Team Beta",
+        },
+        requestedByParticipant: {
+          id: "participant-2",
+          discordUserId: "preview-student-2",
+          discordUsername: "Mika",
+          indexId: "B004",
+        },
+        approvals: [
+          {
+            participant: {
+              id: "participant-2",
+              discordUserId: "preview-student-2",
+              discordUsername: "Mika",
+              indexId: "B004",
+            },
+          },
+        ],
+      },
+      {
+        id: "redeem-3",
+        purchaseMode: "GROUP",
+        quantity: 2,
+        totalCost: 100,
+        approvalThreshold: 2,
+        status: "FULFILLED",
+        notes: null,
+        createdAt: new Date(Date.now() - 26 * 60 * 60_000).toISOString(),
+        updatedAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+        requestedByUserId: "preview-student-3",
+        requestedByUsername: "Jordan",
+        approvalMessageChannelId: "ch-redeem",
+        approvalMessageId: "message-23",
+        shopItem: {
+          id: "shop-2",
+          name: "Shared pizza run",
+          audience: "GROUP",
+          fulfillmentInstructions: "Coordinate with the staff desk.",
+        },
+        group: {
+          id: "group-1",
+          displayName: "Team Alpha",
+        },
+        requestedByParticipant: {
+          id: "participant-3",
+          discordUserId: "preview-student-3",
+          discordUsername: "Jordan",
+          indexId: "A006",
+        },
+        approvals: [
+          {
+            participant: {
+              id: "participant-3",
+              discordUserId: "preview-student-3",
+              discordUsername: "Jordan",
+              indexId: "A006",
+            },
+          },
+          {
+            participant: {
+              id: "participant-4",
+              discordUserId: "preview-student-4",
+              discordUsername: "Noah",
+              indexId: "A009",
+            },
+          },
+        ],
+      },
+    ],
     listings: [
       {
         id: "list-1",
@@ -330,6 +455,10 @@ export function getDesignPreviewBootstrap(): BootstrapPayload {
   return structuredClone(mockBootstrap);
 }
 
+export function getDesignPreviewRedemptions(): ShopRedemption[] {
+  return structuredClone(mockBootstrap.redemptions ?? []);
+}
+
 export function designPreviewSaveSettings(settings: Settings): Settings {
   mockBootstrap.settings = settings;
   return settings;
@@ -409,4 +538,24 @@ export function designPreviewSaveShopItem(draft: ShopItemDraft): ShopItem {
   }
 
   return item;
+}
+
+export function designPreviewUpdateRedemptionStatus(
+  redemptionId: string,
+  status: "FULFILLED" | "CANCELED",
+): ShopRedemption {
+  const existingIndex = (mockBootstrap.redemptions ?? []).findIndex((candidate) => candidate.id === redemptionId);
+  if (existingIndex < 0) {
+    throw new Error("Preview redemption not found.");
+  }
+
+  const previous = mockBootstrap.redemptions![existingIndex]!;
+  const updated: ShopRedemption = {
+    ...previous,
+    status,
+    updatedAt: new Date().toISOString(),
+  };
+
+  mockBootstrap.redemptions![existingIndex] = updated;
+  return structuredClone(updated);
 }

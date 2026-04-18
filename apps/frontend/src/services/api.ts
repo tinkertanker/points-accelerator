@@ -3,7 +3,9 @@ import {
   designPreviewSaveGroup,
   designPreviewSaveSettings,
   designPreviewSaveShopItem,
+  designPreviewUpdateRedemptionStatus,
   getDesignPreviewBootstrap,
+  getDesignPreviewRedemptions,
   getDesignPreviewSession,
   isDesignPreview,
 } from "../designPreview";
@@ -14,6 +16,7 @@ import type {
   GroupDraft,
   RoleCapability,
   Settings,
+  ShopRedemption,
   ShopItemDraft,
   Submission,
 } from "../types";
@@ -151,6 +154,21 @@ export const api = {
       return Promise.resolve({} as Submission);
     }
     return request<Submission>(`/api/submissions/${submissionId}/review`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+  listShopRedemptions() {
+    if (isDesignPreview()) {
+      return Promise.resolve(getDesignPreviewRedemptions());
+    }
+    return request<ShopRedemption[]>("/api/shop-redemptions");
+  },
+  updateShopRedemptionStatus(redemptionId: string, payload: { status: "FULFILLED" | "CANCELED" }) {
+    if (isDesignPreview()) {
+      return Promise.resolve(designPreviewUpdateRedemptionStatus(redemptionId, payload.status));
+    }
+    return request<ShopRedemption>(`/api/shop-redemptions/${redemptionId}/status`, {
       method: "POST",
       body: payload,
     });

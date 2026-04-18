@@ -63,9 +63,11 @@ Run locally:
 - Buy an item with `/buyforme`
 - Verify the buyer's personal currency decreases
 - Verify stock decreases for limited items
+- Open the dashboard `Fulfilment` tab and mark the personal purchase fulfilled
 - Create a `/buyforgroup` request
 - Approve it from enough group members with `/approve_purchase`
 - Verify the group's shared points are charged and the request moves to pending fulfilment
+- Mark the group redemption fulfilled from the dashboard queue
 
 ### Listings
 

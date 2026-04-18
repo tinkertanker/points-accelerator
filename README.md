@@ -43,6 +43,7 @@ The bot also supports participant-wallet betting: students can place double-or-n
 - Discord-login leaderboard view for any guild member
 - Participant wallet transfers plus wallet-to-group point donations
 - Custom shop with personal purchases and majority-approved group purchases
+- Staff fulfilment queue for recorded and approved store redemptions
 - Participant wallet betting with configurable win chance
 - Marketplace listings with optional Discord channel posting
 - Role capability matrix
@@ -73,7 +74,7 @@ The award and deduct flows use separate commands so Discord enforces the require
 The dashboard uses Discord sign-in with three access tiers:
 
 - Guild members can sign in to view the leaderboard.
-- Mentor roles chosen by admins can manage the shop, assignments, and submission review.
+- Mentor roles chosen by admins can manage the shop, fulfilment queue, assignments, and submission review.
 - Guild admins and roles with `canManageDashboard` enabled keep full access to settings and groups.
 
 After signing into the dashboard, use the built-in walkthrough in the control room to configure role powers, map groups, create assignments, and smoke test the commands in Discord.

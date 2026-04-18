@@ -18,6 +18,7 @@ export type ShopItemInput = {
 };
 
 type PurchaseMode = "INDIVIDUAL" | "GROUP";
+type ManagedRedemptionStatus = "FULFILLED" | "CANCELED";
 type GroupApprovalParticipant = {
   id: string;
   discordUserId: string | null;
@@ -52,6 +53,32 @@ type GroupPurchaseRedemption = ShopRedemption & {
   };
   approvals: GroupPurchaseApproval[];
 };
+
+const redemptionInclude = {
+  shopItem: true,
+  group: true,
+  requestedByParticipant: {
+    select: {
+      id: true,
+      discordUserId: true,
+      discordUsername: true,
+      indexId: true,
+    },
+  },
+  approvals: {
+    include: {
+      participant: {
+        select: {
+          id: true,
+          discordUserId: true,
+          discordUsername: true,
+          indexId: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "asc" },
+  },
+} satisfies Prisma.ShopRedemptionInclude;
 
 export class ShopService {
   public constructor(
@@ -305,32 +332,100 @@ export class ShopService {
   public async getRedemption(guildId: string, redemptionId: string) {
     return this.prisma.shopRedemption.findFirst({
       where: { id: redemptionId, guildId },
-      include: {
-        shopItem: true,
-        group: true,
-        requestedByParticipant: {
-          select: {
-            id: true,
-            discordUserId: true,
-            discordUsername: true,
-            indexId: true,
-          },
-        },
-        approvals: {
-          include: {
-            participant: {
-              select: {
-                id: true,
-                discordUserId: true,
-                discordUsername: true,
-                indexId: true,
-              },
-            },
-          },
-          orderBy: { createdAt: "asc" },
-        },
-      },
+      include: redemptionInclude,
     });
+  }
+
+  public async listRedemptions(guildId: string) {
+    return this.prisma.shopRedemption.findMany({
+      where: { guildId },
+      include: redemptionInclude,
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    });
+  }
+
+  public async updateRedemptionStatus(params: {
+    guildId: string;
+    redemptionId: string;
+    status: ManagedRedemptionStatus;
+    actorUserId: string;
+    actorUsername?: string;
+  }) {
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockRedemption(tx, params.guildId, params.redemptionId);
+
+      const redemption = await tx.shopRedemption.findUnique({
+        where: { id: params.redemptionId },
+        include: redemptionInclude,
+      });
+
+      if (!redemption || redemption.guildId !== params.guildId) {
+        throw new AppError("Shop redemption not found.", 404);
+      }
+
+      if (redemption.status === params.status) {
+        return {
+          changed: false,
+          previousStatus: redemption.status,
+          redemption,
+        };
+      }
+
+      if (params.status === "FULFILLED") {
+        if (redemption.status !== "PENDING") {
+          throw new AppError("Only funded purchases pending fulfilment can be marked fulfilled.", 409);
+        }
+      }
+
+      if (params.status === "CANCELED") {
+        if (redemption.status === "FULFILLED") {
+          throw new AppError("Fulfilled purchases cannot be canceled.", 409);
+        }
+
+        if (redemption.status === "PENDING") {
+          throw new AppError(
+            "Charged purchases cannot be canceled from the fulfilment queue. Use a separate correction entry if needed.",
+            409,
+          );
+        }
+
+        if (redemption.status !== "AWAITING_APPROVAL") {
+          throw new AppError("Only open approval requests can be canceled.", 409);
+        }
+      }
+
+      const updatedRedemption = await tx.shopRedemption.update({
+        where: { id: params.redemptionId },
+        data: { status: params.status },
+        include: redemptionInclude,
+      });
+
+      return {
+        changed: true,
+        previousStatus: redemption.status,
+        redemption: updatedRedemption,
+      };
+    });
+
+    if (result.changed) {
+      await this.auditService.record({
+        guildId: params.guildId,
+        actorUserId: params.actorUserId,
+        actorUsername: params.actorUsername,
+        action: params.status === "FULFILLED" ? "shop.redemption.fulfilled" : "shop.redemption.canceled",
+        entityType: "ShopRedemption",
+        entityId: result.redemption.id,
+        payload: {
+          previousStatus: result.previousStatus,
+          status: result.redemption.status,
+          purchaseMode: result.redemption.purchaseMode,
+          quantity: result.redemption.quantity,
+          totalCost: decimalToNumber(result.redemption.totalCost),
+        },
+      });
+    }
+
+    return result.redemption;
   }
 
   private async redeemIndividual(params: {

@@ -119,6 +119,41 @@ const bootstrapPayload = {
   },
 };
 
+const fulfilmentPayload = [
+  {
+    id: "redeem-1",
+    purchaseMode: "INDIVIDUAL" as const,
+    quantity: 1,
+    totalCost: 15,
+    approvalThreshold: null,
+    status: "PENDING" as const,
+    notes: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    requestedByUserId: "user-1",
+    requestedByUsername: "Admin",
+    approvalMessageChannelId: null,
+    approvalMessageId: null,
+    shopItem: {
+      id: "shop-1",
+      name: "Sticker pack",
+      audience: "INDIVIDUAL" as const,
+      fulfillmentInstructions: "Show this to staff.",
+    },
+    group: {
+      id: "group-1",
+      displayName: "Alpha",
+    },
+    requestedByParticipant: {
+      id: "participant-1",
+      discordUserId: "user-1",
+      discordUsername: "Admin",
+      indexId: "A001",
+    },
+    approvals: [],
+  },
+];
+
 describe("App", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
@@ -178,6 +213,12 @@ describe("App", () => {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(fulfilmentPayload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
       );
 
     render(<App />);
@@ -189,6 +230,15 @@ describe("App", () => {
 
     expect(await screen.findByRole("button", { name: /save settings/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /open the guide/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Fulfilment\b/i }));
+
+    expect(await screen.findByRole("heading", { name: /run the fulfilment queue/i })).toBeInTheDocument();
+    expect(await screen.findAllByRole("button", { name: /mark fulfilled/i })).toHaveLength(2);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringMatching(/\/api\/shop-redemptions$/),
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
   it("shows only mentor tabs for an authenticated mentor", async () => {
@@ -209,6 +259,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("tab", { name: /shop/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Fulfilment\b/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /assignments/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /leaderboard/i })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /settings/i })).not.toBeInTheDocument();

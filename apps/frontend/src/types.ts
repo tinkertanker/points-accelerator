@@ -65,6 +65,48 @@ export type ShopItem = {
 
 export type ShopItemDraft = Omit<ShopItem, "id"> & { id?: string };
 
+export type RedemptionStatus = "AWAITING_APPROVAL" | "PENDING" | "FULFILLED" | "CANCELED";
+
+export type ShopRedemption = {
+  id: string;
+  purchaseMode: "INDIVIDUAL" | "GROUP";
+  quantity: number;
+  totalCost: number;
+  approvalThreshold: number | null;
+  status: RedemptionStatus;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  requestedByUserId: string;
+  requestedByUsername: string | null;
+  approvalMessageChannelId: string | null;
+  approvalMessageId: string | null;
+  shopItem: {
+    id: string;
+    name: string;
+    audience: "INDIVIDUAL" | "GROUP";
+    fulfillmentInstructions: string | null;
+  };
+  group: {
+    id: string;
+    displayName: string;
+  };
+  requestedByParticipant: {
+    id: string;
+    discordUserId: string | null;
+    discordUsername: string | null;
+    indexId: string;
+  } | null;
+  approvals: Array<{
+    participant: {
+      id: string;
+      discordUserId: string | null;
+      discordUsername: string | null;
+      indexId: string;
+    };
+  }>;
+};
+
 export type Listing = {
   id: string;
   title: string;
@@ -130,6 +172,7 @@ export type BootstrapPayload = {
   capabilities: RoleCapability[];
   groups: Group[];
   shopItems: ShopItem[];
+  redemptions?: ShopRedemption[];
   listings: Listing[];
   leaderboard: LeaderboardEntry[];
   ledger: LedgerEntry[];
@@ -147,6 +190,7 @@ export type TabId =
   | "settings"
   | "groups"
   | "shop"
+  | "fulfilment"
   | "assignments"
   | "activity"
   | "guide";

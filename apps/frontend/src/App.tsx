@@ -2,6 +2,7 @@ import { startTransition, useCallback, useEffect, useState } from "react";
 
 import ActivityPanel from "./components/ActivityPanel";
 import AssignmentsPanel from "./components/AssignmentsPanel";
+import FulfilmentPanel from "./components/FulfilmentPanel";
 import GroupsPanel from "./components/GroupsPanel";
 import GuidePanel from "./components/GuidePanel";
 import OverviewPanel from "./components/OverviewPanel";
@@ -19,6 +20,7 @@ import type {
   DashboardAccessLevel,
   Group,
   GroupDraft,
+  ShopRedemption,
   RoleCapability,
   Settings,
   ShopItem,
@@ -129,7 +131,7 @@ function toAssignmentDraft(assignment?: Assignment): AssignmentDraft {
   };
 }
 
-const ALL_TAB_IDS = new Set<string>(["overview", "settings", "groups", "shop", "assignments", "activity", "guide"]);
+const ALL_TAB_IDS = new Set<string>(["overview", "settings", "groups", "shop", "fulfilment", "assignments", "activity", "guide"]);
 
 function tabFromHash(): TabId | null {
   const raw = window.location.hash.replace("#", "");
@@ -141,6 +143,7 @@ const DASHBOARD_TABS: TabDefinition[] = [
   { id: "settings", label: "Settings", description: "Economy rules and role capabilities" },
   { id: "groups", label: "Groups", description: "Team mapping and participants" },
   { id: "shop", label: "Shop", description: "Catalogue, pricing, and fulfilment" },
+  { id: "fulfilment", label: "Fulfilment", description: "Redemption queue and handover status" },
   { id: "assignments", label: "Assignments", description: "Prompts and submission review" },
   { id: "activity", label: "Activity", description: "Leaderboard and ledger feed" },
 ];
@@ -148,6 +151,7 @@ const DASHBOARD_TABS: TabDefinition[] = [
 const MENTOR_TABS: TabDefinition[] = [
   DASHBOARD_TABS[3]!,
   DASHBOARD_TABS[4]!,
+  DASHBOARD_TABS[5]!,
   { id: "activity", label: "Leaderboard", description: "Current standings" },
 ];
 
@@ -188,7 +192,7 @@ function getDashboardSubtitle(accessLevel?: DashboardAccessLevel): string {
   }
 
   if (accessLevel === "mentor") {
-    return "Update the shop, assignments, and submission review queue for the class.";
+    return "Update the shop, track fulfilment, and review class submissions.";
   }
 
   return "Check the latest leaderboard standings for your Discord server.";
@@ -209,6 +213,7 @@ function getPreviewAccessLabel(accessLevel?: DashboardAccessLevel): string {
 export default function App() {
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(null);
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
+  const [redemptions, setRedemptions] = useState<ShopRedemption[]>([]);
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(null);
   const [roleDrafts, setRoleDrafts] = useState<RoleCapability[]>([]);
   const [groupDrafts, setGroupDrafts] = useState<GroupDraft[]>([]);
@@ -217,6 +222,8 @@ export default function App() {
   const [status, setStatus] = useState(getInitialStatus);
   const [isInitialising, setIsInitialising] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
+  const [isLoadingRedemptions, setIsLoadingRedemptions] = useState(false);
+  const [hasLoadedRedemptions, setHasLoadedRedemptions] = useState(false);
   const [activeTab, setActiveTabRaw] = useState<TabId>(() => tabFromHash() ?? getDefaultTab());
 
   const setActiveTab = useCallback((tab: TabId) => {
@@ -232,11 +239,14 @@ export default function App() {
     startTransition(() => {
       setActiveTab(getDefaultTab());
       setBootstrap(null);
+      setRedemptions([]);
       setSettingsDraft(null);
       setRoleDrafts([]);
       setGroupDrafts([]);
       setShopDrafts([]);
       setAssignmentDrafts([]);
+      setHasLoadedRedemptions(false);
+      setIsLoadingRedemptions(false);
     });
   };
 
@@ -256,6 +266,18 @@ export default function App() {
     hydrateDashboard(payload);
   };
 
+  const hydrateRedemptions = (queue: ShopRedemption[]) => {
+    startTransition(() => {
+      setRedemptions(queue);
+    });
+  };
+
+  const refreshRedemptions = async () => {
+    const queue = await api.listShopRedemptions();
+    hydrateRedemptions(queue);
+    setHasLoadedRedemptions(true);
+  };
+
   const loadBootstrap = async () => {
     setIsMutating(true);
     try {
@@ -273,11 +295,12 @@ export default function App() {
     persist: () => Promise<unknown>,
     successMessage: string,
     fallbackErrorMessage: string,
+    refresh: () => Promise<void> = refreshBootstrap,
   ) => {
     setIsMutating(true);
     try {
       await persist();
-      await refreshBootstrap();
+      await refresh();
       setStatus(successMessage);
       return true;
     } catch (error) {
@@ -342,6 +365,39 @@ export default function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  useEffect(() => {
+    if (!bootstrap || !sessionUser?.canManageShop || activeTab !== "fulfilment" || hasLoadedRedemptions) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadRedemptions = async () => {
+      setIsLoadingRedemptions(true);
+      try {
+        const queue = await api.listShopRedemptions();
+        if (!cancelled) {
+          hydrateRedemptions(queue);
+          setHasLoadedRedemptions(true);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setStatus(error instanceof Error ? error.message : "Failed to load the fulfilment queue.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingRedemptions(false);
+        }
+      }
+    };
+
+    void loadRedemptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, bootstrap, hasLoadedRedemptions, sessionUser?.canManageShop]);
 
   const handleLogin = () => {
     setStatus("Redirecting to Discord...");
@@ -416,6 +472,18 @@ export default function App() {
             createShopDraft={() => toShopItemDraft()}
             onShopDraftsChange={setShopDrafts}
             onSaveShop={handleSaveShop}
+          />
+        );
+      case "fulfilment":
+        if (!sessionUser.canManageShop) {
+          return null;
+        }
+        return (
+          <FulfilmentPanel
+            redemptions={redemptions}
+            isBusy={isMutating || isLoadingRedemptions}
+            isLoading={isLoadingRedemptions && !hasLoadedRedemptions}
+            onUpdateRedemptionStatus={handleUpdateRedemptionStatus}
           />
         );
       case "assignments":
@@ -522,6 +590,19 @@ export default function App() {
       () => api.reviewSubmission(submission.id, { status: nextStatus }),
       `Rejected submission from ${submitter}.`,
       "Failed to reject.",
+    );
+  };
+
+  const handleUpdateRedemptionStatus = async (
+    redemption: ShopRedemption,
+    nextStatus: "FULFILLED" | "CANCELED",
+  ) => {
+    const actionLabel = nextStatus === "FULFILLED" ? "Marked fulfilled" : "Canceled";
+    return withMutation(
+      () => api.updateShopRedemptionStatus(redemption.id, { status: nextStatus }),
+      `${actionLabel} ${redemption.shopItem.name}.`,
+      "Failed to update the redemption.",
+      refreshRedemptions,
     );
   };
 

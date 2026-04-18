@@ -135,6 +135,10 @@ const approveGroupPurchaseSchema = z.object({
   approvedByUsername: z.string().optional(),
 });
 
+const redemptionStatusUpdateSchema = z.object({
+  status: z.enum(["FULFILLED", "CANCELED"]),
+});
+
 const assignmentSchema = z.object({
   id: z.string().optional(),
   title: z.string().min(1),
@@ -401,6 +405,52 @@ export function createApp(params: {
     pointsBalance: group.pointsBalance,
   });
 
+  const serialiseShopRedemption = (
+    redemption: NonNullable<Awaited<ReturnType<AppServices["shopService"]["getRedemption"]>>>,
+  ) => {
+    return {
+      id: redemption.id,
+      purchaseMode: redemption.purchaseMode,
+      quantity: redemption.quantity,
+      totalCost: decimalToNumber(redemption.totalCost),
+      approvalThreshold: redemption.approvalThreshold,
+      status: redemption.status,
+      notes: redemption.notes,
+      createdAt: redemption.createdAt.toISOString(),
+      updatedAt: redemption.updatedAt.toISOString(),
+      requestedByUserId: redemption.requestedByUserId,
+      requestedByUsername: redemption.requestedByUsername,
+      approvalMessageChannelId: redemption.approvalMessageChannelId,
+      approvalMessageId: redemption.approvalMessageId,
+      shopItem: {
+        id: redemption.shopItem.id,
+        name: redemption.shopItem.name,
+        audience: redemption.shopItem.audience,
+        fulfillmentInstructions: redemption.shopItem.fulfillmentInstructions,
+      },
+      group: {
+        id: redemption.group.id,
+        displayName: redemption.group.displayName,
+      },
+      requestedByParticipant: redemption.requestedByParticipant
+        ? {
+            id: redemption.requestedByParticipant.id,
+            discordUserId: redemption.requestedByParticipant.discordUserId,
+            discordUsername: redemption.requestedByParticipant.discordUsername,
+            indexId: redemption.requestedByParticipant.indexId,
+          }
+        : null,
+      approvals: redemption.approvals.map((approval) => ({
+        participant: {
+          id: approval.participant.id,
+          discordUserId: approval.participant.discordUserId,
+          discordUsername: approval.participant.discordUsername,
+          indexId: approval.participant.indexId,
+        },
+      })),
+    };
+  };
+
   app.register(cors, {
     origin: true,
     credentials: true,
@@ -633,6 +683,26 @@ export function createApp(params: {
       ...item,
       cost: decimalToNumber(item.cost),
     };
+  });
+
+  app.get("/api/shop-redemptions", { preHandler: requireMentor }, async () => {
+    const redemptions = await services.shopService.listRedemptions(params.env.GUILD_ID);
+    return redemptions.map((redemption) => serialiseShopRedemption(redemption));
+  });
+
+  app.post("/api/shop-redemptions/:id/status", { preHandler: requireMentor }, async (request) => {
+    const payload = redemptionStatusUpdateSchema.parse(request.body);
+    const session = await resolveDashboardSession(request);
+    const { id } = request.params as { id: string };
+    const redemption = await services.shopService.updateRedemptionStatus({
+      guildId: params.env.GUILD_ID,
+      redemptionId: id,
+      status: payload.status,
+      actorUserId: session.userId,
+      actorUsername: session.username,
+    });
+
+    return serialiseShopRedemption(redemption);
   });
 
   app.get("/api/listings", { preHandler: requireAdmin }, async () => services.listingService.list(params.env.GUILD_ID));

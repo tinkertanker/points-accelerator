@@ -62,7 +62,8 @@ After deployment:
 4. Map each student group role to a group entry.
 5. Set listing, redemption, and log channels.
 6. Add shop items if you want the shop enabled during phase 1.
-7. Review `Bet win chance (%)` in the dashboard to set the desired win probability for test users. The default is `50`.
+7. Use the **Fulfilment** tab after test purchases so staff can mark handovers complete.
+8. Review `Bet win chance (%)` in the dashboard to set the desired win probability for test users. The default is `50`.
 
 ## 6. Test commands
 

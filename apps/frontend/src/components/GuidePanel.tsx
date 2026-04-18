@@ -338,7 +338,8 @@ export default function GuidePanel() {
               <p>
                 Items with the <strong>Individual</strong> audience cost personal wallet currency. Students buy them
                 with <code>/buyforme</code> and the purchase is fulfilled immediately. Add fulfilment instructions
-                (e.g. &ldquo;show this receipt to a mentor&rdquo;) to tell students what happens next.
+                (e.g. &ldquo;show this receipt to a mentor&rdquo;) to tell students what happens next. Staff can then
+                clear the row from the <strong>Fulfilment</strong> tab once the handover is done.
               </p>
 
               <h3>Group items</h3>
@@ -346,7 +347,8 @@ export default function GuidePanel() {
                 Items with the <strong>Group</strong> audience cost group points. A student initiates the purchase
                 with <code>/buyforgroup</code>, then other group members approve it with{" "}
                 <code>/approve_purchase</code>. The number of approvals required scales with group size. Once the
-                threshold is met, the points are deducted and the item is fulfilled.
+                threshold is met, the points are deducted and the request moves into the dashboard&rsquo;s{" "}
+                <strong>Fulfilment</strong> queue until staff mark it fulfilled.
               </p>
 
               <h3>Stock management</h3>

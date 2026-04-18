@@ -738,6 +738,155 @@ describe("points accelerator API", () => {
     });
   });
 
+  it("lists fulfilment queue items and lets staff fulfil or cancel eligible requests", async () => {
+    const groupResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/groups",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        displayName: "Ravenclaw",
+        slug: "ravenclaw",
+        mentorName: null,
+        roleId: "role-ravenclaw",
+        aliases: [],
+        active: true,
+      },
+    });
+    const group = groupResponse.json() as { id: string };
+    groupMemberCounts.set("role-ravenclaw", 2);
+
+    const participant = await registerParticipant({
+      discordUserId: "user-raven",
+      discordUsername: "Raven user",
+      indexId: "R001",
+      groupId: group.id,
+    });
+    const approver = await registerParticipant({
+      discordUserId: "user-raven-2",
+      discordUsername: "Raven mate",
+      indexId: "R002",
+      groupId: group.id,
+    });
+
+    await seedParticipantCurrency(participant.id, 50);
+
+    const personalItemResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/shop-items",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        name: "Notebook",
+        description: "Personal item",
+        audience: "INDIVIDUAL",
+        cost: 10,
+        stock: 4,
+        enabled: true,
+        fulfillmentInstructions: "Pick it up from the desk.",
+      },
+    });
+    const personalItem = personalItemResponse.json() as { id: string };
+
+    const groupItemResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/shop-items",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        name: "Team snacks",
+        description: "Group reward",
+        audience: "GROUP",
+        cost: 25,
+        stock: 3,
+        enabled: true,
+        fulfillmentInstructions: "Hand over during break.",
+      },
+    });
+    const groupItem = groupItemResponse.json() as { id: string };
+
+    const personalRedeemResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/actions/redeem",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        participantId: participant.id,
+        shopItemId: personalItem.id,
+        requestedByUserId: participant.discordUserId,
+        requestedByUsername: participant.discordUsername ?? undefined,
+      },
+    });
+    const personalRedemption = personalRedeemResponse.json() as { id: string; status: string };
+
+    const groupRedeemResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/actions/redeem",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        participantId: approver.id,
+        shopItemId: groupItem.id,
+        requestedByUserId: approver.discordUserId,
+        requestedByUsername: approver.discordUsername ?? undefined,
+        purchaseMode: "GROUP",
+      },
+    });
+    const groupRedemption = groupRedeemResponse.json() as { id: string; status: string };
+
+    const queueResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/shop-redemptions",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+    expect(queueResponse.statusCode).toBe(200);
+    expect(queueResponse.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: personalRedemption.id,
+          status: "PENDING",
+          shopItem: expect.objectContaining({ name: "Notebook" }),
+        }),
+        expect.objectContaining({
+          id: groupRedemption.id,
+          status: "AWAITING_APPROVAL",
+          shopItem: expect.objectContaining({ name: "Team snacks" }),
+        }),
+      ]),
+    );
+
+    const bootstrapResponse = await ctx.app.inject({
+      method: "GET",
+      url: "/api/bootstrap",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+    expect(bootstrapResponse.statusCode).toBe(200);
+    expect(bootstrapResponse.json()).not.toHaveProperty("redemptions");
+
+    const fulfilResponse = await ctx.app.inject({
+      method: "POST",
+      url: `/api/shop-redemptions/${personalRedemption.id}/status`,
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        status: "FULFILLED",
+      },
+    });
+    expect(fulfilResponse.statusCode).toBe(200);
+    expect(fulfilResponse.json()).toMatchObject({
+      id: personalRedemption.id,
+      status: "FULFILLED",
+    });
+
+    const cancelResponse = await ctx.app.inject({
+      method: "POST",
+      url: `/api/shop-redemptions/${groupRedemption.id}/status`,
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        status: "CANCELED",
+      },
+    });
+    expect(cancelResponse.statusCode).toBe(200);
+    expect(cancelResponse.json()).toMatchObject({
+      id: groupRedemption.id,
+      status: "CANCELED",
+    });
+  });
+
   it("ignores approvals from members who have left the group", async () => {
     const groupAlphaResponse = await ctx.app.inject({
       method: "POST",
