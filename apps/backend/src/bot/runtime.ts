@@ -11,6 +11,7 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
+  type AutocompleteInteraction,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type GuildTextBasedChannel,
@@ -33,6 +34,7 @@ type GroupLeaderboardEntry = Awaited<ReturnType<AppServices["economyService"]["g
 type GuildConfig = Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>;
 type ActiveAssignment = Awaited<ReturnType<AppServices["assignmentService"]["listActive"]>>[number];
 type CurrencyLeaderboardEntry = Awaited<ReturnType<AppServices["participantService"]["getCurrencyLeaderboard"]>>[number];
+type ShopListItem = Awaited<ReturnType<AppServices["shopService"]["list"]>>[number];
 type GuildMemberCollection = Awaited<
   ReturnType<NonNullable<ChatInputCommandInteraction["guild"]>["members"]["fetch"]>
 >;
@@ -55,11 +57,18 @@ function isDiscordSnowflake(value: string | null | undefined): value is string {
   return typeof value === "string" && DISCORD_SNOWFLAKE_PATTERN.test(value);
 }
 
-const MAX_LEDGER_LINE_LENGTH = 160;
+const LEDGER_PAGE_SIZE = 10;
+const LEDGER_EMBED_COLOUR = 0x8b5cf6;
+const LEDGER_DESCRIPTION_MAX = 300;
+const LEDGER_FIELD_VALUE_MAX = 1024;
 const LEADERBOARD_EMBED_LIMIT = 10;
 const LEADERBOARD_FEATURED_COUNT = 4;
 const GROUP_LEADERBOARD_COLOUR = 0xf59e0b;
 const FORBES_EMBED_COLOUR = 0x38bdf8;
+const STORE_EMBED_COLOUR = 0x10b981;
+const STORE_ITEMS_PER_SECTION = 15;
+const AUTOCOMPLETE_CHOICE_LIMIT = 25;
+const AUTOCOMPLETE_CHOICE_NAME_MAX = 100;
 const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
 
 function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: string) {
@@ -282,6 +291,15 @@ export class BotRuntime {
 
     this.client.on("interactionCreate", async (interaction) => {
       if (interaction.guildId !== this.env.GUILD_ID) {
+        return;
+      }
+
+      if (interaction.isAutocomplete()) {
+        try {
+          await this.handleAutocomplete(interaction);
+        } catch (error) {
+          console.error("Autocomplete handling failed", error);
+        }
         return;
       }
 
@@ -952,6 +970,51 @@ export class BotRuntime {
       .setFooter({ text: "Server display names are shown when Discord can resolve them." });
   }
 
+  private formatStoreLine(item: ShopListItem, priceLabel: string) {
+    const emoji = item.emoji ? `${item.emoji} ` : "";
+    const parts = [`${emoji}**${item.name}**`, priceLabel];
+    if (item.stock !== null) {
+      parts.push(item.stock > 0 ? `${item.stock} left` : "sold out");
+    }
+    return `• ${parts.join(" · ")}`;
+  }
+
+  private buildStoreEmbed(items: ShopListItem[], config: GuildConfig) {
+    const enabled = items.filter((item) => item.enabled);
+    const personalItems = enabled
+      .filter((item) => item.audience === "INDIVIDUAL")
+      .slice(0, STORE_ITEMS_PER_SECTION);
+    const groupItems = enabled
+      .filter((item) => item.audience === "GROUP")
+      .slice(0, STORE_ITEMS_PER_SECTION);
+
+    const fields: { name: string; value: string; inline: boolean }[] = [];
+    if (personalItems.length > 0) {
+      const value = personalItems
+        .map((item) => this.formatStoreLine(item, this.formatCurrencyAmount(item.cost.toString(), config)))
+        .join("\n");
+      fields.push({ name: `Personal items — spend ${config.currencyName}`, value, inline: false });
+    }
+    if (groupItems.length > 0) {
+      const value = groupItems
+        .map((item) => this.formatStoreLine(item, this.formatPointsAmount(item.cost.toString(), config)))
+        .join("\n");
+      fields.push({ name: `Group items — spend shared ${config.pointsName}`, value, inline: false });
+    }
+    fields.push({ name: "Items available", value: `${enabled.length}`, inline: true });
+
+    return new EmbedBuilder()
+      .setColor(STORE_EMBED_COLOUR)
+      .setTitle("Store")
+      .setDescription(
+        `Browse items buyable with ${config.currencyName} or shared ${config.pointsName}. Pick an item by name with /buyforme or /buyforgroup.`,
+      )
+      .addFields(fields)
+      .setFooter({
+        text: `/buyforme spends your ${config.currencyName} · /buyforgroup spends shared ${config.pointsName} · /donate converts between them.`,
+      });
+  }
+
   private async resolveActiveParticipant(params: {
     discordUserId: string;
     discordUsername?: string;
@@ -1280,6 +1343,41 @@ export class BotRuntime {
     }
   }
 
+  private async handleAutocomplete(interaction: AutocompleteInteraction) {
+    const { commandName } = interaction;
+    if (commandName !== "buyforme" && commandName !== "buyforgroup") {
+      return;
+    }
+    const focused = interaction.options.getFocused(true);
+    if (focused.name !== "item_id") {
+      await interaction.respond([]);
+      return;
+    }
+    const audience = commandName === "buyforgroup" ? "GROUP" : "INDIVIDUAL";
+    const [config, items] = await Promise.all([
+      this.services.configService.getOrCreate(this.env.GUILD_ID),
+      this.services.shopService.list(this.env.GUILD_ID),
+    ]);
+    const query = focused.value.trim().toLowerCase();
+    const matches = items
+      .filter((item) => item.enabled && item.audience === audience)
+      .filter((item) => (query.length === 0 ? true : item.name.toLowerCase().includes(query)))
+      .slice(0, AUTOCOMPLETE_CHOICE_LIMIT)
+      .map((item) => {
+        const priceLabel =
+          audience === "GROUP"
+            ? this.formatPointsAmount(item.cost.toString(), config)
+            : this.formatCurrencyAmount(item.cost.toString(), config);
+        const label = `${item.name} · ${priceLabel}`;
+        const name =
+          label.length > AUTOCOMPLETE_CHOICE_NAME_MAX
+            ? `${label.slice(0, AUTOCOMPLETE_CHOICE_NAME_MAX - 1)}…`
+            : label;
+        return { name, value: item.id };
+      });
+    await interaction.respond(matches);
+  }
+
   private async handleCommand(interaction: ChatInputCommandInteraction) {
     if (interaction.commandName === "leaderboard") {
       await interaction.deferReply();
@@ -1340,10 +1438,9 @@ export class BotRuntime {
       case "ledger": {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const page = interaction.options.getInteger("page") ?? 1;
-        const limit = 10;
-        const offset = (page - 1) * limit;
+        const offset = (page - 1) * LEDGER_PAGE_SIZE;
         const entries = await this.services.economyService.getLedger(this.env.GUILD_ID, {
-          limit,
+          limit: LEDGER_PAGE_SIZE,
           offset,
         });
 
@@ -1357,9 +1454,7 @@ export class BotRuntime {
           return;
         }
 
-        const content = this.formatLedgerResponse(entries, config, page, offset);
-
-        await interaction.reply({ content });
+        await interaction.reply({ embeds: [this.buildLedgerEmbed(entries, config, page, offset)] });
         return;
       }
       case "transfer": {
@@ -1619,26 +1714,15 @@ export class BotRuntime {
         return;
       }
       case "store": {
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-        const items = await this.services.shopService.list(this.env.GUILD_ID);
-        const enabledItems = items.filter((item) => item.enabled).slice(0, 20);
-        const personalLines = enabledItems
-          .filter((item) => item.audience === "INDIVIDUAL")
-          .map((item) => `${item.id}: ${item.emoji} ${item.name} (${this.formatCurrencyAmount(item.cost.toString(), config)})`);
-        const groupLines = enabledItems
-          .filter((item) => item.audience === "GROUP")
-          .map((item) => `${item.id}: ${item.emoji} ${item.name} (${this.formatPointsAmount(item.cost.toString(), config)})`);
-        const sections = [
-          personalLines.length > 0 ? `Personal items:\n${personalLines.join("\n")}` : null,
-          groupLines.length > 0 ? `Group items:\n${groupLines.join("\n")}` : null,
-        ].filter((value): value is string => value !== null);
-        await interaction.reply({
-          content:
-            sections.length > 0
-              ? `${sections.join("\n\n")}\nUse /buyforme for personal wallet purchases, /buyforgroup for shared ${config.pointsName} purchases, and /donate to convert ${config.currencyName} into ${config.pointsName}.`
-              : "Store is empty.",
-          ephemeral: true,
-        });
+        const [config, items] = await Promise.all([
+          this.services.configService.getOrCreate(this.env.GUILD_ID),
+          this.services.shopService.list(this.env.GUILD_ID),
+        ]);
+        if (!items.some((item) => item.enabled)) {
+          await interaction.reply({ content: "Store is empty.", ephemeral: true });
+          return;
+        }
+        await interaction.reply({ embeds: [this.buildStoreEmbed(items, config)], ephemeral: true });
         return;
       }
       case "buyforme":
@@ -2038,40 +2122,79 @@ export class BotRuntime {
     }
   }
 
-  private formatLedgerResponse(
-    entries: CommandLedgerEntry[],
-    config: GuildConfig,
-    page: number,
-    offset: number,
-  ) {
-    return [
-      `Recent transactions, page ${page}:`,
-      ...entries.map((entry, index) => this.formatLedgerLine(entry, config, offset + index + 1)),
-      "Use /ledger with page:2, page:3, and so on to go back further.",
-    ].join("\n");
+  private static readonly LEDGER_ENTRY_LABELS: Record<string, { emoji: string; label: string }> = {
+    MESSAGE_REWARD: { emoji: "💬", label: "Message reward" },
+    MANUAL_AWARD: { emoji: "🎁", label: "Award" },
+    MANUAL_DEDUCT: { emoji: "📉", label: "Deduction" },
+    CORRECTION: { emoji: "🛠️", label: "Correction" },
+    TRANSFER: { emoji: "🔀", label: "Transfer" },
+    DONATION: { emoji: "🎗️", label: "Donation" },
+    SHOP_REDEMPTION: { emoji: "🛍️", label: "Shop redemption" },
+    ADJUSTMENT: { emoji: "🧮", label: "Adjustment" },
+    SUBMISSION_REWARD: { emoji: "📝", label: "Submission reward" },
+    BET_WIN: { emoji: "💰", label: "Bet win" },
+    BET_LOSS: { emoji: "💸", label: "Bet loss" },
+  };
+
+  private formatLedgerEntryType(type: string) {
+    const mapping = BotRuntime.LEDGER_ENTRY_LABELS[type];
+    if (mapping) {
+      return `${mapping.emoji} ${mapping.label}`;
+    }
+    const pretty = type
+      .toLowerCase()
+      .split("_")
+      .map((segment) => (segment.length === 0 ? segment : segment[0]!.toUpperCase() + segment.slice(1)))
+      .join(" ");
+    return `• ${pretty}`;
   }
 
-  private formatLedgerLine(
+  private formatLedgerSplitLine(
+    split: CommandLedgerEntry["splits"][number],
+    config: GuildConfig,
+  ) {
+    const deltas = [
+      split.pointsDelta === 0 ? null : this.formatSignedPointsAmount(split.pointsDelta, config),
+      split.currencyDelta === 0 ? null : this.formatSignedCurrencyAmount(split.currencyDelta, config),
+    ].filter((value): value is string => value !== null);
+    const amount = deltas.length > 0 ? deltas.join(" / ") : "no change";
+    return `**${split.group.displayName}** ${amount}`;
+  }
+
+  private buildLedgerEntryField(
     entry: CommandLedgerEntry,
     config: GuildConfig,
     index: number,
   ) {
     const timestamp = Math.floor(new Date(entry.createdAt).getTime() / 1000);
-    const splitSummary = entry.splits
-      .map((split) => {
-        const deltas = [
-          split.pointsDelta === 0 ? null : this.formatSignedPointsAmount(split.pointsDelta, config),
-          split.currencyDelta === 0 ? null : this.formatSignedCurrencyAmount(split.currencyDelta, config),
-        ].filter((value): value is string => value !== null);
+    const name = `#${index} · ${this.formatLedgerEntryType(entry.type)}`;
+    const splitLines = entry.splits.map((split) => this.formatLedgerSplitLine(split, config));
+    const lines = [`<t:${timestamp}:R>`, ...splitLines];
+    const description = entry.description?.trim();
+    if (description) {
+      lines.push(`> ${this.truncateText(description, LEDGER_DESCRIPTION_MAX)}`);
+    }
+    const value = this.truncateText(lines.join("\n"), LEDGER_FIELD_VALUE_MAX);
+    return { name, value, inline: false };
+  }
 
-        return `${split.group.displayName} ${deltas.join(" / ")}`;
-      })
-      .join("; ");
-
-    return this.truncateText(
-      `${index}. <t:${timestamp}:g> · ${entry.type} · ${splitSummary} · ${entry.description}`,
-      MAX_LEDGER_LINE_LENGTH,
+  private buildLedgerEmbed(
+    entries: CommandLedgerEntry[],
+    config: GuildConfig,
+    page: number,
+    offset: number,
+  ) {
+    const fields = entries.map((entry, index) =>
+      this.buildLedgerEntryField(entry, config, offset + index + 1),
     );
+    const firstIndex = offset + 1;
+    const lastIndex = offset + entries.length;
+    return new EmbedBuilder()
+      .setColor(LEDGER_EMBED_COLOUR)
+      .setTitle("Transaction ledger")
+      .setDescription(`Page ${page} · showing entries ${firstIndex}–${lastIndex}.`)
+      .addFields(fields)
+      .setFooter({ text: "Use /ledger page:N to browse further back." });
   }
 
   private formatSignedNumber(value: number) {
@@ -2144,12 +2267,24 @@ export class BotRuntime {
       new SlashCommandBuilder()
         .setName("buyforme")
         .setDescription("Buy a shop item for yourself.")
-        .addStringOption((option) => option.setName("item_id").setDescription("Shop item id").setRequired(true))
+        .addStringOption((option) =>
+          option
+            .setName("item_id")
+            .setDescription("Item to buy — start typing to search by name")
+            .setRequired(true)
+            .setAutocomplete(true),
+        )
         .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
       new SlashCommandBuilder()
         .setName("buyforgroup")
         .setDescription("Start a group purchase request for a shop item.")
-        .addStringOption((option) => option.setName("item_id").setDescription("Shop item id").setRequired(true))
+        .addStringOption((option) =>
+          option
+            .setName("item_id")
+            .setDescription("Item to buy — start typing to search by name")
+            .setRequired(true)
+            .setAutocomplete(true),
+        )
         .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
       new SlashCommandBuilder()
         .setName("approve_purchase")
