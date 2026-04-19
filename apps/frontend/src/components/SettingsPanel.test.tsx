@@ -21,6 +21,7 @@ const baseSettings: Settings = {
   commandLogChannelId: null,
   redemptionChannelId: null,
   listingChannelId: null,
+  announcementsChannelId: null,
   betWinChance: 50,
 };
 

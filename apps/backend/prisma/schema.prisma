@@ -78,6 +78,8 @@ model GuildConfig {
   commandLogChannelId          String?
   redemptionChannelId          String?
   listingChannelId             String?
+  announcementsChannelId       String?
+  lastAnnouncedVersion         String?
   betWinChance                 Int                   @default(50)
   createdAt                    DateTime              @default(now())
   updatedAt                    DateTime              @updatedAt

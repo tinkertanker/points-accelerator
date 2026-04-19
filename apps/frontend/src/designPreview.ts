@@ -132,6 +132,7 @@ function createInitialBootstrap(): BootstrapPayload {
       commandLogChannelId: "ch-log",
       redemptionChannelId: "ch-redeem",
       listingChannelId: "ch-listings",
+      announcementsChannelId: "ch-announce",
       betWinChance: 50,
     },
     capabilities: [

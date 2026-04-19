@@ -15,6 +15,7 @@ export type Settings = {
   commandLogChannelId: string | null;
   redemptionChannelId: string | null;
   listingChannelId: string | null;
+  announcementsChannelId: string | null;
   betWinChance: number;
 };
 

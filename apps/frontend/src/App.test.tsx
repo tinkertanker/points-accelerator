@@ -97,6 +97,7 @@ const bootstrapPayload = {
     commandLogChannelId: null,
     redemptionChannelId: null,
     listingChannelId: null,
+    announcementsChannelId: null,
     betWinChance: 50,
   },
   capabilities: [

@@ -19,6 +19,7 @@ export type GuildConfigUpdateInput = {
   commandLogChannelId?: string | null;
   redemptionChannelId?: string | null;
   listingChannelId?: string | null;
+  announcementsChannelId?: string | null;
   betWinChance?: number;
 };
 
@@ -62,8 +63,16 @@ export class ConfigService {
         commandLogChannelId: input.commandLogChannelId,
         redemptionChannelId: input.redemptionChannelId,
         listingChannelId: input.listingChannelId,
+        announcementsChannelId: input.announcementsChannelId,
         betWinChance: input.betWinChance,
       },
+    });
+  }
+
+  public async markAnnounced(guildId: string, version: string) {
+    await this.prisma.guildConfig.update({
+      where: { guildId },
+      data: { lastAnnouncedVersion: version },
     });
   }
 }
