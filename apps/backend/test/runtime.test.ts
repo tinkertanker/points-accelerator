@@ -155,7 +155,7 @@ describe("bot runtime", () => {
     );
   });
 
-  it("shows the full shop item id in /store output", async () => {
+  it("renders /store as an embed without exposing raw shop item ids", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.shopService.list.mockResolvedValue([
       {
@@ -163,8 +163,19 @@ describe("bot runtime", () => {
         enabled: true,
         name: "Bubble Tea",
         audience: "INDIVIDUAL",
+        stock: null,
         cost: {
           toString: () => "3",
+        },
+      },
+      {
+        id: "group-item-0987654321",
+        enabled: true,
+        name: "Pizza Party",
+        audience: "GROUP",
+        stock: null,
+        cost: {
+          toString: () => "500",
         },
       },
     ]);
@@ -185,16 +196,18 @@ describe("bot runtime", () => {
       },
     });
 
-    expect(reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("shop-item-1234567890"),
-      }),
-    );
-    expect(reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("Personal items"),
-      }),
-    );
+    const call = reply.mock.calls[0][0];
+    expect(call.ephemeral).toBe(true);
+    expect(call.embeds).toHaveLength(1);
+    const embed = call.embeds[0].data;
+    expect(embed.title).toBe("Store");
+    const rendered = JSON.stringify(embed);
+    expect(rendered).not.toContain("shop-item-1234567890");
+    expect(rendered).not.toContain("group-item-0987654321");
+    expect(rendered).toContain("Bubble Tea");
+    expect(rendered).toContain("Pizza Party");
+    expect(rendered).toContain("Personal items");
+    expect(rendered).toContain("Group items");
   });
 
   it("shows a paged ledger summary in Discord", async () => {

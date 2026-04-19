@@ -8,6 +8,7 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
+  type AutocompleteInteraction,
   type ChatInputCommandInteraction,
   type GuildTextBasedChannel,
   type GuildMember,
@@ -29,6 +30,7 @@ type GroupLeaderboardEntry = Awaited<ReturnType<AppServices["economyService"]["g
 type GuildConfig = Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>;
 type ActiveAssignment = Awaited<ReturnType<AppServices["assignmentService"]["listActive"]>>[number];
 type CurrencyLeaderboardEntry = Awaited<ReturnType<AppServices["participantService"]["getCurrencyLeaderboard"]>>[number];
+type ShopListItem = Awaited<ReturnType<AppServices["shopService"]["list"]>>[number];
 type GuildMemberCollection = Awaited<
   ReturnType<NonNullable<ChatInputCommandInteraction["guild"]>["members"]["fetch"]>
 >;
@@ -50,6 +52,10 @@ const LEADERBOARD_EMBED_LIMIT = 10;
 const LEADERBOARD_FEATURED_COUNT = 4;
 const GROUP_LEADERBOARD_COLOUR = 0xf59e0b;
 const FORBES_EMBED_COLOUR = 0x38bdf8;
+const STORE_EMBED_COLOUR = 0x10b981;
+const STORE_ITEMS_PER_SECTION = 15;
+const AUTOCOMPLETE_CHOICE_LIMIT = 25;
+const AUTOCOMPLETE_CHOICE_NAME_MAX = 100;
 const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
 
 function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: string) {
@@ -266,7 +272,20 @@ export class BotRuntime {
     });
 
     this.client.on("interactionCreate", async (interaction) => {
-      if (!interaction.isChatInputCommand() || interaction.guildId !== this.env.GUILD_ID) {
+      if (interaction.guildId !== this.env.GUILD_ID) {
+        return;
+      }
+
+      if (interaction.isAutocomplete()) {
+        try {
+          await this.handleAutocomplete(interaction);
+        } catch (error) {
+          console.error("Autocomplete handling failed", error);
+        }
+        return;
+      }
+
+      if (!interaction.isChatInputCommand()) {
         return;
       }
 
@@ -687,6 +706,50 @@ export class BotRuntime {
       .setFooter({ text: "Server display names are shown when Discord can resolve them." });
   }
 
+  private formatStoreLine(item: ShopListItem, priceLabel: string) {
+    const parts = [`**${item.name}**`, priceLabel];
+    if (item.stock !== null) {
+      parts.push(item.stock > 0 ? `${item.stock} left` : "sold out");
+    }
+    return `• ${parts.join(" · ")}`;
+  }
+
+  private buildStoreEmbed(items: ShopListItem[], config: GuildConfig) {
+    const enabled = items.filter((item) => item.enabled);
+    const personalItems = enabled
+      .filter((item) => item.audience === "INDIVIDUAL")
+      .slice(0, STORE_ITEMS_PER_SECTION);
+    const groupItems = enabled
+      .filter((item) => item.audience === "GROUP")
+      .slice(0, STORE_ITEMS_PER_SECTION);
+
+    const fields: { name: string; value: string; inline: boolean }[] = [];
+    if (personalItems.length > 0) {
+      const value = personalItems
+        .map((item) => this.formatStoreLine(item, this.formatCurrencyAmount(item.cost.toString(), config)))
+        .join("\n");
+      fields.push({ name: `Personal items — spend ${config.currencyName}`, value, inline: false });
+    }
+    if (groupItems.length > 0) {
+      const value = groupItems
+        .map((item) => this.formatStoreLine(item, this.formatPointsAmount(item.cost.toString(), config)))
+        .join("\n");
+      fields.push({ name: `Group items — spend shared ${config.pointsName}`, value, inline: false });
+    }
+    fields.push({ name: "Items available", value: `${enabled.length}`, inline: true });
+
+    return new EmbedBuilder()
+      .setColor(STORE_EMBED_COLOUR)
+      .setTitle("Store")
+      .setDescription(
+        `Browse items buyable with ${config.currencyName} or shared ${config.pointsName}. Pick an item by name with /buyforme or /buyforgroup.`,
+      )
+      .addFields(fields)
+      .setFooter({
+        text: `/buyforme spends your ${config.currencyName} · /buyforgroup spends shared ${config.pointsName} · /donate converts between them.`,
+      });
+  }
+
   private async resolveActiveParticipant(params: {
     discordUserId: string;
     discordUsername?: string;
@@ -1013,6 +1076,41 @@ export class BotRuntime {
       const text = error instanceof AppError ? error.message : "Something went wrong with your submission.";
       await message.reply(text).catch(() => {});
     }
+  }
+
+  private async handleAutocomplete(interaction: AutocompleteInteraction) {
+    const { commandName } = interaction;
+    if (commandName !== "buyforme" && commandName !== "buyforgroup") {
+      return;
+    }
+    const focused = interaction.options.getFocused(true);
+    if (focused.name !== "item_id") {
+      await interaction.respond([]);
+      return;
+    }
+    const audience = commandName === "buyforgroup" ? "GROUP" : "INDIVIDUAL";
+    const [config, items] = await Promise.all([
+      this.services.configService.getOrCreate(this.env.GUILD_ID),
+      this.services.shopService.list(this.env.GUILD_ID),
+    ]);
+    const query = focused.value.trim().toLowerCase();
+    const matches = items
+      .filter((item) => item.enabled && item.audience === audience)
+      .filter((item) => (query.length === 0 ? true : item.name.toLowerCase().includes(query)))
+      .slice(0, AUTOCOMPLETE_CHOICE_LIMIT)
+      .map((item) => {
+        const priceLabel =
+          audience === "GROUP"
+            ? this.formatPointsAmount(item.cost.toString(), config)
+            : this.formatCurrencyAmount(item.cost.toString(), config);
+        const label = `${item.name} · ${priceLabel}`;
+        const name =
+          label.length > AUTOCOMPLETE_CHOICE_NAME_MAX
+            ? `${label.slice(0, AUTOCOMPLETE_CHOICE_NAME_MAX - 1)}…`
+            : label;
+        return { name, value: item.id };
+      });
+    await interaction.respond(matches);
   }
 
   private async handleCommand(interaction: ChatInputCommandInteraction) {
@@ -1354,26 +1452,15 @@ export class BotRuntime {
         return;
       }
       case "store": {
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-        const items = await this.services.shopService.list(this.env.GUILD_ID);
-        const enabledItems = items.filter((item) => item.enabled).slice(0, 20);
-        const personalLines = enabledItems
-          .filter((item) => item.audience === "INDIVIDUAL")
-          .map((item) => `${item.id}: ${item.name} (${this.formatCurrencyAmount(item.cost.toString(), config)})`);
-        const groupLines = enabledItems
-          .filter((item) => item.audience === "GROUP")
-          .map((item) => `${item.id}: ${item.name} (${this.formatPointsAmount(item.cost.toString(), config)})`);
-        const sections = [
-          personalLines.length > 0 ? `Personal items:\n${personalLines.join("\n")}` : null,
-          groupLines.length > 0 ? `Group items:\n${groupLines.join("\n")}` : null,
-        ].filter((value): value is string => value !== null);
-        await interaction.reply({
-          content:
-            sections.length > 0
-              ? `${sections.join("\n\n")}\nUse /buyforme for personal wallet purchases, /buyforgroup for shared ${config.pointsName} purchases, and /donate to convert ${config.currencyName} into ${config.pointsName}.`
-              : "Store is empty.",
-          ephemeral: true,
-        });
+        const [config, items] = await Promise.all([
+          this.services.configService.getOrCreate(this.env.GUILD_ID),
+          this.services.shopService.list(this.env.GUILD_ID),
+        ]);
+        if (!items.some((item) => item.enabled)) {
+          await interaction.reply({ content: "Store is empty.", ephemeral: true });
+          return;
+        }
+        await interaction.reply({ embeds: [this.buildStoreEmbed(items, config)], ephemeral: true });
         return;
       }
       case "buyforme":
@@ -1817,12 +1904,24 @@ export class BotRuntime {
       new SlashCommandBuilder()
         .setName("buyforme")
         .setDescription("Buy a shop item for yourself.")
-        .addStringOption((option) => option.setName("item_id").setDescription("Shop item id").setRequired(true))
+        .addStringOption((option) =>
+          option
+            .setName("item_id")
+            .setDescription("Item to buy — start typing to search by name")
+            .setRequired(true)
+            .setAutocomplete(true),
+        )
         .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
       new SlashCommandBuilder()
         .setName("buyforgroup")
         .setDescription("Start a group purchase request for a shop item.")
-        .addStringOption((option) => option.setName("item_id").setDescription("Shop item id").setRequired(true))
+        .addStringOption((option) =>
+          option
+            .setName("item_id")
+            .setDescription("Item to buy — start typing to search by name")
+            .setRequired(true)
+            .setAutocomplete(true),
+        )
         .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
       new SlashCommandBuilder()
         .setName("approve_purchase")
