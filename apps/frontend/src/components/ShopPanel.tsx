@@ -104,14 +104,6 @@ export default function ShopPanel({
     return Array.from(byUserId.values()).sort((left, right) => left.username.localeCompare(right.username));
   }, [members, participants]);
 
-  const resolveOwnerUsername = (ownerUserId: string | null) => {
-    if (!ownerUserId) {
-      return null;
-    }
-
-    return ownerSuggestions.find((suggestion) => suggestion.userId === ownerUserId)?.username ?? null;
-  };
-
   const handleOwnerInput = (item: ShopItemDraft, rawValue: string): ShopItemDraft => {
     const value = rawValue.trim();
     if (!value) {

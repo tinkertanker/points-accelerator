@@ -218,6 +218,7 @@ export class ShopService {
         return {
           redemption,
           executed: redemption.status === "PENDING",
+          justExecuted: false,
           approvalsCount: redemption.approvals.length,
           threshold: redemption.approvalThreshold ?? 1,
         };
@@ -295,6 +296,7 @@ export class ShopService {
             approvals: eligibleApprovals,
           },
           executed: false,
+          justExecuted: false,
           approvalsCount: eligibleApprovals.length,
           threshold,
         };
@@ -310,7 +312,10 @@ export class ShopService {
         actorUsername: params.approvedByUsername,
       });
 
-      return executedPurchase;
+      return {
+        ...executedPurchase,
+        justExecuted: executedPurchase.executed,
+      };
     });
 
     await this.auditService.record({
@@ -467,52 +472,50 @@ export class ShopService {
     const { tx, redemption } = params;
     const totalCost = decimalToNumber(redemption.totalCost);
 
-    if (totalCost <= 0) {
-      return;
-    }
+    if (totalCost > 0) {
+      if (redemption.purchaseMode === "INDIVIDUAL") {
+        if (!redemption.requestedByParticipantId) {
+          throw new AppError("Cannot refund: original participant is missing.", 409);
+        }
 
-    if (redemption.purchaseMode === "INDIVIDUAL") {
-      if (!redemption.requestedByParticipantId) {
-        throw new AppError("Cannot refund: original participant is missing.", 409);
+        await this.participantCurrencyService.recordEntry({
+          guildId: params.guildId,
+          actor: {
+            userId: params.actorUserId,
+            username: params.actorUsername,
+            roleIds: [],
+          },
+          type: "CORRECTION",
+          description: `Refund: ${redemption.shopItem.name} (cancelled redemption ${redemption.id})`,
+          splits: [{ participantId: redemption.requestedByParticipantId, currencyDelta: totalCost }],
+          systemAction: true,
+          executor: tx,
+          externalRef: redemption.id,
+          auditAction: "shop.redemption.refunded",
+          auditPayload: {
+            redemptionId: redemption.id,
+            participantId: redemption.requestedByParticipantId,
+            amount: totalCost,
+          },
+        });
+      } else {
+        await this.economyService.awardGroups({
+          guildId: params.guildId,
+          actor: {
+            userId: params.actorUserId,
+            username: params.actorUsername,
+            roleIds: [],
+          },
+          type: "CORRECTION",
+          description: `Refund: group purchase ${redemption.shopItem.name} (cancelled redemption ${redemption.id})`,
+          targetGroupIds: [redemption.groupId],
+          pointsDelta: totalCost,
+          currencyDelta: 0,
+          systemAction: true,
+          executor: tx,
+          externalRef: redemption.id,
+        });
       }
-
-      await this.participantCurrencyService.recordEntry({
-        guildId: params.guildId,
-        actor: {
-          userId: params.actorUserId,
-          username: params.actorUsername,
-          roleIds: [],
-        },
-        type: "CORRECTION",
-        description: `Refund: ${redemption.shopItem.name} (cancelled redemption ${redemption.id})`,
-        splits: [{ participantId: redemption.requestedByParticipantId, currencyDelta: totalCost }],
-        systemAction: true,
-        executor: tx,
-        externalRef: redemption.id,
-        auditAction: "shop.redemption.refunded",
-        auditPayload: {
-          redemptionId: redemption.id,
-          participantId: redemption.requestedByParticipantId,
-          amount: totalCost,
-        },
-      });
-    } else {
-      await this.economyService.awardGroups({
-        guildId: params.guildId,
-        actor: {
-          userId: params.actorUserId,
-          username: params.actorUsername,
-          roleIds: [],
-        },
-        type: "CORRECTION",
-        description: `Refund: group purchase ${redemption.shopItem.name} (cancelled redemption ${redemption.id})`,
-        targetGroupIds: [redemption.groupId],
-        pointsDelta: totalCost,
-        currencyDelta: 0,
-        systemAction: true,
-        executor: tx,
-        externalRef: redemption.id,
-      });
     }
 
     if (redemption.shopItem.stock !== null) {

@@ -527,13 +527,15 @@ export class BotRuntime {
     }
 
     const ownerMention = params.ownerUserId ? `<@${params.ownerUserId}>` : null;
-    const mentions = [ownerMention, params.buyerMention].filter(Boolean).join(" ");
-    const scopeLabel =
-      params.audience === "GROUP" ? `${params.groupName} (group purchase)` : params.buyerMention;
+    const subject =
+      params.audience === "GROUP"
+        ? `${params.buyerMention} (on behalf of **${params.groupName}**)`
+        : params.buyerMention;
     const fulfilmentLine = params.fulfillmentInstructions
       ? `\nFulfilment notes: ${params.fulfillmentInstructions}`
       : "";
-    const content = `${mentions} ${scopeLabel} purchased ${params.shopItemEmoji} **${params.shopItemName}**${
+    const header = ownerMention ? `${ownerMention} heads up — ` : "";
+    const content = `${header}${subject} purchased ${params.shopItemEmoji} **${params.shopItemName}**${
       params.quantity > 1 ? ` x${params.quantity}` : ""
     }.\nRedemption ID: \`${params.redemptionId}\`${fulfilmentLine}`;
 
@@ -574,12 +576,20 @@ export class BotRuntime {
       return;
     }
 
-    const member = interaction.member && "roles" in interaction.member ? (interaction.member as GuildMember) : null;
-    const roleIds = member ? Array.from(member.roles.cache.keys()) : [];
+    const guildMember = await interaction.guild?.members
+      .fetch(interaction.user.id)
+      .catch(() => null) ?? null;
+    const rawMember = interaction.member;
+    const apiRoleIds =
+      rawMember && "roles" in rawMember && Array.isArray((rawMember as { roles: unknown }).roles)
+        ? ((rawMember as { roles: string[] }).roles)
+        : [];
+    const roleIds = guildMember ? Array.from(guildMember.roles.cache.keys()) : apiRoleIds;
     const isOwner = redemption.shopItem.ownerUserId === interaction.user.id;
-    const hasStaffPerms = member
-      ? member.permissions.has(PermissionFlagsBits.Administrator) ||
-        member.permissions.has(PermissionFlagsBits.ManageGuild)
+    const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
+    const hasStaffPerms = memberPermissions
+      ? memberPermissions.has(PermissionFlagsBits.Administrator) ||
+        memberPermissions.has(PermissionFlagsBits.ManageGuild)
       : false;
 
     let isStaff = hasStaffPerms;
@@ -1656,11 +1666,6 @@ export class BotRuntime {
           guild: interaction.guild,
         });
         const currentGroupMemberCount = syncedGroupMembers.count;
-        const existingRedemption = await this.services.shopService.getRedemption(
-          this.env.GUILD_ID,
-          purchaseId,
-        );
-        const previousStatus = existingRedemption?.status ?? null;
         const result = await this.services.shopService.approveGroupPurchase({
           guildId: this.env.GUILD_ID,
           redemptionId: purchaseId,
@@ -1677,8 +1682,7 @@ export class BotRuntime {
             ? ` ${result.blockingGroup} does not currently have enough ${config.pointsName}, so the request stays open until more are earned or donated.`
             : "";
 
-        const justFunded = previousStatus === "AWAITING_APPROVAL" && result.redemption.status === "PENDING";
-        if (justFunded) {
+        if (result.justExecuted) {
           const fulfilmentChannelId = config.redemptionChannelId ?? interaction.channelId;
           const fullRedemption = await this.services.shopService.getRedemption(
             this.env.GUILD_ID,

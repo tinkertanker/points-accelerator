@@ -603,7 +603,9 @@ export function createApp(params: {
         canManageAdminPages ? params.botRuntime?.getTextChannels() ?? [] : Promise.resolve([]),
         canManageMentorPages ? params.botRuntime?.getMembers() ?? [] : Promise.resolve([]),
         canManageMentorPages ? services.assignmentService.list(params.env.GUILD_ID) : Promise.resolve([]),
-        canManageAdminPages ? services.participantService.list(params.env.GUILD_ID) : Promise.resolve([]),
+        canManageAdminPages || canManageMentorPages
+          ? services.participantService.list(params.env.GUILD_ID)
+          : Promise.resolve([]),
         canManageMentorPages ? services.submissionService.list(params.env.GUILD_ID) : Promise.resolve([]),
       ]);
 
