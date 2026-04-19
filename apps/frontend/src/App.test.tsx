@@ -166,6 +166,7 @@ const fulfilmentPayload = [
       name: "Sticker pack",
       audience: "INDIVIDUAL" as const,
       fulfillmentInstructions: "Show this to staff.",
+      emoji: "💸",
       ownerUserId: null,
       ownerUsername: null,
     },

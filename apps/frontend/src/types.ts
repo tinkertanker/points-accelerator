@@ -63,6 +63,7 @@ export type ShopItem = {
   stock: number | null;
   enabled: boolean;
   fulfillmentInstructions: string | null;
+  emoji: string;
   ownerUserId: string | null;
   ownerUsername: string | null;
 };
@@ -90,6 +91,7 @@ export type ShopRedemption = {
     name: string;
     audience: "INDIVIDUAL" | "GROUP";
     fulfillmentInstructions: string | null;
+    emoji: string;
     ownerUserId: string | null;
     ownerUsername: string | null;
   };

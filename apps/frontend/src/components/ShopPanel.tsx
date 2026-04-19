@@ -196,6 +196,9 @@ export default function ShopPanel({
                     <th scope="col" className="col-audience">
                       Audience
                     </th>
+                    <th scope="col" className="col-emoji">
+                      Emoji
+                    </th>
                     <th scope="col" className="col-name">
                       Name
                     </th>
@@ -234,6 +237,15 @@ export default function ShopPanel({
                           <option value="GROUP">👥</option>
                           <option value="INDIVIDUAL">👤</option>
                         </select>
+                      </td>
+                      <td className="col-emoji">
+                        <input
+                          value={item.emoji}
+                          aria-label="Item emoji"
+                          maxLength={8}
+                          onChange={(event) => updateShopDraft(index, { ...item, emoji: event.target.value })}
+                          placeholder="💸"
+                        />
                       </td>
                       <td className="col-name">
                         <input
@@ -312,7 +324,9 @@ export default function ShopPanel({
             {sortedDrafts.map(({ item, index }) => (
               <article className="shop-card" key={`card-${item.id ?? "new"}-${index}`}>
                 <div className="shop-card__header">
-                  <h3>{item.name.trim() || "New shop item"}</h3>
+                  <h3>
+                    <span aria-hidden>{item.emoji}</span> {item.name.trim() || "New shop item"}
+                  </h3>
                   <span className="shop-card__audience">{AUDIENCE_LABELS[item.audience]}</span>
                 </div>
                 <div className="shop-card__grid">
@@ -331,6 +345,16 @@ export default function ShopPanel({
                       <option value="GROUP">👥</option>
                       <option value="INDIVIDUAL">👤</option>
                     </select>
+                  </label>
+                  <label className="shop-field">
+                    <span className="shop-field__label">Emoji</span>
+                    <input
+                      value={item.emoji}
+                      aria-label="Item emoji"
+                      maxLength={8}
+                      onChange={(event) => updateShopDraft(index, { ...item, emoji: event.target.value })}
+                      placeholder="💸"
+                    />
                   </label>
                   <label className="shop-field">
                     <span className="shop-field__label">Name</span>
@@ -418,6 +442,8 @@ export default function ShopPanel({
           <details className="capability-help">
             <summary>What do these shop columns mean?</summary>
             <dl>
+              <dt>Emoji</dt>
+              <dd>Shown next to the item name in the shop, redemption notices, and the fulfilment queue. Defaults to 💸.</dd>
               <dt>Name</dt>
               <dd>The item title shown in the shop and purchase flows.</dd>
               <dt>Description</dt>

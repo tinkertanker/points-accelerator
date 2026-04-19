@@ -14,6 +14,7 @@ const shopDrafts: ShopItemDraft[] = [
     stock: 10,
     enabled: true,
     fulfillmentInstructions: "Collect from the desk",
+    emoji: "🦓",
     ownerUserId: null,
     ownerUsername: null,
   },
@@ -26,6 +27,7 @@ const shopDrafts: ShopItemDraft[] = [
     stock: 3,
     enabled: true,
     fulfillmentInstructions: "Ask a mentor",
+    emoji: "🍎",
     ownerUserId: null,
     ownerUsername: null,
   },
@@ -38,6 +40,7 @@ const shopDrafts: ShopItemDraft[] = [
     stock: null,
     enabled: false,
     fulfillmentInstructions: null,
+    emoji: "💸",
     ownerUserId: null,
     ownerUsername: null,
   },
@@ -61,6 +64,7 @@ describe("ShopPanel", () => {
           stock: null,
           enabled: true,
           fulfillmentInstructions: "",
+          emoji: "💸",
           ownerUserId: null,
           ownerUsername: null,
         })}
@@ -72,6 +76,7 @@ describe("ShopPanel", () => {
     const headers = within(screen.getByRole("table")).getAllByRole("columnheader");
     expect(headers.map((header) => header.textContent?.trim())).toEqual([
       "Audience",
+      "Emoji",
       "Name",
       "Description",
       "Cost",
@@ -100,6 +105,7 @@ describe("ShopPanel", () => {
           stock: null,
           enabled: true,
           fulfillmentInstructions: "",
+          emoji: "💸",
           ownerUserId: null,
           ownerUsername: null,
         })}

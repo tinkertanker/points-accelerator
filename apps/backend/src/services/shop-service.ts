@@ -6,6 +6,8 @@ import type { AuditService } from "./audit-service.js";
 import type { EconomyService } from "./economy-service.js";
 import type { ParticipantCurrencyService } from "./participant-currency-service.js";
 
+export const DEFAULT_SHOP_ITEM_EMOJI = "💸";
+
 export type ShopItemInput = {
   id?: string;
   name: string;
@@ -15,6 +17,7 @@ export type ShopItemInput = {
   stock: number | null;
   enabled: boolean;
   fulfillmentInstructions?: string | null;
+  emoji?: string | null;
   ownerUserId?: string | null;
   ownerUsername?: string | null;
 };
@@ -42,6 +45,7 @@ type GroupPurchaseRedemption = ShopRedemption & {
     audience: ShopItemAudience;
     cost: Prisma.Decimal;
     fulfillmentInstructions: string | null;
+    emoji: string;
     ownerUserId: string | null;
     ownerUsername: string | null;
   };
@@ -105,6 +109,7 @@ export class ShopService {
   public async upsert(guildId: string, input: ShopItemInput) {
     const ownerUserId = input.ownerUserId?.trim() ? input.ownerUserId.trim() : null;
     const ownerUsername = input.ownerUsername?.trim() ? input.ownerUsername.trim() : null;
+    const emoji = input.emoji?.trim() ? input.emoji.trim() : DEFAULT_SHOP_ITEM_EMOJI;
 
     const item = input.id
       ? await this.prisma.shopItem.update({
@@ -117,6 +122,7 @@ export class ShopService {
             stock: input.stock,
             enabled: input.enabled,
             fulfillmentInstructions: input.fulfillmentInstructions ?? null,
+            emoji,
             ownerUserId,
             ownerUsername,
           },
@@ -131,6 +137,7 @@ export class ShopService {
             stock: input.stock,
             enabled: input.enabled,
             fulfillmentInstructions: input.fulfillmentInstructions ?? null,
+            emoji,
             ownerUserId,
             ownerUsername,
           },

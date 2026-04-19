@@ -79,6 +79,7 @@ const shopItemSchema = z.object({
   stock: z.number().int().nonnegative().nullable(),
   enabled: z.boolean(),
   fulfillmentInstructions: z.string().nullable().optional(),
+  emoji: z.string().nullable().optional(),
   ownerUserId: z.string().nullable().optional(),
   ownerUsername: z.string().nullable().optional(),
 });
@@ -432,6 +433,7 @@ export function createApp(params: {
         name: redemption.shopItem.name,
         audience: redemption.shopItem.audience,
         fulfillmentInstructions: redemption.shopItem.fulfillmentInstructions,
+        emoji: redemption.shopItem.emoji,
         ownerUserId: redemption.shopItem.ownerUserId,
         ownerUsername: redemption.shopItem.ownerUsername,
       },

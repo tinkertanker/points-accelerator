@@ -510,6 +510,7 @@ export class BotRuntime {
     buyerUserId: string;
     buyerMention: string;
     shopItemName: string;
+    shopItemEmoji: string;
     quantity: number;
     redemptionId: string;
     audience: "INDIVIDUAL" | "GROUP";
@@ -532,7 +533,7 @@ export class BotRuntime {
     const fulfilmentLine = params.fulfillmentInstructions
       ? `\nFulfilment notes: ${params.fulfillmentInstructions}`
       : "";
-    const content = `${mentions} ${scopeLabel} purchased **${params.shopItemName}**${
+    const content = `${mentions} ${scopeLabel} purchased ${params.shopItemEmoji} **${params.shopItemName}**${
       params.quantity > 1 ? ` x${params.quantity}` : ""
     }.\nRedemption ID: \`${params.redemptionId}\`${fulfilmentLine}`;
 
@@ -1546,10 +1547,10 @@ export class BotRuntime {
         const enabledItems = items.filter((item) => item.enabled).slice(0, 20);
         const personalLines = enabledItems
           .filter((item) => item.audience === "INDIVIDUAL")
-          .map((item) => `${item.id}: ${item.name} (${this.formatCurrencyAmount(item.cost.toString(), config)})`);
+          .map((item) => `${item.id}: ${item.emoji} ${item.name} (${this.formatCurrencyAmount(item.cost.toString(), config)})`);
         const groupLines = enabledItems
           .filter((item) => item.audience === "GROUP")
-          .map((item) => `${item.id}: ${item.name} (${this.formatPointsAmount(item.cost.toString(), config)})`);
+          .map((item) => `${item.id}: ${item.emoji} ${item.name} (${this.formatPointsAmount(item.cost.toString(), config)})`);
         const sections = [
           personalLines.length > 0 ? `Personal items:\n${personalLines.join("\n")}` : null,
           groupLines.length > 0 ? `Group items:\n${groupLines.join("\n")}` : null,
@@ -1599,7 +1600,7 @@ export class BotRuntime {
           const posted = announcementChannelId
             ? await this.postListing(
                 announcementChannelId,
-                `Group purchase request for **${redemption.shopItem.name}** x${redemption.quantity} by **${group.displayName}**.\nRequest ID: \`${redemption.id}\`\n${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded.\nApprove with \`/approve_purchase purchase_id:${redemption.id}\`.`,
+                `Group purchase request for ${redemption.shopItem.emoji} **${redemption.shopItem.name}** x${redemption.quantity} by **${group.displayName}**.\nRequest ID: \`${redemption.id}\`\n${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded.\nApprove with \`/approve_purchase purchase_id:${redemption.id}\`.`,
               )
             : null;
           if (posted) {
@@ -1622,6 +1623,7 @@ export class BotRuntime {
               buyerUserId: interaction.user.id,
               buyerMention: `<@${interaction.user.id}>`,
               shopItemName: redemption.shopItem.name,
+              shopItemEmoji: redemption.shopItem.emoji,
               quantity: redemption.quantity,
               redemptionId: redemption.id,
               audience: redemption.shopItem.audience,
@@ -1690,6 +1692,7 @@ export class BotRuntime {
               buyerUserId,
               buyerMention: `<@${buyerUserId}>`,
               shopItemName: fullRedemption.shopItem.name,
+              shopItemEmoji: fullRedemption.shopItem.emoji,
               quantity: fullRedemption.quantity,
               redemptionId: fullRedemption.id,
               audience: fullRedemption.shopItem.audience,
