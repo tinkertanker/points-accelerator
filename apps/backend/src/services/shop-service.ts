@@ -459,7 +459,12 @@ export class ShopService {
       });
     }
 
-    return result.redemption;
+    return {
+      redemption: result.redemption,
+      changed: result.changed,
+      previousStatus: result.previousStatus,
+      refunded: result.refunded,
+    };
   }
 
   private async refundRedemption(params: {

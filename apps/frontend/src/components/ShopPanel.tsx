@@ -120,7 +120,11 @@ export default function ShopPanel({
       return { ...item, ownerUserId: matchedByUserId.userId, ownerUsername: matchedByUserId.username };
     }
 
-    return { ...item, ownerUserId: value, ownerUsername: null };
+    if (/^\d{17,20}$/.test(value)) {
+      return { ...item, ownerUserId: value, ownerUsername: null };
+    }
+
+    return { ...item, ownerUserId: null, ownerUsername: value };
   };
 
   const updateShopDraft = (index: number, nextDraft: ShopItemDraft) => {

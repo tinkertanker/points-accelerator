@@ -80,7 +80,13 @@ const shopItemSchema = z.object({
   enabled: z.boolean(),
   fulfillmentInstructions: z.string().nullable().optional(),
   emoji: z.string().nullable().optional(),
-  ownerUserId: z.string().nullable().optional(),
+  ownerUserId: z
+    .string()
+    .nullable()
+    .optional()
+    .refine((value) => !value || /^\d{17,20}$/.test(value), {
+      message: "Owner must be a Discord user ID (17–20 digits)",
+    }),
   ownerUsername: z.string().nullable().optional(),
 });
 
@@ -710,7 +716,7 @@ export function createApp(params: {
     const payload = redemptionStatusUpdateSchema.parse(request.body);
     const session = await resolveDashboardSession(request);
     const { id } = request.params as { id: string };
-    const redemption = await services.shopService.updateRedemptionStatus({
+    const { redemption } = await services.shopService.updateRedemptionStatus({
       guildId: params.env.GUILD_ID,
       redemptionId: id,
       status: payload.status,

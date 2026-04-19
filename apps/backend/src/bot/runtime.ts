@@ -49,6 +49,12 @@ type AwardLikeCommandName =
   | "deductmember"
   | "deductmixed";
 
+const DISCORD_SNOWFLAKE_PATTERN = /^\d{17,20}$/;
+
+function isDiscordSnowflake(value: string | null | undefined): value is string {
+  return typeof value === "string" && DISCORD_SNOWFLAKE_PATTERN.test(value);
+}
+
 const MAX_LEDGER_LINE_LENGTH = 160;
 const LEADERBOARD_EMBED_LIMIT = 10;
 const LEADERBOARD_FEATURED_COUNT = 4;
@@ -526,7 +532,8 @@ export class BotRuntime {
       return null;
     }
 
-    const ownerMention = params.ownerUserId ? `<@${params.ownerUserId}>` : null;
+    const validOwnerId = isDiscordSnowflake(params.ownerUserId) ? params.ownerUserId : null;
+    const ownerMention = validOwnerId ? `<@${validOwnerId}>` : null;
     const subject =
       params.audience === "GROUP"
         ? `${params.buyerMention} (on behalf of **${params.groupName}**)`
@@ -539,13 +546,15 @@ export class BotRuntime {
       params.quantity > 1 ? ` x${params.quantity}` : ""
     }.\nRedemption ID: \`${params.redemptionId}\`${fulfilmentLine}`;
 
+    const mentionUsers = [params.buyerUserId, ...(validOwnerId ? [validOwnerId] : [])].filter(
+      isDiscordSnowflake,
+    );
+
     const sent = await (channel as GuildTextBasedChannel)
       .send({
         content,
         components: [this.buildRedemptionActionRow(params.redemptionId)],
-        allowedMentions: {
-          users: [params.buyerUserId, ...(params.ownerUserId ? [params.ownerUserId] : [])],
-        },
+        allowedMentions: { users: mentionUsers },
       })
       .catch((error: unknown) => {
         console.error("Failed to post redemption fulfilment notice", error);
@@ -612,13 +621,21 @@ export class BotRuntime {
     const nextStatus = action === "fulfil" ? "FULFILLED" : "CANCELED";
 
     try {
-      const updated = await this.services.shopService.updateRedemptionStatus({
+      const { redemption: updated, changed } = await this.services.shopService.updateRedemptionStatus({
         guildId: this.env.GUILD_ID,
         redemptionId,
         status: nextStatus,
         actorUserId: interaction.user.id,
         actorUsername: interaction.user.username,
       });
+
+      if (!changed) {
+        await interaction.followUp({
+          content: `Redemption \`${redemptionId}\` is already **${updated.status}**.`,
+          ephemeral: true,
+        });
+        return;
+      }
 
       const actionLabel =
         nextStatus === "FULFILLED"
