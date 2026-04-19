@@ -167,12 +167,13 @@ export class GroupService {
 
   public async resolveGroupFromRoleIds(guildId: string, roleIds: string[]): Promise<ResolvedGroup> {
     const awardableRoleIds = await this.syncAwardableRoleGroups(guildId);
+    const matchingRoleIds = roleIds.filter((roleId) => awardableRoleIds.includes(roleId));
 
     const groups = await this.prisma.group.findMany({
       where: {
         guildId,
         roleId: {
-          in: roleIds.filter((roleId) => awardableRoleIds.includes(roleId)),
+          in: matchingRoleIds,
         },
         active: true,
       },
@@ -182,8 +183,12 @@ export class GroupService {
       throw new AppError("You are not mapped to an active group.", 403);
     }
 
-    if (groups.length > 1) {
-      throw new AppError("You belong to multiple configured groups. Resolve the mapping before using this command.", 409);
+    const groupsByRoleId = new Map(groups.map((group) => [group.roleId, group]));
+    for (const roleId of matchingRoleIds) {
+      const group = groupsByRoleId.get(roleId);
+      if (group) {
+        return group;
+      }
     }
 
     return groups[0];

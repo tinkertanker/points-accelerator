@@ -398,6 +398,67 @@ describe("points accelerator API", () => {
     ]);
   });
 
+  it("prefers the first matching group role when multiple configured groups are present", async () => {
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-alpha",
+          roleName: "Alpha",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: true,
+        },
+        {
+          roleId: "role-beta",
+          roleName: "Beta",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: true,
+        },
+      ],
+    });
+
+    await ctx.prisma.group.createMany({
+      data: [
+        {
+          guildId: ctx.env.GUILD_ID,
+          displayName: "Alpha",
+          slug: "alpha",
+          mentorName: null,
+          roleId: "role-alpha",
+          active: true,
+        },
+        {
+          guildId: ctx.env.GUILD_ID,
+          displayName: "Beta",
+          slug: "beta",
+          mentorName: null,
+          roleId: "role-beta",
+          active: true,
+        },
+      ],
+    });
+
+    await expect(ctx.services.groupService.resolveGroupFromRoleIds(ctx.env.GUILD_ID, ["role-beta", "role-alpha"])).resolves
+      .toMatchObject({
+        displayName: "Beta",
+        roleId: "role-beta",
+      });
+  });
+
   it("assigns unique slugs when synced role names normalise to the same value", async () => {
     await ctx.app.inject({
       method: "PUT",

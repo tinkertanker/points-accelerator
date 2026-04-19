@@ -286,7 +286,7 @@ export class BotRuntime {
 
       await this.handlePassiveMessage({
         memberId: member.id,
-        roleIds: Array.from(member.roles.cache.keys()),
+        roleIds: this.getOrderedRoleIds(member),
         userId: message.author.id,
         username: message.author.username,
         messageId: message.id,
@@ -369,6 +369,20 @@ export class BotRuntime {
   public async stop() {
     this.client?.destroy();
     this.client = null;
+  }
+
+  private getOrderedRoleIds(member: GuildMember | null): string[] {
+    if (!member) {
+      return [];
+    }
+
+    return Array.from(member.roles.cache.entries())
+      .map(([roleId, role]) => ({
+        roleId,
+        rawPosition: typeof role.rawPosition === "number" ? role.rawPosition : -1,
+      }))
+      .sort((left, right) => right.rawPosition - left.rawPosition || left.roleId.localeCompare(right.roleId))
+      .map((role) => role.roleId);
   }
 
   public async getRoles() {
@@ -477,7 +491,7 @@ export class BotRuntime {
       username: member.user.username,
       displayName: member.displayName,
       avatarUrl: member.displayAvatarURL({ size: 128 }) || null,
-      roleIds: Array.from(member.roles.cache.keys()),
+      roleIds: this.getOrderedRoleIds(member),
       isGuildOwner: guild.ownerId === member.id,
       hasAdministrator: member.permissions.has(PermissionFlagsBits.Administrator),
       hasManageGuild: member.permissions.has(PermissionFlagsBits.ManageGuild),
@@ -657,7 +671,7 @@ export class BotRuntime {
       rawMember && "roles" in rawMember && Array.isArray((rawMember as { roles: unknown }).roles)
         ? ((rawMember as { roles: string[] }).roles)
         : [];
-    const roleIds = guildMember ? Array.from(guildMember.roles.cache.keys()) : apiRoleIds;
+    const roleIds = guildMember ? this.getOrderedRoleIds(guildMember) : apiRoleIds;
     // Authorize against the owner snapshot taken when the notice was posted,
     // so that re-assigning the item later doesn't yank fulfil/cancel rights
     // away from the person actually @mentioned in the channel. The
@@ -1119,7 +1133,7 @@ export class BotRuntime {
     const eligibleMembers = await Promise.all(
       candidates.map(async (candidate) => {
         const resolvedGroup = await this.services.groupService
-          .resolveGroupFromRoleIds(this.env.GUILD_ID, Array.from(candidate.roles.cache.keys()))
+          .resolveGroupFromRoleIds(this.env.GUILD_ID, this.getOrderedRoleIds(candidate))
           .catch(() => null);
 
         return resolvedGroup?.id === params.groupId ? candidate : null;
@@ -1308,7 +1322,7 @@ export class BotRuntime {
       const { participant } = await this.resolveActiveParticipant({
         discordUserId: message.author.id,
         discordUsername: message.author.username,
-        roleIds: Array.from(member.roles.cache.keys()),
+        roleIds: this.getOrderedRoleIds(member),
       });
 
       // --- 5. Resolve assignment --------------------------------------------
@@ -1478,7 +1492,7 @@ export class BotRuntime {
     }
 
     const member = await interaction.guild?.members.fetch(interaction.user.id);
-    const roleIds = member ? Array.from(member.roles.cache.keys()) : [];
+    const roleIds = this.getOrderedRoleIds(member ?? null);
     const actor = {
       userId: interaction.user.id,
       username: interaction.user.username,
@@ -1539,7 +1553,7 @@ export class BotRuntime {
         const { participant: targetParticipant } = await this.resolveActiveParticipant({
           discordUserId: targetUser.id,
           discordUsername: targetUser.username,
-          roleIds: Array.from(targetMember.roles.cache.keys()),
+          roleIds: this.getOrderedRoleIds(targetMember),
         });
         await this.services.participantCurrencyService.transferCurrency({
           guildId: this.env.GUILD_ID,
@@ -1640,7 +1654,7 @@ export class BotRuntime {
               ({ participant: currencyParticipant } = await this.resolveActiveParticipant({
                 discordUserId: targetMember.id,
                 discordUsername: targetMember.username,
-                roleIds: Array.from(memberRecord.roles.cache.keys()),
+                roleIds: this.getOrderedRoleIds(memberRecord),
               }));
             }
           }

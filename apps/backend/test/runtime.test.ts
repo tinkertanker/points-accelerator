@@ -156,6 +156,22 @@ describe("bot runtime", () => {
     );
   });
 
+  it("orders member role ids by Discord hierarchy before resolving a group", () => {
+    const { runtime } = createRuntimeFixture();
+
+    const roleIds = (runtime as any).getOrderedRoleIds({
+      roles: {
+        cache: new Map([
+          ["role-low", { id: "role-low", rawPosition: 1 }],
+          ["role-high", { id: "role-high", rawPosition: 20 }],
+          ["role-mid", { id: "role-mid", rawPosition: 10 }],
+        ]),
+      },
+    });
+
+    expect(roleIds).toEqual(["role-high", "role-mid", "role-low"]);
+  });
+
   it("renders /store as an embed without exposing raw shop item ids", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.shopService.list.mockResolvedValue([
