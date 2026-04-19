@@ -940,6 +940,28 @@ export class BotRuntime {
     return `${approvalsCount}/${threshold} approval${threshold === 1 ? "" : "s"}`;
   }
 
+  private formatUserReference(discordUserId: string | null | undefined, fallbackLabel: string) {
+    return discordUserId ? `<@${discordUserId}>` : fallbackLabel;
+  }
+
+  private formatGroupReference(group: { roleId?: string | null; displayName: string }) {
+    return group.roleId ? `<@&${group.roleId}>` : group.displayName;
+  }
+
+  private formatParticipantReference(
+    participant: {
+      discordUserId?: string | null;
+      discordUsername?: string | null;
+      indexId: string;
+    },
+    fallbackLabel?: string,
+  ) {
+    return this.formatUserReference(
+      participant.discordUserId,
+      fallbackLabel ?? participant.discordUsername ?? participant.indexId,
+    );
+  }
+
   private formatRankMarker(index: number) {
     switch (index) {
       case 0:
@@ -1023,13 +1045,19 @@ export class BotRuntime {
     const totalCurrency = leaderboard.reduce((sum, participant) => sum + participant.currencyBalance, 0);
     const standings = featuredParticipants
       .map((participant, index) => {
-        const displayName = displayNames.get(participant.id) ?? participant.discordUsername ?? participant.indexId;
+        const displayName = this.formatParticipantReference(
+          participant,
+          displayNames.get(participant.id) ?? participant.discordUsername ?? participant.indexId,
+        );
         return `${this.formatRankMarker(index)} **${displayName}**\n${this.formatCurrencyAmount(participant.currencyBalance, config)}`;
       })
       .join("\n\n");
     const compactStandings = compactParticipants
       .map((participant, index) => {
-        const displayName = displayNames.get(participant.id) ?? participant.discordUsername ?? participant.indexId;
+        const displayName = this.formatParticipantReference(
+          participant,
+          displayNames.get(participant.id) ?? participant.discordUsername ?? participant.indexId,
+        );
         return `#${LEADERBOARD_FEATURED_COUNT + index + 1} **${displayName}** · ${this.formatCurrencyAmount(participant.currencyBalance, config)}`;
       })
       .join("\n");
@@ -1541,6 +1569,7 @@ export class BotRuntime {
         const targetUser = interaction.options.getUser("member", true);
         const amount = interaction.options.getNumber("amount", true);
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const sourceLabel = this.formatUserReference(interaction.user.id, member?.displayName ?? interaction.user.username);
         const { participant: sourceParticipant } = await this.resolveActiveParticipant({
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
@@ -1550,6 +1579,10 @@ export class BotRuntime {
         if (!targetMember) {
           throw new AppError("Target user is not in this server.", 404);
         }
+        const targetLabel = this.formatUserReference(
+          targetUser.id,
+          targetMember.displayName || targetUser.globalName || targetUser.username,
+        );
         const { participant: targetParticipant } = await this.resolveActiveParticipant({
           discordUserId: targetUser.id,
           discordUsername: targetUser.username,
@@ -1563,9 +1596,7 @@ export class BotRuntime {
           amount,
           description: `${interaction.user.username} transferred ${amount} to ${targetUser.username}`,
         });
-        await interaction.reply(
-          `${interaction.user.username} transferred ${this.formatCurrencyAmount(amount, config)} to ${targetUser.username}.`,
-        );
+        await interaction.reply(`${sourceLabel} transferred ${this.formatCurrencyAmount(amount, config)} to ${targetLabel}.`);
         return;
       }
       case "donate": {
@@ -1585,8 +1616,10 @@ export class BotRuntime {
           conversionRate: config.groupPointsPerCurrencyDonation.toNumber(),
           description: `${interaction.user.username} donated ${this.formatCurrencyAmount(amount, config)} to ${group.displayName}`,
         });
+        const sourceLabel = this.formatUserReference(interaction.user.id, member?.displayName ?? interaction.user.username);
+        const groupLabel = this.formatGroupReference(group);
         await interaction.reply(
-          `${interaction.user.username} donated ${this.formatCurrencyAmount(amount, config)} to ${group.displayName}, adding ${this.formatPointsAmount(donation.groupPointsAward, config)}.`,
+          `${sourceLabel} donated ${this.formatCurrencyAmount(amount, config)} to ${groupLabel}, adding ${this.formatPointsAmount(donation.groupPointsAward, config)}.`,
         );
         return;
       }
@@ -1680,7 +1713,10 @@ export class BotRuntime {
               new Set(syncedTargetGroups.flatMap((syncedGroup) => syncedGroup.participantIds)),
             );
             bulkCurrencyGroupSummary = syncedTargetGroups
-              .map((syncedGroup, index) => ({ displayName: targetGroups[index]!.displayName, count: syncedGroup.count }))
+              .map((syncedGroup, index) => ({
+                displayName: this.formatGroupReference(targetGroups[index]!),
+                count: syncedGroup.count,
+              }))
               .filter((group) => group.count > 0)
               .map((group) => `${group.displayName} (${group.count})`)
               .join(", ");
@@ -1742,12 +1778,13 @@ export class BotRuntime {
           const direction = commandConfig.isDeduction ? "from" : "to";
           const summaries = [
             commandConfig.includesGroupPoints && targetGroups.length > 0
-              ? `${this.formatPointsAmount(Math.abs(points), config)} ${direction} ${targetGroups.map((group) => group.displayName).join(", ")}`
+              ? `${this.formatPointsAmount(Math.abs(points), config)} ${direction} ${targetGroups.map((group) => this.formatGroupReference(group)).join(", ")}`
               : null,
             currencyParticipant && currency !== 0
-              ? `${this.formatCurrencyAmount(Math.abs(currency), config)} ${direction} ${
-                  currencyMemberLabel ?? currencyParticipant.discordUsername ?? currencyParticipant.indexId
-                }`
+              ? `${this.formatCurrencyAmount(Math.abs(currency), config)} ${direction} ${this.formatUserReference(
+                  targetMember?.id,
+                  currencyMemberLabel ?? currencyParticipant.discordUsername ?? currencyParticipant.indexId,
+                )}`
               : null,
             bulkCurrencyParticipantIds.length > 0 && currency !== 0
               ? `${this.formatCurrencyAmount(Math.abs(currency), config)} each ${direction} ${bulkCurrencyParticipantIds.length} member${
@@ -1784,9 +1821,10 @@ export class BotRuntime {
         if (config.listingChannelId) {
           await this.postListing(
             config.listingChannelId,
-            `New listing from ${interaction.user.username}: **${listing.title}**\n${listing.description}\nQuantity: ${
-              listing.quantity ?? "infinite"
-            }`,
+            `New listing from ${this.formatUserReference(
+              interaction.user.id,
+              member?.displayName ?? interaction.user.username,
+            )}: **${listing.title}**\n${listing.description}\nQuantity: ${listing.quantity ?? "infinite"}`,
           );
         }
 
@@ -1838,10 +1876,12 @@ export class BotRuntime {
         let sharedMessageSuffix = "";
         if (purchaseMode === "GROUP") {
           const announcementChannelId = config.redemptionChannelId ?? interaction.channelId;
+          const requesterLabel = this.formatUserReference(interaction.user.id, member?.displayName ?? interaction.user.username);
+          const groupLabel = this.formatGroupReference(group);
           const posted = announcementChannelId
             ? await this.postListing(
                 announcementChannelId,
-                `Group purchase request for ${redemption.shopItem.emoji} **${redemption.shopItem.name}** x${redemption.quantity} by **${group.displayName}**.\nRequest ID: \`${redemption.id}\`\n${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded.\nApprove with \`/approve_purchase purchase_id:${redemption.id}\`.`,
+                `Group purchase request for ${redemption.shopItem.emoji} **${redemption.shopItem.name}** x${redemption.quantity} from ${groupLabel}, requested by ${requesterLabel}.\nRequest ID: \`${redemption.id}\`\n${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded.\nApprove with \`/approve_purchase purchase_id:${redemption.id}\`.`,
               )
             : null;
           if (posted) {
@@ -1886,7 +1926,7 @@ export class BotRuntime {
         await interaction.reply({
           content:
             purchaseMode === "GROUP"
-              ? `Group purchase request created for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase and spend shared ${config.pointsName} if it passes.${sharedMessageSuffix}`
+              ? `Group purchase request created for ${this.formatGroupReference(group)} for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase and spend shared ${config.pointsName} if it passes.${sharedMessageSuffix}`
               : `Purchase recorded for ${quantity} item(s). Request ID: ${redemption.id}. Cost uses your ${config.currencyName}.`,
           ephemeral: true,
         });
@@ -1919,7 +1959,7 @@ export class BotRuntime {
         const progress = this.formatGroupPurchaseProgress(result.approvalsCount, result.threshold);
         const blockingSuffix =
           "blockingGroup" in result && result.blockingGroup
-            ? ` ${result.blockingGroup} does not currently have enough ${config.pointsName}, so the request stays open until more are earned or donated.`
+            ? ` ${this.formatGroupReference(group)} does not currently have enough ${config.pointsName}, so the request stays open until more are earned or donated.`
             : "";
 
         if (result.justExecuted) {
@@ -1957,8 +1997,8 @@ export class BotRuntime {
 
         await interaction.reply({
           content: result.executed
-            ? `Approval recorded. ${progress}. The group purchase is now funded and pending fulfilment.${blockingSuffix}`
-            : `Approval recorded. ${progress}.${blockingSuffix}`,
+            ? `Approval recorded for ${this.formatGroupReference(group)}. ${progress}. The group purchase is now funded and pending fulfilment.${blockingSuffix}`
+            : `Approval recorded for ${this.formatGroupReference(group)}. ${progress}.${blockingSuffix}`,
           ephemeral: true,
         });
         return;
