@@ -366,12 +366,15 @@ export default function SettingsPanel({
                     min={0}
                     step={1}
                     value={settingsDraft.bettingCooldownSeconds}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const parsed = Number(event.target.value);
                       onSettingsChange({
                         ...settingsDraft,
-                        bettingCooldownSeconds: Math.max(0, Math.round(Number(event.target.value))),
-                      })
-                    }
+                        bettingCooldownSeconds: Number.isFinite(parsed)
+                          ? Math.max(0, Math.round(parsed))
+                          : 0,
+                      });
+                    }}
                   />
                 </label>
               </div>

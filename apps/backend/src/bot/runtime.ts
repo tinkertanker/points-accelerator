@@ -546,7 +546,7 @@ export class BotRuntime {
   private checkBettingCooldown(
     userId: string,
     cooldownSeconds: number,
-  ): { rebuke: string; displayName: string } | null {
+  ): string | null {
     if (cooldownSeconds <= 0) {
       return null;
     }
@@ -568,10 +568,13 @@ export class BotRuntime {
     this.bettingCooldowns.set(key, { lastBetAt: entry.lastBetAt, offenses });
 
     const remaining = this.formatDuration(Math.max(1, Math.ceil((cooldownMs - elapsed) / 1000)));
-    return { rebuke: this.buildBettingRebuke(offenses, remaining), displayName: "" };
+    return this.buildBettingRebuke(offenses, remaining);
   }
 
-  private recordBetPlaced(userId: string) {
+  private recordBetPlaced(userId: string, cooldownSeconds: number) {
+    if (cooldownSeconds <= 0) {
+      return;
+    }
     const key = `${this.env.GUILD_ID}:${userId}:bet`;
     this.bettingCooldowns.set(key, { lastBetAt: Date.now(), offenses: 0 });
   }
@@ -1718,12 +1721,12 @@ export class BotRuntime {
         const amount = interaction.options.getNumber("amount", true);
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
 
-        const cooldownCheck = this.checkBettingCooldown(
+        const rebuke = this.checkBettingCooldown(
           interaction.user.id,
           config.bettingCooldownSeconds,
         );
-        if (cooldownCheck) {
-          await interaction.reply(`<@${interaction.user.id}> ${cooldownCheck.rebuke}`);
+        if (rebuke) {
+          await interaction.reply(`<@${interaction.user.id}> ${rebuke}`);
           return;
         }
 
@@ -1738,7 +1741,7 @@ export class BotRuntime {
           participantId: participant.id,
           amount,
         });
-        this.recordBetPlaced(interaction.user.id);
+        this.recordBetPlaced(interaction.user.id, config.bettingCooldownSeconds);
 
         if (result.won) {
           await interaction.reply(
