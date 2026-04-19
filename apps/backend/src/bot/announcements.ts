@@ -29,12 +29,14 @@ export async function readBackendVersion(): Promise<string | null> {
 
 export async function readChangelogEntry(version: string): Promise<ChangelogEntry | null> {
   for (const candidate of CHANGELOG_CANDIDATES) {
+    let raw: string;
     try {
-      const raw = await readFile(candidate, "utf8");
-      return parseChangelogEntry(raw, version);
+      raw = await readFile(candidate, "utf8");
     } catch {
       continue;
     }
+    const entry = parseChangelogEntry(raw, version);
+    if (entry) return entry;
   }
   return null;
 }
