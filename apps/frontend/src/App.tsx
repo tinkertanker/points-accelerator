@@ -75,6 +75,8 @@ function toSyncedGroupDrafts(groups: Group[], capabilities: RoleCapability[]): G
     .map((capability) => toGroupDraft(groupsByRoleId.get(capability.roleId), capability));
 }
 
+const DEFAULT_SHOP_ITEM_EMOJI = "💸";
+
 function toShopItemDraft(item?: ShopItem): ShopItemDraft {
   if (!item) {
     return {
@@ -85,6 +87,9 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
       stock: null,
       enabled: true,
       fulfillmentInstructions: "",
+      emoji: DEFAULT_SHOP_ITEM_EMOJI,
+      ownerUserId: null,
+      ownerUsername: null,
     };
   }
 
@@ -97,6 +102,9 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
     stock: item.stock,
     enabled: item.enabled,
     fulfillmentInstructions: item.fulfillmentInstructions,
+    emoji: item.emoji || DEFAULT_SHOP_ITEM_EMOJI,
+    ownerUserId: item.ownerUserId,
+    ownerUsername: item.ownerUsername,
   };
 }
 
@@ -464,6 +472,8 @@ export default function App() {
           <ShopPanel
             shopDrafts={shopDrafts}
             isBusy={isMutating}
+            participants={bootstrap.participants}
+            members={bootstrap.discord.members}
             createShopDraft={() => toShopItemDraft()}
             onShopDraftsChange={setShopDrafts}
             onSaveShop={handleSaveShop}

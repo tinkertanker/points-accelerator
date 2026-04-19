@@ -10,6 +10,7 @@ const groupMemberCounts = new Map<string, number>();
 const botRuntime: BotRuntimeApi = {
   getRoles: vi.fn().mockResolvedValue([]),
   getTextChannels: vi.fn().mockResolvedValue([]),
+  getMembers: vi.fn().mockResolvedValue([]),
   getDashboardMember: vi.fn().mockResolvedValue(null),
   getGroupMemberCount: vi.fn(async (roleId: string) => groupMemberCounts.get(roleId) ?? null),
   getGroupMemberDiscordUserIds: vi.fn(async (roleId: string) => {
@@ -17,6 +18,7 @@ const botRuntime: BotRuntimeApi = {
     return count ? Array.from({ length: count }, (_, index) => `${roleId}-member-${index + 1}`) : null;
   }),
   postListing: vi.fn().mockResolvedValue(null),
+  clearRedemptionButtons: vi.fn().mockResolvedValue(undefined),
 };
 
 async function registerParticipant(params: {

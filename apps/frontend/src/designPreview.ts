@@ -210,6 +210,9 @@ function createInitialBootstrap(): BootstrapPayload {
         stock: 40,
         enabled: true,
         fulfillmentInstructions: "DM the bot with your email.",
+        emoji: "🎟️",
+        ownerUserId: null,
+        ownerUsername: null,
       },
       {
         id: "shop-2",
@@ -220,6 +223,9 @@ function createInitialBootstrap(): BootstrapPayload {
         stock: 8,
         enabled: true,
         fulfillmentInstructions: "Coordinate with the staff desk.",
+        emoji: "🍕",
+        ownerUserId: null,
+        ownerUsername: null,
       },
     ],
     redemptions: [
@@ -242,6 +248,9 @@ function createInitialBootstrap(): BootstrapPayload {
           name: "Sticker pack",
           audience: "INDIVIDUAL",
           fulfillmentInstructions: "DM the bot with your email.",
+          emoji: "🎟️",
+          ownerUserId: null,
+          ownerUsername: null,
         },
         group: {
           id: "group-1",
@@ -274,6 +283,9 @@ function createInitialBootstrap(): BootstrapPayload {
           name: "Shared pizza run",
           audience: "GROUP",
           fulfillmentInstructions: "Coordinate with the staff desk.",
+          emoji: "🍕",
+          ownerUserId: null,
+          ownerUsername: null,
         },
         group: {
           id: "group-2",
@@ -315,6 +327,9 @@ function createInitialBootstrap(): BootstrapPayload {
           name: "Shared pizza run",
           audience: "GROUP",
           fulfillmentInstructions: "Coordinate with the staff desk.",
+          emoji: "🍕",
+          ownerUserId: null,
+          ownerUsername: null,
         },
         group: {
           id: "group-1",
@@ -404,6 +419,12 @@ function createInitialBootstrap(): BootstrapPayload {
         { id: "ch-log", name: "economy-log" },
         { id: "ch-redeem", name: "redemptions" },
         { id: "ch-listings", name: "listings" },
+      ],
+      members: [
+        { id: "preview-staff-1", name: "Staff Alice" },
+        { id: "preview-student-1", name: "Ava" },
+        { id: "preview-student-2", name: "Mika" },
+        { id: "preview-student-3", name: "Jordan" },
       ],
     },
     assignments: [
@@ -569,6 +590,9 @@ export function designPreviewSaveShopItem(draft: ShopItemDraft): ShopItem {
     stock: draft.stock,
     enabled: draft.enabled,
     fulfillmentInstructions: draft.fulfillmentInstructions ?? null,
+    emoji: draft.emoji?.trim() ? draft.emoji.trim() : "💸",
+    ownerUserId: draft.ownerUserId ?? null,
+    ownerUsername: draft.ownerUsername ?? null,
   };
 
   const existingIndex = mockBootstrap.shopItems.findIndex((candidate) => candidate.id === item.id);

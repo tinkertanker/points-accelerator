@@ -219,7 +219,9 @@ export default function FulfilmentPanel({
                         <span className={`badge ${STATUS_CLASSES[redemption.status]}`}>{STATUS_LABELS[redemption.status]}</span>
                       </td>
                       <td className="fulfilment-item-cell">
-                        <strong>{redemption.shopItem.name}</strong>
+                        <strong>
+                          <span aria-hidden>{redemption.shopItem.emoji}</span> {redemption.shopItem.name}
+                        </strong>
                         <span>{getPurchaseLabel(redemption)}</span>
                       </td>
                       <td>{getRequesterLabel(redemption)}</td>
@@ -248,7 +250,9 @@ export default function FulfilmentPanel({
                   </div>
                   <div className="fulfilment-card__title-row">
                     <div>
-                      <h3>{redemption.shopItem.name}</h3>
+                      <h3>
+                        <span aria-hidden>{redemption.shopItem.emoji}</span> {redemption.shopItem.name}
+                      </h3>
                       <p>{getPurchaseLabel(redemption)}</p>
                     </div>
                     <strong>{getCostLabel(redemption)}</strong>

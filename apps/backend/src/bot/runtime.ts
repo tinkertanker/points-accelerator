@@ -1,4 +1,7 @@
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelType,
   Client,
   EmbedBuilder,
@@ -9,6 +12,7 @@ import {
   Routes,
   SlashCommandBuilder,
   type AutocompleteInteraction,
+  type ButtonInteraction,
   type ChatInputCommandInteraction,
   type GuildTextBasedChannel,
   type GuildMember,
@@ -46,6 +50,12 @@ type AwardLikeCommandName =
   | "deductgroup"
   | "deductmember"
   | "deductmixed";
+
+const DISCORD_SNOWFLAKE_PATTERN = /^\d{17,20}$/;
+
+function isDiscordSnowflake(value: string | null | undefined): value is string {
+  return typeof value === "string" && DISCORD_SNOWFLAKE_PATTERN.test(value);
+}
 
 const LEDGER_PAGE_SIZE = 10;
 const LEDGER_EMBED_COLOUR = 0x8b5cf6;
@@ -204,10 +214,12 @@ export type DashboardMember = {
 export interface BotRuntimeApi {
   getRoles(): Promise<Array<{ id: string; name: string }>>;
   getTextChannels(): Promise<Array<{ id: string; name: string }>>;
+  getMembers(): Promise<Array<{ id: string; name: string }>>;
   getDashboardMember(userId: string): Promise<DashboardMember | null>;
   getGroupMemberCount(roleId: string): Promise<number | null>;
   getGroupMemberDiscordUserIds(roleId: string): Promise<string[] | null>;
   postListing(channelId: string, content: string): Promise<{ channelId: string; messageId: string } | null>;
+  clearRedemptionButtons(channelId: string, messageId: string, statusLine: string): Promise<void>;
 }
 
 function isDiscordUnknownMemberError(error: unknown): boolean {
@@ -219,10 +231,13 @@ function isDiscordUnknownMemberError(error: unknown): boolean {
   );
 }
 
+const MEMBERS_CACHE_TTL_MS = 60_000;
+
 export class BotRuntime {
   private readonly passiveCooldowns = new Map<string, CooldownEntry>();
   private readonly actionCooldowns = new Map<string, CooldownEntry>();
   private client: Client | null = null;
+  private membersCache: { fetchedAt: number; value: Array<{ id: string; name: string }> } | null = null;
 
   public constructor(
     private readonly env: AppEnv,
@@ -284,6 +299,25 @@ export class BotRuntime {
           await this.handleAutocomplete(interaction);
         } catch (error) {
           console.error("Autocomplete handling failed", error);
+        }
+        return;
+      }
+
+      if (interaction.isButton() && interaction.customId.startsWith("redemption:")) {
+        try {
+          await this.handleRedemptionButton(interaction);
+        } catch (error) {
+          console.error("Redemption button handling failed", error);
+          const message = error instanceof AppError ? error.message : "Unexpected button error.";
+          try {
+            if (interaction.replied || interaction.deferred) {
+              await interaction.editReply({ content: message });
+            } else {
+              await interaction.reply({ content: message, ephemeral: true });
+            }
+          } catch (replyError) {
+            console.error("Failed to send button error response", replyError);
+          }
         }
         return;
       }
@@ -369,6 +403,38 @@ export class BotRuntime {
         name: channel!.name,
       }))
       .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  public async getMembers() {
+    const now = Date.now();
+    if (this.membersCache && now - this.membersCache.fetchedAt < MEMBERS_CACHE_TTL_MS) {
+      return this.membersCache.value;
+    }
+
+    if (!this.client) {
+      return this.membersCache?.value ?? [];
+    }
+
+    const guild = await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null);
+    if (!guild) {
+      return this.membersCache?.value ?? [];
+    }
+
+    const members = await guild.members.fetch().catch(() => null);
+    if (!members) {
+      return this.membersCache?.value ?? [];
+    }
+
+    const value = Array.from(members.values())
+      .filter((member) => !member.user.bot)
+      .map((member) => ({
+        id: member.user.id,
+        name: member.displayName || member.user.username,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    this.membersCache = { fetchedAt: now, value };
+    return value;
   }
 
   public async getDashboardMember(userId: string): Promise<DashboardMember | null> {
@@ -459,6 +525,201 @@ export class BotRuntime {
       channelId: sent.channelId,
       messageId: sent.id,
     };
+  }
+
+  public async clearRedemptionButtons(channelId: string, messageId: string, statusLine: string): Promise<void> {
+    if (!this.client) {
+      return;
+    }
+
+    const channel = await this.client.channels.fetch(channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      return;
+    }
+
+    const message = await (channel as GuildTextBasedChannel).messages.fetch(messageId).catch(() => null);
+    if (!message) {
+      return;
+    }
+
+    const original = message.content ?? "";
+    const suffix = statusLine ? `\n\n${statusLine}` : "";
+    await message
+      .edit({
+        content: `${original}${suffix}`,
+        components: [],
+        allowedMentions: { parse: [] },
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to clear redemption buttons", error);
+      });
+  }
+
+  private buildRedemptionActionRow(redemptionId: string) {
+    return new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`redemption:fulfil:${redemptionId}`)
+        .setLabel("Mark fulfilled")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`redemption:cancel:${redemptionId}`)
+        .setLabel("Cancel & refund")
+        .setStyle(ButtonStyle.Danger),
+    );
+  }
+
+  private async postRedemptionFulfilmentNotice(params: {
+    channelId: string;
+    ownerUserId: string | null;
+    buyerUserId: string;
+    buyerMention: string;
+    shopItemName: string;
+    shopItemEmoji: string;
+    quantity: number;
+    redemptionId: string;
+    audience: "INDIVIDUAL" | "GROUP";
+    groupName: string;
+    fulfillmentInstructions: string | null;
+  }): Promise<{ channelId: string; messageId: string } | null> {
+    if (!this.client) {
+      return null;
+    }
+
+    const channel = await this.client.channels.fetch(params.channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      return null;
+    }
+
+    const validOwnerId = isDiscordSnowflake(params.ownerUserId) ? params.ownerUserId : null;
+    const ownerMention = validOwnerId ? `<@${validOwnerId}>` : null;
+    const subject =
+      params.audience === "GROUP"
+        ? `${params.buyerMention} (on behalf of **${params.groupName}**)`
+        : params.buyerMention;
+    const fulfilmentLine = params.fulfillmentInstructions
+      ? `\nFulfilment notes: ${params.fulfillmentInstructions}`
+      : "";
+    const header = ownerMention ? `${ownerMention} heads up — ` : "";
+    const content = `${header}${subject} purchased ${params.shopItemEmoji} **${params.shopItemName}**${
+      params.quantity > 1 ? ` x${params.quantity}` : ""
+    }.\nRedemption ID: \`${params.redemptionId}\`${fulfilmentLine}`;
+
+    const mentionUsers = [params.buyerUserId, ...(validOwnerId ? [validOwnerId] : [])].filter(
+      isDiscordSnowflake,
+    );
+
+    const sent = await (channel as GuildTextBasedChannel)
+      .send({
+        content,
+        components: [this.buildRedemptionActionRow(params.redemptionId)],
+        allowedMentions: { users: mentionUsers },
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to post redemption fulfilment notice", error);
+        return null;
+      });
+
+    if (!sent) {
+      return null;
+    }
+
+    return { channelId: sent.channelId, messageId: sent.id };
+  }
+
+  private async handleRedemptionButton(interaction: ButtonInteraction) {
+    const parts = interaction.customId.split(":");
+    if (parts.length !== 3 || parts[0] !== "redemption") {
+      return;
+    }
+
+    const [, action, redemptionId] = parts;
+    if (action !== "fulfil" && action !== "cancel") {
+      return;
+    }
+
+    const redemption = await this.services.shopService.getRedemption(this.env.GUILD_ID, redemptionId);
+    if (!redemption) {
+      await interaction.reply({ content: "Redemption not found.", ephemeral: true });
+      return;
+    }
+
+    const guildMember = await interaction.guild?.members
+      .fetch(interaction.user.id)
+      .catch(() => null) ?? null;
+    const rawMember = interaction.member;
+    const apiRoleIds =
+      rawMember && "roles" in rawMember && Array.isArray((rawMember as { roles: unknown }).roles)
+        ? ((rawMember as { roles: string[] }).roles)
+        : [];
+    const roleIds = guildMember ? Array.from(guildMember.roles.cache.keys()) : apiRoleIds;
+    // Authorize against the owner snapshot taken when the notice was posted,
+    // so that re-assigning the item later doesn't yank fulfil/cancel rights
+    // away from the person actually @mentioned in the channel. The
+    // fulfilmentMessageId presence indicates a snapshot was taken (even when
+    // its value is null = explicitly no owner at purchase time); only fall
+    // back to the current item owner for legacy rows that never recorded one.
+    const snapshotTaken = redemption.fulfilmentMessageId !== null;
+    const ownerForRedemption = snapshotTaken
+      ? redemption.ownerUserIdAtPurchase
+      : redemption.shopItem.ownerUserId;
+    const isOwner = ownerForRedemption !== null && ownerForRedemption === interaction.user.id;
+    const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
+    const hasStaffPerms = memberPermissions
+      ? memberPermissions.has(PermissionFlagsBits.Administrator) ||
+        memberPermissions.has(PermissionFlagsBits.ManageGuild)
+      : false;
+
+    let isStaff = hasStaffPerms;
+    if (!isStaff) {
+      const capabilities = await this.services.roleCapabilityService.listForRoleIds(this.env.GUILD_ID, roleIds);
+      const resolved = resolveCapabilities(capabilities);
+      isStaff = resolved.canManageDashboard || resolved.canAward || resolved.canDeduct;
+    }
+
+    if (!isOwner && !isStaff) {
+      await interaction.reply({
+        content: "Only the item owner or staff can act on this purchase.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await interaction.deferUpdate();
+
+    const nextStatus = action === "fulfil" ? "FULFILLED" : "CANCELED";
+
+    try {
+      const { redemption: updated, changed } = await this.services.shopService.updateRedemptionStatus({
+        guildId: this.env.GUILD_ID,
+        redemptionId,
+        status: nextStatus,
+        actorUserId: interaction.user.id,
+        actorUsername: interaction.user.username,
+      });
+
+      if (!changed) {
+        await interaction.followUp({
+          content: `Redemption \`${redemptionId}\` is already **${updated.status}**.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const actionLabel =
+        nextStatus === "FULFILLED"
+          ? `fulfilled by <@${interaction.user.id}>`
+          : `cancelled and refunded by <@${interaction.user.id}>`;
+
+      const originalContent = interaction.message?.content ?? `Redemption \`${redemptionId}\``;
+      await interaction.editReply({
+        content: `${originalContent}\n\n**Status:** ${updated.status} — ${actionLabel}.`,
+        components: [],
+        allowedMentions: { parse: [] },
+      });
+    } catch (error) {
+      const message = error instanceof AppError ? error.message : "Failed to update redemption.";
+      await interaction.followUp({ content: message, ephemeral: true });
+    }
   }
 
   private async assertCanManageSubmissions(member: GuildMember | null, roleIds: string[]) {
@@ -710,7 +971,8 @@ export class BotRuntime {
   }
 
   private formatStoreLine(item: ShopListItem, priceLabel: string) {
-    const parts = [`**${item.name}**`, priceLabel];
+    const emoji = item.emoji ? `${item.emoji} ` : "";
+    const parts = [`${emoji}**${item.name}**`, priceLabel];
     if (item.stock !== null) {
       parts.push(item.stock > 0 ? `${item.stock} left` : "sold out");
     }
@@ -1499,7 +1761,7 @@ export class BotRuntime {
           const posted = announcementChannelId
             ? await this.postListing(
                 announcementChannelId,
-                `Group purchase request for **${redemption.shopItem.name}** x${redemption.quantity} by **${group.displayName}**.\nRequest ID: \`${redemption.id}\`\n${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded.\nApprove with \`/approve_purchase purchase_id:${redemption.id}\`.`,
+                `Group purchase request for ${redemption.shopItem.emoji} **${redemption.shopItem.name}** x${redemption.quantity} by **${group.displayName}**.\nRequest ID: \`${redemption.id}\`\n${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded.\nApprove with \`/approve_purchase purchase_id:${redemption.id}\`.`,
               )
             : null;
           if (posted) {
@@ -1512,6 +1774,35 @@ export class BotRuntime {
             sharedMessageSuffix = " A shared approval message has been posted for your group.";
           }
         }
+
+        if (redemption.status === "PENDING") {
+          const fulfilmentChannelId = config.redemptionChannelId ?? interaction.channelId;
+          if (fulfilmentChannelId) {
+            const posted = await this.postRedemptionFulfilmentNotice({
+              channelId: fulfilmentChannelId,
+              ownerUserId: redemption.shopItem.ownerUserId,
+              buyerUserId: interaction.user.id,
+              buyerMention: `<@${interaction.user.id}>`,
+              shopItemName: redemption.shopItem.name,
+              shopItemEmoji: redemption.shopItem.emoji,
+              quantity: redemption.quantity,
+              redemptionId: redemption.id,
+              audience: redemption.shopItem.audience,
+              groupName: group.displayName,
+              fulfillmentInstructions: redemption.shopItem.fulfillmentInstructions,
+            });
+            if (posted) {
+              await this.services.shopService.setFulfilmentMessage({
+                guildId: this.env.GUILD_ID,
+                redemptionId: redemption.id,
+                channelId: posted.channelId,
+                messageId: posted.messageId,
+                ownerUserIdAtPurchase: redemption.shopItem.ownerUserId,
+              });
+            }
+          }
+        }
+
         await interaction.reply({
           content:
             purchaseMode === "GROUP"
@@ -1550,6 +1841,39 @@ export class BotRuntime {
           "blockingGroup" in result && result.blockingGroup
             ? ` ${result.blockingGroup} does not currently have enough ${config.pointsName}, so the request stays open until more are earned or donated.`
             : "";
+
+        if (result.justExecuted) {
+          const fulfilmentChannelId = config.redemptionChannelId ?? interaction.channelId;
+          const fullRedemption = await this.services.shopService.getRedemption(
+            this.env.GUILD_ID,
+            result.redemption.id,
+          );
+          if (fulfilmentChannelId && fullRedemption) {
+            const buyerUserId = fullRedemption.requestedByUserId;
+            const posted = await this.postRedemptionFulfilmentNotice({
+              channelId: fulfilmentChannelId,
+              ownerUserId: fullRedemption.shopItem.ownerUserId,
+              buyerUserId,
+              buyerMention: `<@${buyerUserId}>`,
+              shopItemName: fullRedemption.shopItem.name,
+              shopItemEmoji: fullRedemption.shopItem.emoji,
+              quantity: fullRedemption.quantity,
+              redemptionId: fullRedemption.id,
+              audience: fullRedemption.shopItem.audience,
+              groupName: fullRedemption.group.displayName,
+              fulfillmentInstructions: fullRedemption.shopItem.fulfillmentInstructions,
+            });
+            if (posted) {
+              await this.services.shopService.setFulfilmentMessage({
+                guildId: this.env.GUILD_ID,
+                redemptionId: fullRedemption.id,
+                channelId: posted.channelId,
+                messageId: posted.messageId,
+                ownerUserIdAtPurchase: fullRedemption.shopItem.ownerUserId,
+              });
+            }
+          }
+        }
 
         await interaction.reply({
           content: result.executed

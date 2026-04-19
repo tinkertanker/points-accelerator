@@ -79,6 +79,15 @@ const shopItemSchema = z.object({
   stock: z.number().int().nonnegative().nullable(),
   enabled: z.boolean(),
   fulfillmentInstructions: z.string().nullable().optional(),
+  emoji: z.string().nullable().optional(),
+  ownerUserId: z
+    .string()
+    .nullable()
+    .optional()
+    .refine((value) => !value || /^\d{17,20}$/.test(value), {
+      message: "Owner must be a Discord user ID (17–20 digits)",
+    }),
+  ownerUsername: z.string().nullable().optional(),
 });
 
 const listingSchema = z.object({
@@ -430,6 +439,9 @@ export function createApp(params: {
         name: redemption.shopItem.name,
         audience: redemption.shopItem.audience,
         fulfillmentInstructions: redemption.shopItem.fulfillmentInstructions,
+        emoji: redemption.shopItem.emoji,
+        ownerUserId: redemption.shopItem.ownerUserId,
+        ownerUsername: redemption.shopItem.ownerUsername,
       },
       group: {
         id: redemption.group.id,
@@ -584,7 +596,7 @@ export function createApp(params: {
     const canManageAdminPages = session.canManageSettings || session.canManageGroups;
     const canManageMentorPages = session.canManageShop || session.canManageAssignments;
 
-    const [settings, leaderboard, capabilities, groups, shopItems, listings, ledger, roles, channels, assignments, participants, submissions] =
+    const [settings, leaderboard, capabilities, groups, shopItems, listings, ledger, roles, channels, members, assignments, participants, submissions] =
       await Promise.all([
         services.configService.getOrCreate(params.env.GUILD_ID),
         services.economyService.getLeaderboard(params.env.GUILD_ID),
@@ -595,8 +607,11 @@ export function createApp(params: {
         canManageAdminPages ? services.economyService.getLedger(params.env.GUILD_ID, 25) : Promise.resolve([]),
         canManageAdminPages ? params.botRuntime?.getRoles() ?? [] : Promise.resolve([]),
         canManageAdminPages ? params.botRuntime?.getTextChannels() ?? [] : Promise.resolve([]),
+        canManageMentorPages ? params.botRuntime?.getMembers() ?? [] : Promise.resolve([]),
         canManageMentorPages ? services.assignmentService.list(params.env.GUILD_ID) : Promise.resolve([]),
-        canManageAdminPages ? services.participantService.list(params.env.GUILD_ID) : Promise.resolve([]),
+        canManageAdminPages || canManageMentorPages
+          ? services.participantService.list(params.env.GUILD_ID)
+          : Promise.resolve([]),
         canManageMentorPages ? services.submissionService.list(params.env.GUILD_ID) : Promise.resolve([]),
       ]);
 
@@ -618,6 +633,7 @@ export function createApp(params: {
       discord: {
         roles,
         channels,
+        members,
       },
       assignments,
       participants,
@@ -700,13 +716,26 @@ export function createApp(params: {
     const payload = redemptionStatusUpdateSchema.parse(request.body);
     const session = await resolveDashboardSession(request);
     const { id } = request.params as { id: string };
-    const redemption = await services.shopService.updateRedemptionStatus({
+    const { redemption, changed } = await services.shopService.updateRedemptionStatus({
       guildId: params.env.GUILD_ID,
       redemptionId: id,
       status: payload.status,
       actorUserId: session.userId,
       actorUsername: session.username,
     });
+
+    if (changed && redemption.fulfilmentMessageChannelId && redemption.fulfilmentMessageId) {
+      const actor = session.username ?? session.userId;
+      const verb = redemption.status === "FULFILLED" ? "Fulfilled" : "Cancelled";
+      const refundSuffix = redemption.status === "CANCELED" ? " and refunded" : "";
+      await params.botRuntime
+        ?.clearRedemptionButtons(
+          redemption.fulfilmentMessageChannelId,
+          redemption.fulfilmentMessageId,
+          `**Status:** ${redemption.status} — ${verb}${refundSuffix} by ${actor} via the dashboard.`,
+        )
+        .catch(() => {});
+    }
 
     return serialiseShopRedemption(redemption);
   });

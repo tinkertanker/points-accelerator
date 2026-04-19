@@ -1,0 +1,2 @@
+ALTER TABLE "ShopItem"
+ADD COLUMN "emoji" TEXT NOT NULL DEFAULT '💸';
