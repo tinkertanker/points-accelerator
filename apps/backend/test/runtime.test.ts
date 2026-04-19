@@ -251,26 +251,30 @@ describe("bot runtime", () => {
       limit: 10,
       offset: 10,
     });
-    expect(reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("Recent transactions, page 2"),
-      }),
-    );
-    expect(reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("Gryffindor +5 blorgshj 🏅"),
-      }),
-    );
+    const call = reply.mock.calls[0][0];
+    expect(call.embeds).toHaveLength(1);
+    const embed = call.embeds[0].data;
+    expect(embed.title).toBe("Transaction ledger");
+    expect(embed.description).toContain("Page 2");
+    expect(embed.fields).toHaveLength(1);
+    const [field] = embed.fields;
+    expect(field.name).toContain("#11");
+    expect(field.name).toContain("Award");
+    expect(field.value).toContain("Gryffindor");
+    expect(field.value).toContain("+5 blorgshj 🏅");
+    expect(field.value).toContain("Answered the toughest warm-up question");
   });
 
-  it("truncates long ledger lines so Discord replies stay within the message limit", async () => {
+  it("keeps ledger entry field values within Discord's 1024 character limit", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.economyService.getLedger.mockResolvedValue(
       Array.from({ length: 10 }, (_, index) => ({
         id: `entry-${index + 1}`,
         type: "MANUAL_AWARD",
         description:
-          "Awarded for consistently helping other tables, finishing every checkpoint, and writing up the clearest recap note of the day.",
+          "Awarded for consistently helping other tables, finishing every checkpoint, and writing up the clearest recap note of the day. ".repeat(
+            5,
+          ),
         createdAt: "2026-04-01T12:00:00.000Z",
         splits: [
           {
@@ -307,9 +311,14 @@ describe("bot runtime", () => {
       },
     });
 
-    const [{ content }] = reply.mock.calls[0] as [{ content: string }];
-    expect(content.length).toBeLessThanOrEqual(2000);
-    expect(content).toContain("...");
+    const call = reply.mock.calls[0][0];
+    const embed = call.embeds[0].data;
+    expect(embed.fields).toHaveLength(10);
+    for (const field of embed.fields) {
+      expect(field.value.length).toBeLessThanOrEqual(1024);
+    }
+    const longDescriptionField = embed.fields.find((f: { value: string }) => f.value.includes("..."));
+    expect(longDescriptionField).toBeDefined();
   });
 
   it("uses the Discord display name in /awardcurrency replies for member currency awards", async () => {

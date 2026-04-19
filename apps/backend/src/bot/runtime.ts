@@ -47,7 +47,10 @@ type AwardLikeCommandName =
   | "deductmember"
   | "deductmixed";
 
-const MAX_LEDGER_LINE_LENGTH = 160;
+const LEDGER_PAGE_SIZE = 10;
+const LEDGER_EMBED_COLOUR = 0x8b5cf6;
+const LEDGER_DESCRIPTION_MAX = 300;
+const LEDGER_FIELD_VALUE_MAX = 1024;
 const LEADERBOARD_EMBED_LIMIT = 10;
 const LEADERBOARD_FEATURED_COUNT = 4;
 const GROUP_LEADERBOARD_COLOUR = 0xf59e0b;
@@ -1173,10 +1176,9 @@ export class BotRuntime {
       case "ledger": {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const page = interaction.options.getInteger("page") ?? 1;
-        const limit = 10;
-        const offset = (page - 1) * limit;
+        const offset = (page - 1) * LEDGER_PAGE_SIZE;
         const entries = await this.services.economyService.getLedger(this.env.GUILD_ID, {
-          limit,
+          limit: LEDGER_PAGE_SIZE,
           offset,
         });
 
@@ -1190,9 +1192,7 @@ export class BotRuntime {
           return;
         }
 
-        const content = this.formatLedgerResponse(entries, config, page, offset);
-
-        await interaction.reply({ content });
+        await interaction.reply({ embeds: [this.buildLedgerEmbed(entries, config, page, offset)] });
         return;
       }
       case "transfer": {
@@ -1798,40 +1798,79 @@ export class BotRuntime {
     }
   }
 
-  private formatLedgerResponse(
-    entries: CommandLedgerEntry[],
-    config: GuildConfig,
-    page: number,
-    offset: number,
-  ) {
-    return [
-      `Recent transactions, page ${page}:`,
-      ...entries.map((entry, index) => this.formatLedgerLine(entry, config, offset + index + 1)),
-      "Use /ledger with page:2, page:3, and so on to go back further.",
-    ].join("\n");
+  private static readonly LEDGER_ENTRY_LABELS: Record<string, { emoji: string; label: string }> = {
+    MESSAGE_REWARD: { emoji: "💬", label: "Message reward" },
+    MANUAL_AWARD: { emoji: "🎁", label: "Award" },
+    MANUAL_DEDUCT: { emoji: "📉", label: "Deduction" },
+    CORRECTION: { emoji: "🛠️", label: "Correction" },
+    TRANSFER: { emoji: "🔀", label: "Transfer" },
+    DONATION: { emoji: "🎗️", label: "Donation" },
+    SHOP_REDEMPTION: { emoji: "🛍️", label: "Shop redemption" },
+    ADJUSTMENT: { emoji: "🧮", label: "Adjustment" },
+    SUBMISSION_REWARD: { emoji: "📝", label: "Submission reward" },
+    BET_WIN: { emoji: "💰", label: "Bet win" },
+    BET_LOSS: { emoji: "💸", label: "Bet loss" },
+  };
+
+  private formatLedgerEntryType(type: string) {
+    const mapping = BotRuntime.LEDGER_ENTRY_LABELS[type];
+    if (mapping) {
+      return `${mapping.emoji} ${mapping.label}`;
+    }
+    const pretty = type
+      .toLowerCase()
+      .split("_")
+      .map((segment) => (segment.length === 0 ? segment : segment[0]!.toUpperCase() + segment.slice(1)))
+      .join(" ");
+    return `• ${pretty}`;
   }
 
-  private formatLedgerLine(
+  private formatLedgerSplitLine(
+    split: CommandLedgerEntry["splits"][number],
+    config: GuildConfig,
+  ) {
+    const deltas = [
+      split.pointsDelta === 0 ? null : this.formatSignedPointsAmount(split.pointsDelta, config),
+      split.currencyDelta === 0 ? null : this.formatSignedCurrencyAmount(split.currencyDelta, config),
+    ].filter((value): value is string => value !== null);
+    const amount = deltas.length > 0 ? deltas.join(" / ") : "no change";
+    return `**${split.group.displayName}** ${amount}`;
+  }
+
+  private buildLedgerEntryField(
     entry: CommandLedgerEntry,
     config: GuildConfig,
     index: number,
   ) {
     const timestamp = Math.floor(new Date(entry.createdAt).getTime() / 1000);
-    const splitSummary = entry.splits
-      .map((split) => {
-        const deltas = [
-          split.pointsDelta === 0 ? null : this.formatSignedPointsAmount(split.pointsDelta, config),
-          split.currencyDelta === 0 ? null : this.formatSignedCurrencyAmount(split.currencyDelta, config),
-        ].filter((value): value is string => value !== null);
+    const name = `#${index} · ${this.formatLedgerEntryType(entry.type)}`;
+    const splitLines = entry.splits.map((split) => this.formatLedgerSplitLine(split, config));
+    const lines = [`<t:${timestamp}:R>`, ...splitLines];
+    const description = entry.description?.trim();
+    if (description) {
+      lines.push(`> ${this.truncateText(description, LEDGER_DESCRIPTION_MAX)}`);
+    }
+    const value = this.truncateText(lines.join("\n"), LEDGER_FIELD_VALUE_MAX);
+    return { name, value, inline: false };
+  }
 
-        return `${split.group.displayName} ${deltas.join(" / ")}`;
-      })
-      .join("; ");
-
-    return this.truncateText(
-      `${index}. <t:${timestamp}:g> · ${entry.type} · ${splitSummary} · ${entry.description}`,
-      MAX_LEDGER_LINE_LENGTH,
+  private buildLedgerEmbed(
+    entries: CommandLedgerEntry[],
+    config: GuildConfig,
+    page: number,
+    offset: number,
+  ) {
+    const fields = entries.map((entry, index) =>
+      this.buildLedgerEntryField(entry, config, offset + index + 1),
     );
+    const firstIndex = offset + 1;
+    const lastIndex = offset + entries.length;
+    return new EmbedBuilder()
+      .setColor(LEDGER_EMBED_COLOUR)
+      .setTitle("Transaction ledger")
+      .setDescription(`Page ${page} · showing entries ${firstIndex}–${lastIndex}.`)
+      .addFields(fields)
+      .setFooter({ text: "Use /ledger page:N to browse further back." });
   }
 
   private formatSignedNumber(value: number) {
