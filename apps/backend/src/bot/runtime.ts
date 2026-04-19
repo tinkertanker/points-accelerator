@@ -41,6 +41,7 @@ type GuildConfig = Awaited<ReturnType<AppServices["configService"]["getOrCreate"
 type ActiveAssignment = Awaited<ReturnType<AppServices["assignmentService"]["listActive"]>>[number];
 type CurrencyLeaderboardEntry = Awaited<ReturnType<AppServices["participantService"]["getCurrencyLeaderboard"]>>[number];
 type ShopListItem = Awaited<ReturnType<AppServices["shopService"]["list"]>>[number];
+type UserRedemption = Awaited<ReturnType<AppServices["shopService"]["listRedemptionsByUser"]>>[number];
 type GuildMemberCollection = Awaited<
   ReturnType<NonNullable<ChatInputCommandInteraction["guild"]>["members"]["fetch"]>
 >;
@@ -73,6 +74,8 @@ const GROUP_LEADERBOARD_COLOUR = 0xf59e0b;
 const FORBES_EMBED_COLOUR = 0x38bdf8;
 const STORE_EMBED_COLOUR = 0x10b981;
 const STORE_ITEMS_PER_SECTION = 15;
+const INVENTORY_EMBED_COLOUR = 0xec4899;
+const INVENTORY_ITEMS_LIMIT = 15;
 const AUTOCOMPLETE_CHOICE_LIMIT = 25;
 const AUTOCOMPLETE_CHOICE_NAME_MAX = 100;
 const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
@@ -1117,6 +1120,64 @@ export class BotRuntime {
     return `• ${parts.join(" · ")}`;
   }
 
+  private formatInventoryStatus(status: UserRedemption["status"]) {
+    switch (status) {
+      case "FULFILLED":
+        return "✅ Fulfilled";
+      case "PENDING":
+        return "📦 Pending fulfilment";
+      case "AWAITING_APPROVAL":
+        return "⏳ Awaiting approval";
+      case "CANCELED":
+        return "🚫 Canceled";
+      default:
+        return status;
+    }
+  }
+
+  private formatInventoryLine(redemption: UserRedemption, config: GuildConfig) {
+    const emoji = redemption.shopItem.emoji ? `${redemption.shopItem.emoji} ` : "";
+    const unitLabel =
+      redemption.purchaseMode === "GROUP"
+        ? this.formatPointsAmount(redemption.totalCost.toString(), config)
+        : this.formatCurrencyAmount(redemption.totalCost.toString(), config);
+    const timestamp = Math.floor(new Date(redemption.createdAt).getTime() / 1000);
+    const quantityLabel = redemption.quantity > 1 ? ` ×${redemption.quantity}` : "";
+    const lines = [
+      `${emoji}**${redemption.shopItem.name}**${quantityLabel}`,
+      `${this.formatInventoryStatus(redemption.status)} · ${unitLabel} · <t:${timestamp}:R>`,
+    ];
+    return lines.join("\n");
+  }
+
+  private buildInventoryEmbed(redemptions: UserRedemption[], config: GuildConfig, displayName: string) {
+    const visible = redemptions.slice(0, INVENTORY_ITEMS_LIMIT);
+    const fulfilled = redemptions.filter((redemption) => redemption.status === "FULFILLED");
+    const totalItems = fulfilled.reduce((sum, redemption) => sum + redemption.quantity, 0);
+    const pendingCount = redemptions.filter(
+      (redemption) => redemption.status === "PENDING" || redemption.status === "AWAITING_APPROVAL",
+    ).length;
+
+    const description =
+      visible.length === 0
+        ? "Nothing yet — try `/store` to see what's for sale."
+        : visible.map((redemption) => `• ${this.formatInventoryLine(redemption, config)}`).join("\n\n");
+
+    const footerParts = [
+      `${totalItems} item${totalItems === 1 ? "" : "s"} fulfilled`,
+      `${pendingCount} in progress`,
+    ];
+    if (redemptions.length > INVENTORY_ITEMS_LIMIT) {
+      footerParts.push(`showing latest ${INVENTORY_ITEMS_LIMIT} of ${redemptions.length}`);
+    }
+
+    return new EmbedBuilder()
+      .setColor(INVENTORY_EMBED_COLOUR)
+      .setTitle(`${displayName}'s inventory`)
+      .setDescription(description)
+      .setFooter({ text: footerParts.join(" · ") });
+  }
+
   private buildStoreEmbed(items: ShopListItem[], config: GuildConfig) {
     const enabled = items.filter((item) => item.enabled);
     const personalItems = enabled
@@ -1873,6 +1934,18 @@ export class BotRuntime {
         await interaction.reply({ embeds: [this.buildStoreEmbed(items, config)], ephemeral: true });
         return;
       }
+      case "inventory": {
+        const [config, redemptions] = await Promise.all([
+          this.services.configService.getOrCreate(this.env.GUILD_ID),
+          this.services.shopService.listRedemptionsByUser(this.env.GUILD_ID, interaction.user.id),
+        ]);
+        const displayName = member?.displayName ?? interaction.user.username;
+        await interaction.reply({
+          embeds: [this.buildInventoryEmbed(redemptions, config, displayName)],
+          ephemeral: true,
+        });
+        return;
+      }
       case "buyforme":
       case "buyforgroup": {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
@@ -2424,6 +2497,9 @@ export class BotRuntime {
       new SlashCommandBuilder()
         .setName("store")
         .setDescription("Browse the custom shop."),
+      new SlashCommandBuilder()
+        .setName("inventory")
+        .setDescription("Show the shop items you've bought."),
       new SlashCommandBuilder()
         .setName("buyforme")
         .setDescription("Buy a shop item for yourself.")

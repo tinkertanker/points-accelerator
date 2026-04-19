@@ -390,6 +390,14 @@ export class ShopService {
     });
   }
 
+  public async listRedemptionsByUser(guildId: string, discordUserId: string) {
+    return this.prisma.shopRedemption.findMany({
+      where: { guildId, requestedByUserId: discordUserId },
+      include: redemptionInclude,
+      orderBy: [{ createdAt: "desc" }],
+    });
+  }
+
   public async updateRedemptionStatus(params: {
     guildId: string;
     redemptionId: string;
