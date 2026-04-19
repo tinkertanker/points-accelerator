@@ -636,11 +636,15 @@ export class BotRuntime {
     const roleIds = guildMember ? Array.from(guildMember.roles.cache.keys()) : apiRoleIds;
     // Authorize against the owner snapshot taken when the notice was posted,
     // so that re-assigning the item later doesn't yank fulfil/cancel rights
-    // away from the person actually @mentioned in the channel. Falls back to
-    // the current item owner for legacy redemptions created before the
-    // snapshot column existed.
-    const ownerForRedemption = redemption.ownerUserIdAtPurchase ?? redemption.shopItem.ownerUserId;
-    const isOwner = ownerForRedemption === interaction.user.id;
+    // away from the person actually @mentioned in the channel. The
+    // fulfilmentMessageId presence indicates a snapshot was taken (even when
+    // its value is null = explicitly no owner at purchase time); only fall
+    // back to the current item owner for legacy rows that never recorded one.
+    const snapshotTaken = redemption.fulfilmentMessageId !== null;
+    const ownerForRedemption = snapshotTaken
+      ? redemption.ownerUserIdAtPurchase
+      : redemption.shopItem.ownerUserId;
+    const isOwner = ownerForRedemption !== null && ownerForRedemption === interaction.user.id;
     const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
     const hasStaffPerms = memberPermissions
       ? memberPermissions.has(PermissionFlagsBits.Administrator) ||
