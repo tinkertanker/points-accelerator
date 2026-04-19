@@ -18,6 +18,7 @@ const botRuntime: BotRuntimeApi = {
     return count ? Array.from({ length: count }, (_, index) => `${roleId}-member-${index + 1}`) : null;
   }),
   postListing: vi.fn().mockResolvedValue(null),
+  clearRedemptionButtons: vi.fn().mockResolvedValue(undefined),
 };
 
 async function registerParticipant(params: {

@@ -212,6 +212,8 @@ model ShopRedemption {
   approvalThreshold Int?
   approvalMessageChannelId String?
   approvalMessageId String?
+  fulfilmentMessageChannelId String?
+  fulfilmentMessageId String?
   currencyEntryId   String?
   ledgerEntryId     String?
   stockHeld         Int?

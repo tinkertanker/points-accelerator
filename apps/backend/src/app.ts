@@ -716,13 +716,26 @@ export function createApp(params: {
     const payload = redemptionStatusUpdateSchema.parse(request.body);
     const session = await resolveDashboardSession(request);
     const { id } = request.params as { id: string };
-    const { redemption } = await services.shopService.updateRedemptionStatus({
+    const { redemption, changed } = await services.shopService.updateRedemptionStatus({
       guildId: params.env.GUILD_ID,
       redemptionId: id,
       status: payload.status,
       actorUserId: session.userId,
       actorUsername: session.username,
     });
+
+    if (changed && redemption.fulfilmentMessageChannelId && redemption.fulfilmentMessageId) {
+      const actor = session.username ?? session.userId;
+      const verb = redemption.status === "FULFILLED" ? "Fulfilled" : "Cancelled";
+      const refundSuffix = redemption.status === "CANCELED" ? " and refunded" : "";
+      await params.botRuntime
+        ?.clearRedemptionButtons(
+          redemption.fulfilmentMessageChannelId,
+          redemption.fulfilmentMessageId,
+          `**Status:** ${redemption.status} — ${verb}${refundSuffix} by ${actor} via the dashboard.`,
+        )
+        .catch(() => {});
+    }
 
     return serialiseShopRedemption(redemption);
   });

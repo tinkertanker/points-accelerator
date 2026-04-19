@@ -355,6 +355,24 @@ export class ShopService {
     });
   }
 
+  public async setFulfilmentMessage(params: {
+    guildId: string;
+    redemptionId: string;
+    channelId: string;
+    messageId: string;
+  }) {
+    return this.prisma.shopRedemption.updateMany({
+      where: {
+        id: params.redemptionId,
+        guildId: params.guildId,
+      },
+      data: {
+        fulfilmentMessageChannelId: params.channelId,
+        fulfilmentMessageId: params.messageId,
+      },
+    });
+  }
+
   public async getRedemption(guildId: string, redemptionId: string) {
     return this.prisma.shopRedemption.findFirst({
       where: { id: redemptionId, guildId },

@@ -210,6 +210,7 @@ export interface BotRuntimeApi {
   getGroupMemberCount(roleId: string): Promise<number | null>;
   getGroupMemberDiscordUserIds(roleId: string): Promise<string[] | null>;
   postListing(channelId: string, content: string): Promise<{ channelId: string; messageId: string } | null>;
+  clearRedemptionButtons(channelId: string, messageId: string, statusLine: string): Promise<void>;
 }
 
 function isDiscordUnknownMemberError(error: unknown): boolean {
@@ -506,6 +507,34 @@ export class BotRuntime {
       channelId: sent.channelId,
       messageId: sent.id,
     };
+  }
+
+  public async clearRedemptionButtons(channelId: string, messageId: string, statusLine: string): Promise<void> {
+    if (!this.client) {
+      return;
+    }
+
+    const channel = await this.client.channels.fetch(channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      return;
+    }
+
+    const message = await (channel as GuildTextBasedChannel).messages.fetch(messageId).catch(() => null);
+    if (!message) {
+      return;
+    }
+
+    const original = message.content ?? "";
+    const suffix = statusLine ? `\n\n${statusLine}` : "";
+    await message
+      .edit({
+        content: `${original}${suffix}`,
+        components: [],
+        allowedMentions: { parse: [] },
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to clear redemption buttons", error);
+      });
   }
 
   private buildRedemptionActionRow(redemptionId: string) {
@@ -1655,7 +1684,7 @@ export class BotRuntime {
         if (redemption.status === "PENDING") {
           const fulfilmentChannelId = config.redemptionChannelId ?? interaction.channelId;
           if (fulfilmentChannelId) {
-            await this.postRedemptionFulfilmentNotice({
+            const posted = await this.postRedemptionFulfilmentNotice({
               channelId: fulfilmentChannelId,
               ownerUserId: redemption.shopItem.ownerUserId,
               buyerUserId: interaction.user.id,
@@ -1668,6 +1697,14 @@ export class BotRuntime {
               groupName: group.displayName,
               fulfillmentInstructions: redemption.shopItem.fulfillmentInstructions,
             });
+            if (posted) {
+              await this.services.shopService.setFulfilmentMessage({
+                guildId: this.env.GUILD_ID,
+                redemptionId: redemption.id,
+                channelId: posted.channelId,
+                messageId: posted.messageId,
+              });
+            }
           }
         }
 
@@ -1718,7 +1755,7 @@ export class BotRuntime {
           );
           if (fulfilmentChannelId && fullRedemption) {
             const buyerUserId = fullRedemption.requestedByUserId;
-            await this.postRedemptionFulfilmentNotice({
+            const posted = await this.postRedemptionFulfilmentNotice({
               channelId: fulfilmentChannelId,
               ownerUserId: fullRedemption.shopItem.ownerUserId,
               buyerUserId,
@@ -1731,6 +1768,14 @@ export class BotRuntime {
               groupName: fullRedemption.group.displayName,
               fulfillmentInstructions: fullRedemption.shopItem.fulfillmentInstructions,
             });
+            if (posted) {
+              await this.services.shopService.setFulfilmentMessage({
+                guildId: this.env.GUILD_ID,
+                redemptionId: fullRedemption.id,
+                channelId: posted.channelId,
+                messageId: posted.messageId,
+              });
+            }
           }
         }
 

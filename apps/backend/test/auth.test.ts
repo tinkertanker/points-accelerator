@@ -29,6 +29,7 @@ const botRuntime: BotRuntimeApi = {
   getGroupMemberCount: vi.fn().mockResolvedValue(null),
   getGroupMemberDiscordUserIds: vi.fn().mockResolvedValue(null),
   postListing: vi.fn().mockResolvedValue(null),
+  clearRedemptionButtons: vi.fn().mockResolvedValue(undefined),
 };
 
 const discordOAuthClient: DiscordOAuthClient = {
