@@ -17,6 +17,7 @@ export type Settings = {
   listingChannelId: string | null;
   announcementsChannelId: string | null;
   betWinChance: number;
+  bettingCooldownSeconds: number;
 };
 
 export type RoleCapability = {
@@ -64,6 +65,9 @@ export type ShopItem = {
   stock: number | null;
   enabled: boolean;
   fulfillmentInstructions: string | null;
+  emoji: string;
+  ownerUserId: string | null;
+  ownerUsername: string | null;
 };
 
 export type ShopItemDraft = Omit<ShopItem, "id"> & { id?: string };
@@ -89,6 +93,9 @@ export type ShopRedemption = {
     name: string;
     audience: "INDIVIDUAL" | "GROUP";
     fulfillmentInstructions: string | null;
+    emoji: string;
+    ownerUserId: string | null;
+    ownerUsername: string | null;
   };
   group: {
     id: string;
@@ -182,6 +189,7 @@ export type BootstrapPayload = {
   discord: {
     roles: DiscordOption[];
     channels: DiscordOption[];
+    members: DiscordOption[];
   };
   assignments: Assignment[];
   participants: Participant[];

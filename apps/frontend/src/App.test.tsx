@@ -99,6 +99,7 @@ const bootstrapPayload = {
     listingChannelId: null,
     announcementsChannelId: null,
     betWinChance: 50,
+    bettingCooldownSeconds: 0,
   },
   capabilities: [
     {
@@ -143,6 +144,7 @@ const bootstrapPayload = {
   discord: {
     roles: [{ id: "role-1", name: "Admin" }],
     channels: [{ id: "channel-1", name: "general" }],
+    members: [],
   },
 };
 
@@ -166,6 +168,9 @@ const fulfilmentPayload = [
       name: "Sticker pack",
       audience: "INDIVIDUAL" as const,
       fulfillmentInstructions: "Show this to staff.",
+      emoji: "💸",
+      ownerUserId: null,
+      ownerUsername: null,
     },
     group: {
       id: "group-1",

@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
-import type { ShopItemDraft } from "../types";
+import type { DiscordOption, Participant, ShopItemDraft } from "../types";
+
+const OWNER_DATALIST_ID = "shop-owner-participants";
 
 type ShopSortKey = "audience" | "name" | "cost" | "stock" | "enabled";
 type SortDirection = "asc" | "desc";
@@ -60,6 +62,8 @@ function compareShopItems(
 type ShopPanelProps = {
   shopDrafts: ShopItemDraft[];
   isBusy: boolean;
+  participants?: Participant[];
+  members?: DiscordOption[];
   createShopDraft: () => ShopItemDraft;
   onShopDraftsChange: (next: ShopItemDraft[]) => void;
   onSaveShop: () => Promise<void>;
@@ -68,12 +72,73 @@ type ShopPanelProps = {
 export default function ShopPanel({
   shopDrafts,
   isBusy,
+  participants = [],
+  members = [],
   createShopDraft,
   onShopDraftsChange,
   onSaveShop,
 }: ShopPanelProps) {
   const [sortKey, setSortKey] = useState<ShopSortKey>("audience");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+
+  const ownerSuggestions = useMemo(() => {
+    const byUserId = new Map<string, { userId: string; username: string }>();
+
+    for (const member of members) {
+      if (!member.id || byUserId.has(member.id)) {
+        continue;
+      }
+      byUserId.set(member.id, { userId: member.id, username: member.name || member.id });
+    }
+
+    for (const participant of participants) {
+      if (!participant.discordUserId || byUserId.has(participant.discordUserId)) {
+        continue;
+      }
+      byUserId.set(participant.discordUserId, {
+        userId: participant.discordUserId,
+        username: participant.discordUsername ?? participant.indexId,
+      });
+    }
+
+    const entries = Array.from(byUserId.values()).sort((left, right) =>
+      left.username.localeCompare(right.username),
+    );
+
+    // Always disambiguate the datalist label with the user ID so duplicate
+    // display names don't silently bind to the wrong account on selection.
+    return entries.map((entry) => ({
+      ...entry,
+      label: `${entry.username} · ${entry.userId}`,
+    }));
+  }, [members, participants]);
+
+  const handleOwnerInput = (item: ShopItemDraft, rawValue: string): ShopItemDraft => {
+    const value = rawValue.trim();
+    if (!value) {
+      return { ...item, ownerUserId: null, ownerUsername: null };
+    }
+
+    const matchedByLabel = ownerSuggestions.find((suggestion) => suggestion.label === value);
+    if (matchedByLabel) {
+      return { ...item, ownerUserId: matchedByLabel.userId, ownerUsername: matchedByLabel.username };
+    }
+
+    const matchedByUserId = ownerSuggestions.find((suggestion) => suggestion.userId === value);
+    if (matchedByUserId) {
+      return { ...item, ownerUserId: matchedByUserId.userId, ownerUsername: matchedByUserId.username };
+    }
+
+    if (/^\d{17,20}$/.test(value)) {
+      return { ...item, ownerUserId: value, ownerUsername: null };
+    }
+
+    // Freeform text that matches nothing: clear the bound ID so the displayed
+    // name can never disagree with the actual owner. The UI shows a hint when
+    // ownerUsername is set but ownerUserId is null, so the staffer can pick a
+    // suggestion or paste a snowflake.
+    return { ...item, ownerUserId: null, ownerUsername: value };
+  };
 
   const updateShopDraft = (index: number, nextDraft: ShopItemDraft) => {
     const next = [...shopDrafts];
@@ -90,6 +155,15 @@ export default function ShopPanel({
 
   return (
     <div className="panel-stack">
+      {ownerSuggestions.length > 0 ? (
+        <datalist id={OWNER_DATALIST_ID}>
+          {ownerSuggestions.map((suggestion) => (
+            <option key={suggestion.userId} value={suggestion.label}>
+              {suggestion.username}
+            </option>
+          ))}
+        </datalist>
+      ) : null}
       <article className="section">
         <header className="section-header">
           <h2>Edit the shop catalogue</h2>
@@ -131,6 +205,9 @@ export default function ShopPanel({
                     <th scope="col" className="col-audience">
                       Audience
                     </th>
+                    <th scope="col" className="col-emoji">
+                      Emoji
+                    </th>
                     <th scope="col" className="col-name">
                       Name
                     </th>
@@ -145,6 +222,9 @@ export default function ShopPanel({
                     </th>
                     <th scope="col" className="col-fulfil">
                       Fulfilment
+                    </th>
+                    <th scope="col" className="col-owner">
+                      Owner
                     </th>
                     <th scope="col" className="matrix-table__th--center col-enabled">Enabled</th>
                   </tr>
@@ -166,6 +246,15 @@ export default function ShopPanel({
                           <option value="GROUP">👥</option>
                           <option value="INDIVIDUAL">👤</option>
                         </select>
+                      </td>
+                      <td className="col-emoji">
+                        <input
+                          value={item.emoji}
+                          aria-label="Item emoji"
+                          maxLength={8}
+                          onChange={(event) => updateShopDraft(index, { ...item, emoji: event.target.value })}
+                          placeholder="💸"
+                        />
                       </td>
                       <td className="col-name">
                         <input
@@ -216,6 +305,18 @@ export default function ShopPanel({
                           placeholder="How to redeem"
                         />
                       </td>
+                      <td className="col-owner">
+                        <input
+                          value={item.ownerUsername ?? item.ownerUserId ?? ""}
+                          aria-label="Owner Discord user"
+                          list={ownerSuggestions.length > 0 ? OWNER_DATALIST_ID : undefined}
+                          onChange={(event) => updateShopDraft(index, handleOwnerInput(item, event.target.value))}
+                          placeholder="Pick a participant or type a user ID"
+                        />
+                        {item.ownerUsername && !item.ownerUserId ? (
+                          <small className="shop-owner-hint">No match — pick a suggestion or paste a Discord user ID.</small>
+                        ) : null}
+                      </td>
                       <td className="col-enabled">
                         <input
                           type="checkbox"
@@ -235,7 +336,9 @@ export default function ShopPanel({
             {sortedDrafts.map(({ item, index }) => (
               <article className="shop-card" key={`card-${item.id ?? "new"}-${index}`}>
                 <div className="shop-card__header">
-                  <h3>{item.name.trim() || "New shop item"}</h3>
+                  <h3>
+                    <span aria-hidden>{item.emoji}</span> {item.name.trim() || "New shop item"}
+                  </h3>
                   <span className="shop-card__audience">{AUDIENCE_LABELS[item.audience]}</span>
                 </div>
                 <div className="shop-card__grid">
@@ -254,6 +357,16 @@ export default function ShopPanel({
                       <option value="GROUP">👥</option>
                       <option value="INDIVIDUAL">👤</option>
                     </select>
+                  </label>
+                  <label className="shop-field">
+                    <span className="shop-field__label">Emoji</span>
+                    <input
+                      value={item.emoji}
+                      aria-label="Item emoji"
+                      maxLength={8}
+                      onChange={(event) => updateShopDraft(index, { ...item, emoji: event.target.value })}
+                      placeholder="💸"
+                    />
                   </label>
                   <label className="shop-field">
                     <span className="shop-field__label">Name</span>
@@ -307,6 +420,19 @@ export default function ShopPanel({
                       placeholder="How to redeem"
                     />
                   </label>
+                  <label className="shop-field shop-field--full">
+                    <span className="shop-field__label">Owner</span>
+                    <input
+                      value={item.ownerUsername ?? item.ownerUserId ?? ""}
+                      aria-label="Owner Discord user"
+                      list={ownerSuggestions.length > 0 ? OWNER_DATALIST_ID : undefined}
+                      onChange={(event) => updateShopDraft(index, handleOwnerInput(item, event.target.value))}
+                      placeholder="Pick a participant or type a user ID"
+                    />
+                    {item.ownerUsername && !item.ownerUserId ? (
+                      <small className="shop-owner-hint">No match — pick a suggestion or paste a Discord user ID.</small>
+                    ) : null}
+                  </label>
                   <label className="shop-field shop-field--checkbox shop-field--full">
                     <span className="shop-field__label">Enabled</span>
                     <input
@@ -331,6 +457,8 @@ export default function ShopPanel({
           <details className="capability-help">
             <summary>What do these shop columns mean?</summary>
             <dl>
+              <dt>Emoji</dt>
+              <dd>Shown next to the item name in the shop, redemption notices, and the fulfilment queue. Defaults to 💸.</dd>
               <dt>Name</dt>
               <dd>The item title shown in the shop and purchase flows.</dd>
               <dt>Description</dt>
@@ -349,6 +477,12 @@ export default function ShopPanel({
               <dd>
                 What happens after purchase: for example, &ldquo;show this receipt to a mentor&rdquo; or
                 &ldquo;collect from the staff desk&rdquo;.
+              </dd>
+              <dt>Owner</dt>
+              <dd>
+                The person responsible for fulfilling purchases of this item. Pick from registered participants, or
+                paste a raw Discord user ID for a staff member. They will be pinged in the redemption channel with
+                fulfil and refund buttons whenever someone buys this item.
               </dd>
               <dt>Enabled</dt>
               <dd>Turn items on or off without deleting them from the catalogue.</dd>

@@ -32,6 +32,7 @@ async function seedSettingsAndGroup() {
       listingChannelId: null,
       announcementsChannelId: null,
       betWinChance: 50,
+      bettingCooldownSeconds: 0,
     },
   });
 
@@ -298,6 +299,7 @@ describe("betting system", () => {
         listingChannelId: null,
         announcementsChannelId: null,
         betWinChance: 75,
+        bettingCooldownSeconds: 0,
       },
     });
 

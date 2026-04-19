@@ -24,10 +24,12 @@ let currentDashboardMember = { ...defaultDashboardMember };
 const botRuntime: BotRuntimeApi = {
   getRoles: vi.fn().mockResolvedValue([]),
   getTextChannels: vi.fn().mockResolvedValue([]),
+  getMembers: vi.fn().mockResolvedValue([]),
   getDashboardMember: vi.fn(async (userId: string) => (userId === currentDashboardMember.userId ? currentDashboardMember : null)),
   getGroupMemberCount: vi.fn().mockResolvedValue(null),
   getGroupMemberDiscordUserIds: vi.fn().mockResolvedValue(null),
   postListing: vi.fn().mockResolvedValue(null),
+  clearRedemptionButtons: vi.fn().mockResolvedValue(undefined),
 };
 
 const discordOAuthClient: DiscordOAuthClient = {
@@ -91,6 +93,7 @@ async function seedSettings(overrides: Partial<{ mentorRoleIds: string[] }> = {}
       listingChannelId: null,
       announcementsChannelId: null,
       betWinChance: 50,
+      bettingCooldownSeconds: 0,
     },
   });
 }

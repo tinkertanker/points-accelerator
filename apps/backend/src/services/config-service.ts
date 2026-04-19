@@ -21,6 +21,7 @@ export type GuildConfigUpdateInput = {
   listingChannelId?: string | null;
   announcementsChannelId?: string | null;
   betWinChance?: number;
+  bettingCooldownSeconds?: number;
 };
 
 export class ConfigService {
@@ -65,6 +66,7 @@ export class ConfigService {
         listingChannelId: input.listingChannelId,
         announcementsChannelId: input.announcementsChannelId,
         betWinChance: input.betWinChance,
+        bettingCooldownSeconds: input.bettingCooldownSeconds,
       },
     });
   }

@@ -62,6 +62,7 @@ function createRuntimeFixture() {
         }),
       setApprovalMessage: vi.fn().mockResolvedValue(undefined),
       approveGroupPurchase: vi.fn().mockResolvedValue({ executed: false, approvalsCount: 1, threshold: 2 }),
+      getRedemption: vi.fn().mockResolvedValue(null),
     },
     participantService: {
       findByDiscordUser: vi.fn(),
@@ -155,7 +156,23 @@ describe("bot runtime", () => {
     );
   });
 
-  it("shows the full shop item id in /store output", async () => {
+  it("orders member role ids by Discord hierarchy before resolving a group", () => {
+    const { runtime } = createRuntimeFixture();
+
+    const roleIds = (runtime as any).getOrderedRoleIds({
+      roles: {
+        cache: new Map([
+          ["role-low", { id: "role-low", rawPosition: 1 }],
+          ["role-high", { id: "role-high", rawPosition: 20 }],
+          ["role-mid", { id: "role-mid", rawPosition: 10 }],
+        ]),
+      },
+    });
+
+    expect(roleIds).toEqual(["role-high", "role-mid", "role-low"]);
+  });
+
+  it("renders /store as an embed without exposing raw shop item ids", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.shopService.list.mockResolvedValue([
       {
@@ -163,8 +180,19 @@ describe("bot runtime", () => {
         enabled: true,
         name: "Bubble Tea",
         audience: "INDIVIDUAL",
+        stock: null,
         cost: {
           toString: () => "3",
+        },
+      },
+      {
+        id: "group-item-0987654321",
+        enabled: true,
+        name: "Pizza Party",
+        audience: "GROUP",
+        stock: null,
+        cost: {
+          toString: () => "500",
         },
       },
     ]);
@@ -185,16 +213,18 @@ describe("bot runtime", () => {
       },
     });
 
-    expect(reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("shop-item-1234567890"),
-      }),
-    );
-    expect(reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("Personal items"),
-      }),
-    );
+    const call = reply.mock.calls[0][0];
+    expect(call.ephemeral).toBe(true);
+    expect(call.embeds).toHaveLength(1);
+    const embed = call.embeds[0].data;
+    expect(embed.title).toBe("Store");
+    const rendered = JSON.stringify(embed);
+    expect(rendered).not.toContain("shop-item-1234567890");
+    expect(rendered).not.toContain("group-item-0987654321");
+    expect(rendered).toContain("Bubble Tea");
+    expect(rendered).toContain("Pizza Party");
+    expect(rendered).toContain("Personal items");
+    expect(rendered).toContain("Group items");
   });
 
   it("shows a paged ledger summary in Discord", async () => {
@@ -238,26 +268,30 @@ describe("bot runtime", () => {
       limit: 10,
       offset: 10,
     });
-    expect(reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("Recent transactions, page 2"),
-      }),
-    );
-    expect(reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("Gryffindor +5 blorgshj 🏅"),
-      }),
-    );
+    const call = reply.mock.calls[0][0];
+    expect(call.embeds).toHaveLength(1);
+    const embed = call.embeds[0].data;
+    expect(embed.title).toBe("Transaction ledger");
+    expect(embed.description).toContain("Page 2");
+    expect(embed.fields).toHaveLength(1);
+    const [field] = embed.fields;
+    expect(field.name).toContain("#11");
+    expect(field.name).toContain("Award");
+    expect(field.value).toContain("Gryffindor");
+    expect(field.value).toContain("+5 blorgshj 🏅");
+    expect(field.value).toContain("Answered the toughest warm-up question");
   });
 
-  it("truncates long ledger lines so Discord replies stay within the message limit", async () => {
+  it("keeps ledger entry field values within Discord's 1024 character limit", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.economyService.getLedger.mockResolvedValue(
       Array.from({ length: 10 }, (_, index) => ({
         id: `entry-${index + 1}`,
         type: "MANUAL_AWARD",
         description:
-          "Awarded for consistently helping other tables, finishing every checkpoint, and writing up the clearest recap note of the day.",
+          "Awarded for consistently helping other tables, finishing every checkpoint, and writing up the clearest recap note of the day. ".repeat(
+            5,
+          ),
         createdAt: "2026-04-01T12:00:00.000Z",
         splits: [
           {
@@ -294,12 +328,17 @@ describe("bot runtime", () => {
       },
     });
 
-    const [{ content }] = reply.mock.calls[0] as [{ content: string }];
-    expect(content.length).toBeLessThanOrEqual(2000);
-    expect(content).toContain("...");
+    const call = reply.mock.calls[0][0];
+    const embed = call.embeds[0].data;
+    expect(embed.fields).toHaveLength(10);
+    for (const field of embed.fields) {
+      expect(field.value.length).toBeLessThanOrEqual(1024);
+    }
+    const longDescriptionField = embed.fields.find((f: { value: string }) => f.value.includes("..."));
+    expect(longDescriptionField).toBeDefined();
   });
 
-  it("uses the Discord display name in /awardcurrency replies for member currency awards", async () => {
+  it("mentions the selected student in /awardcurrency replies for member currency awards", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.participantService.ensureForGroup.mockResolvedValue({
       id: "participant-2",
@@ -366,7 +405,87 @@ describe("bot runtime", () => {
       currencyDelta: 100,
       description: "Great work",
     });
-    expect(reply).toHaveBeenCalledWith("Awarded 100 bananas 💲 to Alex Carter. Reason: Great work");
+    expect(reply).toHaveBeenCalledWith("Awarded 100 bananas 💲 to <@student-1>. Reason: Great work");
+  });
+
+  it("mentions both students in /transfer replies", async () => {
+    const { runtime } = createRuntimeFixture();
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const fetchMember = vi.fn(async (userId: string) => {
+      if (userId === "user-1") {
+        return {
+          displayName: "Alice Jones",
+          roles: { cache: new Map([["group-role", { id: "group-role", rawPosition: 1 }]]) },
+          permissions: { has: vi.fn().mockReturnValue(false) },
+        };
+      }
+
+      if (userId === "student-2") {
+        return {
+          displayName: "Ben Taylor",
+          roles: { cache: new Map([["group-role", { id: "group-role", rawPosition: 1 }]]) },
+          permissions: { has: vi.fn().mockReturnValue(false) },
+        };
+      }
+
+      return null;
+    });
+
+    await (runtime as any).handleCommand({
+      commandName: "transfer",
+      guild: {
+        members: {
+          fetch: fetchMember,
+        },
+      },
+      options: {
+        getNumber: vi.fn((name: string) => (name === "amount" ? 5 : null)),
+        getUser: vi.fn((name: string) =>
+          name === "member"
+            ? {
+                id: "student-2",
+                username: "ben-user",
+                globalName: "Ben Taylor",
+              }
+            : null,
+        ),
+      },
+      reply,
+      user: {
+        id: "user-1",
+        username: "alice-user",
+      },
+    });
+
+    expect(reply).toHaveBeenCalledWith("<@user-1> transferred 5 bananas 💲 to <@student-2>.");
+  });
+
+  it("mentions the student and group in /donate replies", async () => {
+    const { runtime } = createRuntimeFixture();
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "donate",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue({
+            displayName: "Alice Jones",
+            roles: { cache: new Map([["group-role", { id: "group-role", rawPosition: 1 }]]) },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          }),
+        },
+      },
+      options: {
+        getNumber: vi.fn((name: string) => (name === "amount" ? 3 : null)),
+      },
+      reply,
+      user: {
+        id: "user-1",
+        username: "alice-user",
+      },
+    });
+
+    expect(reply).toHaveBeenCalledWith("<@user-1> donated 3 bananas 💲 to <@&group-role>, adding 20 blorgshj 🏅.");
   });
 
   it("awards currency in bulk to eligible members across selected groups", async () => {
@@ -471,7 +590,7 @@ describe("bot runtime", () => {
       description: "Team effort",
       executor: {},
     });
-    expect(reply).toHaveBeenCalledWith("Awarded 15 bananas 💲 each to 2 members across Gryffindor (2). Reason: Team effort");
+    expect(reply).toHaveBeenCalledWith("Awarded 15 bananas 💲 each to 2 members across <@&group-role> (2). Reason: Team effort");
   });
 
   it("echoes the reason in /awardpoints replies for group awards", async () => {
@@ -526,7 +645,7 @@ describe("bot runtime", () => {
       description: "Helped another group",
       executor: {},
     });
-    expect(reply).toHaveBeenCalledWith("Awarded 5 blorgshj 🏅 to Gryffindor. Reason: Helped another group");
+    expect(reply).toHaveBeenCalledWith("Awarded 5 blorgshj 🏅 to <@&group-role>. Reason: Helped another group");
   });
 
   it("blocks repeated award commands during the configured role cooldown for non-admin members", async () => {
@@ -1198,15 +1317,15 @@ describe("bot runtime", () => {
       expect.arrayContaining([
         expect.objectContaining({
           name: "Standings",
-          value: expect.stringContaining("🥇 **Bobby Tables**"),
+          value: expect.stringContaining("🥇 **<@student-2>**"),
         }),
         expect.objectContaining({
           name: "Standings",
-          value: expect.stringContaining("🥈 **S001**"),
+          value: expect.stringContaining("🥈 **<@student-1>**"),
         }),
         expect.objectContaining({
           name: "Also ranked",
-          value: expect.stringContaining("#5 **Echo**"),
+          value: expect.stringContaining("#5 **<@student-5>**"),
         }),
         expect.objectContaining({
           name: "Total held",
@@ -1343,6 +1462,10 @@ describe("bot runtime", () => {
     expect(services.participantService.ensureForGroup).toHaveBeenCalledTimes(3);
     expect(postListingSpy).toHaveBeenCalledWith(
       "channel-current",
+      expect.stringContaining("from <@&group-role>, requested by <@user-1>"),
+    );
+    expect(postListingSpy).toHaveBeenCalledWith(
+      "channel-current",
       expect.stringContaining("Request ID: `redemption-12345678`"),
     );
     expect(services.shopService.setApprovalMessage).toHaveBeenCalledWith({
@@ -1353,7 +1476,7 @@ describe("bot runtime", () => {
     });
     expect(reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining("Request ID: redemption-12345678"),
+        content: expect.stringMatching(/<@&group-role>.*Request ID: redemption-12345678/),
       }),
     );
   });

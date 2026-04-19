@@ -81,6 +81,7 @@ model GuildConfig {
   announcementsChannelId       String?
   lastAnnouncedVersion         String?
   betWinChance                 Int                   @default(50)
+  bettingCooldownSeconds       Int                   @default(0)
   createdAt                    DateTime              @default(now())
   updatedAt                    DateTime              @updatedAt
   groups                       Group[]
@@ -189,6 +190,9 @@ model ShopItem {
   stock                  Int?
   enabled                Boolean           @default(true)
   fulfillmentInstructions String?
+  emoji                  String            @default("💸")
+  ownerUserId            String?
+  ownerUsername          String?
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
   guild                  GuildConfig       @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
@@ -211,8 +215,12 @@ model ShopRedemption {
   approvalThreshold Int?
   approvalMessageChannelId String?
   approvalMessageId String?
+  fulfilmentMessageChannelId String?
+  fulfilmentMessageId String?
+  ownerUserIdAtPurchase String?
   currencyEntryId   String?
   ledgerEntryId     String?
+  stockHeld         Int?
   status            RedemptionStatus @default(PENDING)
   notes             String?
   createdAt         DateTime         @default(now())

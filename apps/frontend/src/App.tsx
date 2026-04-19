@@ -75,6 +75,8 @@ function toSyncedGroupDrafts(groups: Group[], capabilities: RoleCapability[]): G
     .map((capability) => toGroupDraft(groupsByRoleId.get(capability.roleId), capability));
 }
 
+const DEFAULT_SHOP_ITEM_EMOJI = "💸";
+
 function toShopItemDraft(item?: ShopItem): ShopItemDraft {
   if (!item) {
     return {
@@ -85,6 +87,9 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
       stock: null,
       enabled: true,
       fulfillmentInstructions: "",
+      emoji: DEFAULT_SHOP_ITEM_EMOJI,
+      ownerUserId: null,
+      ownerUsername: null,
     };
   }
 
@@ -97,6 +102,9 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
     stock: item.stock,
     enabled: item.enabled,
     fulfillmentInstructions: item.fulfillmentInstructions,
+    emoji: item.emoji || DEFAULT_SHOP_ITEM_EMOJI,
+    ownerUserId: item.ownerUserId,
+    ownerUsername: item.ownerUsername,
   };
 }
 
@@ -186,7 +194,7 @@ function getDefaultTab(accessLevel?: DashboardAccessLevel): TabId {
 
 function getDashboardSubtitle(accessLevel?: DashboardAccessLevel): string {
   if (accessLevel === "admin") {
-    return "Manage the class economy in focused sections instead of one endless dashboard.";
+    return "";
   }
 
   if (accessLevel === "mentor") {
@@ -464,6 +472,8 @@ export default function App() {
           <ShopPanel
             shopDrafts={shopDrafts}
             isBusy={isMutating}
+            participants={bootstrap.participants}
+            members={bootstrap.discord.members}
             createShopDraft={() => toShopItemDraft()}
             onShopDraftsChange={setShopDrafts}
             onSaveShop={handleSaveShop}
@@ -605,6 +615,8 @@ export default function App() {
   const showLoginScreen = !showLoadingScreen && !bootstrap;
   const showDashboard = !showLoadingScreen && !!bootstrap;
   const isDashboardBusy = isInitialising || isMutating;
+  const appName = settingsDraft?.appName.trim() || bootstrap?.settings.appName || "points accelerator";
+  const dashboardSubtitle = getDashboardSubtitle(sessionUser?.dashboardAccessLevel);
 
   return (
     <main className="shell">
@@ -622,7 +634,10 @@ export default function App() {
       ) : showLoginScreen ? (
         <section className="login-page">
           <header className="login-hero">
-            <h1>points accelerator</h1>
+            <h1 className="brand-title">
+              <img src="/favicon-32x32.png" alt="" aria-hidden="true" className="brand-title__icon brand-title__icon--hero" />
+              <span>points accelerator</span>
+            </h1>
             <p className="lede">
               Group points, personal wallets, shop pricing, role capabilities, and passive chat earn rates all live
               here.
@@ -649,8 +664,11 @@ export default function App() {
           ) : null}
           <header className="topbar">
             <hgroup className="topbar-brand">
-              <h1>{settingsDraft?.appName.trim() || bootstrap.settings.appName}</h1>
-              <p>{getDashboardSubtitle(sessionUser?.dashboardAccessLevel)}</p>
+              <h1 className="brand-title brand-title--compact">
+                <img src="/favicon-32x32.png" alt="" aria-hidden="true" className="brand-title__icon" />
+                <span>{appName}</span>
+              </h1>
+              {dashboardSubtitle ? <p>{dashboardSubtitle}</p> : null}
             </hgroup>
             <div className="topbar-right">
               {isDesignPreview() && sessionUser ? (

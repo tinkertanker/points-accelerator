@@ -23,6 +23,7 @@ const baseSettings: Settings = {
   listingChannelId: null,
   announcementsChannelId: null,
   betWinChance: 50,
+  bettingCooldownSeconds: 0,
 };
 
 function renderSettingsPanel(overrides?: Partial<Settings>) {

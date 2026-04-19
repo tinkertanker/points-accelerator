@@ -14,6 +14,9 @@ const shopDrafts: ShopItemDraft[] = [
     stock: 10,
     enabled: true,
     fulfillmentInstructions: "Collect from the desk",
+    emoji: "🦓",
+    ownerUserId: null,
+    ownerUsername: null,
   },
   {
     id: "group-apple",
@@ -24,6 +27,9 @@ const shopDrafts: ShopItemDraft[] = [
     stock: 3,
     enabled: true,
     fulfillmentInstructions: "Ask a mentor",
+    emoji: "🍎",
+    ownerUserId: null,
+    ownerUsername: null,
   },
   {
     id: "personal-apple",
@@ -34,6 +40,9 @@ const shopDrafts: ShopItemDraft[] = [
     stock: null,
     enabled: false,
     fulfillmentInstructions: null,
+    emoji: "💸",
+    ownerUserId: null,
+    ownerUsername: null,
   },
 ];
 
@@ -55,6 +64,9 @@ describe("ShopPanel", () => {
           stock: null,
           enabled: true,
           fulfillmentInstructions: "",
+          emoji: "💸",
+          ownerUserId: null,
+          ownerUsername: null,
         })}
         onShopDraftsChange={vi.fn()}
         onSaveShop={vi.fn(async () => undefined)}
@@ -64,11 +76,13 @@ describe("ShopPanel", () => {
     const headers = within(screen.getByRole("table")).getAllByRole("columnheader");
     expect(headers.map((header) => header.textContent?.trim())).toEqual([
       "Audience",
+      "Emoji",
       "Name",
       "Description",
       "Cost",
       "Stock",
       "Fulfilment",
+      "Owner",
       "Enabled",
     ]);
 
@@ -91,6 +105,9 @@ describe("ShopPanel", () => {
           stock: null,
           enabled: true,
           fulfillmentInstructions: "",
+          emoji: "💸",
+          ownerUserId: null,
+          ownerUsername: null,
         })}
         onShopDraftsChange={vi.fn()}
         onSaveShop={vi.fn(async () => undefined)}

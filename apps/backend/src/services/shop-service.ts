@@ -6,6 +6,8 @@ import type { AuditService } from "./audit-service.js";
 import type { EconomyService } from "./economy-service.js";
 import type { ParticipantCurrencyService } from "./participant-currency-service.js";
 
+export const DEFAULT_SHOP_ITEM_EMOJI = "💸";
+
 export type ShopItemInput = {
   id?: string;
   name: string;
@@ -15,6 +17,9 @@ export type ShopItemInput = {
   stock: number | null;
   enabled: boolean;
   fulfillmentInstructions?: string | null;
+  emoji?: string | null;
+  ownerUserId?: string | null;
+  ownerUsername?: string | null;
 };
 
 type PurchaseMode = "INDIVIDUAL" | "GROUP";
@@ -39,6 +44,10 @@ type GroupPurchaseRedemption = ShopRedemption & {
     stock: number | null;
     audience: ShopItemAudience;
     cost: Prisma.Decimal;
+    fulfillmentInstructions: string | null;
+    emoji: string;
+    ownerUserId: string | null;
+    ownerUsername: string | null;
   };
   group: {
     id: string;
@@ -80,6 +89,8 @@ const redemptionInclude = {
   },
 } satisfies Prisma.ShopRedemptionInclude;
 
+type FullRedemption = Prisma.ShopRedemptionGetPayload<{ include: typeof redemptionInclude }>;
+
 export class ShopService {
   public constructor(
     private readonly prisma: PrismaClient,
@@ -96,6 +107,10 @@ export class ShopService {
   }
 
   public async upsert(guildId: string, input: ShopItemInput) {
+    const ownerUserId = input.ownerUserId?.trim() ? input.ownerUserId.trim() : null;
+    const ownerUsername = input.ownerUsername?.trim() ? input.ownerUsername.trim() : null;
+    const emoji = input.emoji?.trim() ? input.emoji.trim() : DEFAULT_SHOP_ITEM_EMOJI;
+
     const item = input.id
       ? await this.prisma.shopItem.update({
           where: { id: input.id },
@@ -107,6 +122,9 @@ export class ShopService {
             stock: input.stock,
             enabled: input.enabled,
             fulfillmentInstructions: input.fulfillmentInstructions ?? null,
+            emoji,
+            ownerUserId,
+            ownerUsername,
           },
         })
       : await this.prisma.shopItem.create({
@@ -119,6 +137,9 @@ export class ShopService {
             stock: input.stock,
             enabled: input.enabled,
             fulfillmentInstructions: input.fulfillmentInstructions ?? null,
+            emoji,
+            ownerUserId,
+            ownerUsername,
           },
         });
 
@@ -197,6 +218,7 @@ export class ShopService {
         return {
           redemption,
           executed: redemption.status === "PENDING",
+          justExecuted: false,
           approvalsCount: redemption.approvals.length,
           threshold: redemption.approvalThreshold ?? 1,
         };
@@ -274,6 +296,7 @@ export class ShopService {
             approvals: eligibleApprovals,
           },
           executed: false,
+          justExecuted: false,
           approvalsCount: eligibleApprovals.length,
           threshold,
         };
@@ -289,7 +312,10 @@ export class ShopService {
         actorUsername: params.approvedByUsername,
       });
 
-      return executedPurchase;
+      return {
+        ...executedPurchase,
+        justExecuted: executedPurchase.executed,
+      };
     });
 
     await this.auditService.record({
@@ -325,6 +351,26 @@ export class ShopService {
       data: {
         approvalMessageChannelId: params.channelId,
         approvalMessageId: params.messageId,
+      },
+    });
+  }
+
+  public async setFulfilmentMessage(params: {
+    guildId: string;
+    redemptionId: string;
+    channelId: string;
+    messageId: string;
+    ownerUserIdAtPurchase: string | null;
+  }) {
+    return this.prisma.shopRedemption.updateMany({
+      where: {
+        id: params.redemptionId,
+        guildId: params.guildId,
+      },
+      data: {
+        fulfilmentMessageChannelId: params.channelId,
+        fulfilmentMessageId: params.messageId,
+        ownerUserIdAtPurchase: params.ownerUserIdAtPurchase,
       },
     });
   }
@@ -366,6 +412,7 @@ export class ShopService {
       if (redemption.status === params.status) {
         return {
           changed: false,
+          refunded: false,
           previousStatus: redemption.status,
           redemption,
         };
@@ -377,20 +424,25 @@ export class ShopService {
         }
       }
 
+      let refunded = false;
       if (params.status === "CANCELED") {
         if (redemption.status === "FULFILLED") {
           throw new AppError("Fulfilled purchases cannot be canceled.", 409);
         }
 
-        if (redemption.status === "PENDING") {
-          throw new AppError(
-            "Charged purchases cannot be canceled from the fulfilment queue. Use a separate correction entry if needed.",
-            409,
-          );
+        if (redemption.status !== "PENDING" && redemption.status !== "AWAITING_APPROVAL") {
+          throw new AppError("Only open purchases can be canceled.", 409);
         }
 
-        if (redemption.status !== "AWAITING_APPROVAL") {
-          throw new AppError("Only open approval requests can be canceled.", 409);
+        if (redemption.status === "PENDING") {
+          await this.refundRedemption({
+            tx,
+            guildId: params.guildId,
+            redemption,
+            actorUserId: params.actorUserId,
+            actorUsername: params.actorUsername,
+          });
+          refunded = true;
         }
       }
 
@@ -402,6 +454,7 @@ export class ShopService {
 
       return {
         changed: true,
+        refunded,
         previousStatus: redemption.status,
         redemption: updatedRedemption,
       };
@@ -421,11 +474,86 @@ export class ShopService {
           purchaseMode: result.redemption.purchaseMode,
           quantity: result.redemption.quantity,
           totalCost: decimalToNumber(result.redemption.totalCost),
+          refunded: result.refunded,
         },
       });
     }
 
-    return result.redemption;
+    return {
+      redemption: result.redemption,
+      changed: result.changed,
+      previousStatus: result.previousStatus,
+      refunded: result.refunded,
+    };
+  }
+
+  private async refundRedemption(params: {
+    tx: Prisma.TransactionClient;
+    guildId: string;
+    redemption: FullRedemption;
+    actorUserId: string;
+    actorUsername?: string;
+  }) {
+    const { tx, redemption } = params;
+    const totalCost = decimalToNumber(redemption.totalCost);
+
+    if (totalCost > 0) {
+      if (redemption.purchaseMode === "INDIVIDUAL") {
+        if (!redemption.requestedByParticipantId) {
+          throw new AppError("Cannot refund: original participant is missing.", 409);
+        }
+
+        await this.participantCurrencyService.recordEntry({
+          guildId: params.guildId,
+          actor: {
+            userId: params.actorUserId,
+            username: params.actorUsername,
+            roleIds: [],
+          },
+          type: "CORRECTION",
+          description: `Refund: ${redemption.shopItem.name} (cancelled redemption ${redemption.id})`,
+          splits: [{ participantId: redemption.requestedByParticipantId, currencyDelta: totalCost }],
+          systemAction: true,
+          executor: tx,
+          externalRef: redemption.id,
+          auditAction: "shop.redemption.refunded",
+          auditPayload: {
+            redemptionId: redemption.id,
+            participantId: redemption.requestedByParticipantId,
+            amount: totalCost,
+          },
+        });
+      } else {
+        await this.economyService.awardGroups({
+          guildId: params.guildId,
+          actor: {
+            userId: params.actorUserId,
+            username: params.actorUsername,
+            roleIds: [],
+          },
+          type: "CORRECTION",
+          description: `Refund: group purchase ${redemption.shopItem.name} (cancelled redemption ${redemption.id})`,
+          targetGroupIds: [redemption.groupId],
+          pointsDelta: totalCost,
+          currencyDelta: 0,
+          systemAction: true,
+          executor: tx,
+          externalRef: redemption.id,
+        });
+      }
+    }
+
+    // Restore exactly what was held back at redemption time. For legacy
+    // rows without `stockHeld`, fall back to inferring from the current item
+    // configuration (best effort — see migration add_redemption_stock_held).
+    const stockToRestore =
+      redemption.stockHeld ?? (redemption.shopItem.stock !== null ? redemption.quantity : 0);
+    if (stockToRestore > 0 && redemption.shopItem.stock !== null) {
+      await tx.shopItem.update({
+        where: { id: redemption.shopItemId },
+        data: { stock: { increment: stockToRestore } },
+      });
+    }
   }
 
   private async redeemIndividual(params: {
@@ -518,18 +646,22 @@ export class ShopService {
         },
       });
 
-      if (item.stock !== null) {
+      const stockHeld = item.stock !== null ? quantity : 0;
+      if (stockHeld > 0) {
         await tx.shopItem.update({
           where: { id: item.id },
           data: {
-            stock: item.stock - quantity,
+            stock: item.stock! - quantity,
           },
         });
       }
 
       return tx.shopRedemption.update({
         where: { id: redemption.id },
-        data: { currencyEntryId: currencyEntry.id },
+        data: {
+          currencyEntryId: currencyEntry.id,
+          stockHeld,
+        },
         include: {
           shopItem: true,
           group: true,
@@ -768,11 +900,12 @@ export class ShopService {
       externalRef: params.redemption.id,
     });
 
-    if (item.stock !== null) {
+    const stockHeld = item.stock !== null ? params.redemption.quantity : 0;
+    if (stockHeld > 0) {
       await params.tx.shopItem.update({
         where: { id: item.id },
         data: {
-          stock: item.stock - params.redemption.quantity,
+          stock: item.stock! - params.redemption.quantity,
         },
       });
     }
@@ -782,6 +915,7 @@ export class ShopService {
       data: {
         status: "PENDING",
         ledgerEntryId: ledgerEntry.id,
+        stockHeld,
       },
       include: {
         shopItem: true,

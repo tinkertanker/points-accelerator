@@ -10,6 +10,7 @@ const groupMemberCounts = new Map<string, number>();
 const botRuntime: BotRuntimeApi = {
   getRoles: vi.fn().mockResolvedValue([]),
   getTextChannels: vi.fn().mockResolvedValue([]),
+  getMembers: vi.fn().mockResolvedValue([]),
   getDashboardMember: vi.fn().mockResolvedValue(null),
   getGroupMemberCount: vi.fn(async (roleId: string) => groupMemberCounts.get(roleId) ?? null),
   getGroupMemberDiscordUserIds: vi.fn(async (roleId: string) => {
@@ -17,6 +18,7 @@ const botRuntime: BotRuntimeApi = {
     return count ? Array.from({ length: count }, (_, index) => `${roleId}-member-${index + 1}`) : null;
   }),
   postListing: vi.fn().mockResolvedValue(null),
+  clearRedemptionButtons: vi.fn().mockResolvedValue(undefined),
 };
 
 async function registerParticipant(params: {
@@ -90,6 +92,7 @@ describe("points accelerator API", () => {
         redemptionChannelId: null,
         listingChannelId: null,
         betWinChance: 50,
+        bettingCooldownSeconds: 0,
       },
     });
 
@@ -393,6 +396,67 @@ describe("points accelerator API", () => {
         slug: "red-team",
       }),
     ]);
+  });
+
+  it("prefers the first matching group role when multiple configured groups are present", async () => {
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-alpha",
+          roleName: "Alpha",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: true,
+        },
+        {
+          roleId: "role-beta",
+          roleName: "Beta",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: true,
+        },
+      ],
+    });
+
+    await ctx.prisma.group.createMany({
+      data: [
+        {
+          guildId: ctx.env.GUILD_ID,
+          displayName: "Alpha",
+          slug: "alpha",
+          mentorName: null,
+          roleId: "role-alpha",
+          active: true,
+        },
+        {
+          guildId: ctx.env.GUILD_ID,
+          displayName: "Beta",
+          slug: "beta",
+          mentorName: null,
+          roleId: "role-beta",
+          active: true,
+        },
+      ],
+    });
+
+    await expect(ctx.services.groupService.resolveGroupFromRoleIds(ctx.env.GUILD_ID, ["role-beta", "role-alpha"])).resolves
+      .toMatchObject({
+        displayName: "Beta",
+        roleId: "role-beta",
+      });
   });
 
   it("assigns unique slugs when synced role names normalise to the same value", async () => {

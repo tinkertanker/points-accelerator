@@ -1,4 +1,7 @@
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelType,
   Client,
   EmbedBuilder,
@@ -8,6 +11,8 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
+  type AutocompleteInteraction,
+  type ButtonInteraction,
   type ChatInputCommandInteraction,
   type GuildTextBasedChannel,
   type GuildMember,
@@ -25,11 +30,17 @@ type CooldownEntry = {
   seenAt: number;
 };
 
+type BettingCooldownEntry = {
+  lastBetAt: number;
+  offenses: number;
+};
+
 type CommandLedgerEntry = Awaited<ReturnType<AppServices["economyService"]["getLedger"]>>[number];
 type GroupLeaderboardEntry = Awaited<ReturnType<AppServices["economyService"]["getLeaderboard"]>>[number];
 type GuildConfig = Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>;
 type ActiveAssignment = Awaited<ReturnType<AppServices["assignmentService"]["listActive"]>>[number];
 type CurrencyLeaderboardEntry = Awaited<ReturnType<AppServices["participantService"]["getCurrencyLeaderboard"]>>[number];
+type ShopListItem = Awaited<ReturnType<AppServices["shopService"]["list"]>>[number];
 type GuildMemberCollection = Awaited<
   ReturnType<NonNullable<ChatInputCommandInteraction["guild"]>["members"]["fetch"]>
 >;
@@ -46,11 +57,24 @@ type AwardLikeCommandName =
   | "deductmember"
   | "deductmixed";
 
-const MAX_LEDGER_LINE_LENGTH = 160;
+const DISCORD_SNOWFLAKE_PATTERN = /^\d{17,20}$/;
+
+function isDiscordSnowflake(value: string | null | undefined): value is string {
+  return typeof value === "string" && DISCORD_SNOWFLAKE_PATTERN.test(value);
+}
+
+const LEDGER_PAGE_SIZE = 10;
+const LEDGER_EMBED_COLOUR = 0x8b5cf6;
+const LEDGER_DESCRIPTION_MAX = 300;
+const LEDGER_FIELD_VALUE_MAX = 1024;
 const LEADERBOARD_EMBED_LIMIT = 10;
 const LEADERBOARD_FEATURED_COUNT = 4;
 const GROUP_LEADERBOARD_COLOUR = 0xf59e0b;
 const FORBES_EMBED_COLOUR = 0x38bdf8;
+const STORE_EMBED_COLOUR = 0x10b981;
+const STORE_ITEMS_PER_SECTION = 15;
+const AUTOCOMPLETE_CHOICE_LIMIT = 25;
+const AUTOCOMPLETE_CHOICE_NAME_MAX = 100;
 const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
 
 function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: string) {
@@ -196,10 +220,12 @@ export type DashboardMember = {
 export interface BotRuntimeApi {
   getRoles(): Promise<Array<{ id: string; name: string }>>;
   getTextChannels(): Promise<Array<{ id: string; name: string }>>;
+  getMembers(): Promise<Array<{ id: string; name: string }>>;
   getDashboardMember(userId: string): Promise<DashboardMember | null>;
   getGroupMemberCount(roleId: string): Promise<number | null>;
   getGroupMemberDiscordUserIds(roleId: string): Promise<string[] | null>;
   postListing(channelId: string, content: string): Promise<{ channelId: string; messageId: string } | null>;
+  clearRedemptionButtons(channelId: string, messageId: string, statusLine: string): Promise<void>;
 }
 
 function isDiscordUnknownMemberError(error: unknown): boolean {
@@ -211,10 +237,14 @@ function isDiscordUnknownMemberError(error: unknown): boolean {
   );
 }
 
+const MEMBERS_CACHE_TTL_MS = 60_000;
+
 export class BotRuntime {
   private readonly passiveCooldowns = new Map<string, CooldownEntry>();
   private readonly actionCooldowns = new Map<string, CooldownEntry>();
+  private readonly bettingCooldowns = new Map<string, BettingCooldownEntry>();
   private client: Client | null = null;
+  private membersCache: { fetchedAt: number; value: Array<{ id: string; name: string }> } | null = null;
 
   public constructor(
     private readonly env: AppEnv,
@@ -260,7 +290,7 @@ export class BotRuntime {
 
       await this.handlePassiveMessage({
         memberId: member.id,
-        roleIds: Array.from(member.roles.cache.keys()),
+        roleIds: this.getOrderedRoleIds(member),
         userId: message.author.id,
         username: message.author.username,
         messageId: message.id,
@@ -270,7 +300,39 @@ export class BotRuntime {
     });
 
     this.client.on("interactionCreate", async (interaction) => {
-      if (!interaction.isChatInputCommand() || interaction.guildId !== this.env.GUILD_ID) {
+      if (interaction.guildId !== this.env.GUILD_ID) {
+        return;
+      }
+
+      if (interaction.isAutocomplete()) {
+        try {
+          await this.handleAutocomplete(interaction);
+        } catch (error) {
+          console.error("Autocomplete handling failed", error);
+        }
+        return;
+      }
+
+      if (interaction.isButton() && interaction.customId.startsWith("redemption:")) {
+        try {
+          await this.handleRedemptionButton(interaction);
+        } catch (error) {
+          console.error("Redemption button handling failed", error);
+          const message = error instanceof AppError ? error.message : "Unexpected button error.";
+          try {
+            if (interaction.replied || interaction.deferred) {
+              await interaction.editReply({ content: message });
+            } else {
+              await interaction.reply({ content: message, ephemeral: true });
+            }
+          } catch (replyError) {
+            console.error("Failed to send button error response", replyError);
+          }
+        }
+        return;
+      }
+
+      if (!interaction.isChatInputCommand()) {
         return;
       }
 
@@ -313,6 +375,20 @@ export class BotRuntime {
     this.client = null;
   }
 
+  private getOrderedRoleIds(member: GuildMember | null): string[] {
+    if (!member) {
+      return [];
+    }
+
+    return Array.from(member.roles.cache.entries())
+      .map(([roleId, role]) => ({
+        roleId,
+        rawPosition: typeof role.rawPosition === "number" ? role.rawPosition : -1,
+      }))
+      .sort((left, right) => right.rawPosition - left.rawPosition || left.roleId.localeCompare(right.roleId))
+      .map((role) => role.roleId);
+  }
+
   public async getRoles() {
     if (!this.client) {
       return [];
@@ -353,6 +429,38 @@ export class BotRuntime {
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 
+  public async getMembers() {
+    const now = Date.now();
+    if (this.membersCache && now - this.membersCache.fetchedAt < MEMBERS_CACHE_TTL_MS) {
+      return this.membersCache.value;
+    }
+
+    if (!this.client) {
+      return this.membersCache?.value ?? [];
+    }
+
+    const guild = await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null);
+    if (!guild) {
+      return this.membersCache?.value ?? [];
+    }
+
+    const members = await guild.members.fetch().catch(() => null);
+    if (!members) {
+      return this.membersCache?.value ?? [];
+    }
+
+    const value = Array.from(members.values())
+      .filter((member) => !member.user.bot)
+      .map((member) => ({
+        id: member.user.id,
+        name: member.displayName || member.user.username,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    this.membersCache = { fetchedAt: now, value };
+    return value;
+  }
+
   public async getDashboardMember(userId: string): Promise<DashboardMember | null> {
     if (!this.client) {
       throw new AppError("Discord member lookup is unavailable because the bot is not connected.", 503);
@@ -387,7 +495,7 @@ export class BotRuntime {
       username: member.user.username,
       displayName: member.displayName,
       avatarUrl: member.displayAvatarURL({ size: 128 }) || null,
-      roleIds: Array.from(member.roles.cache.keys()),
+      roleIds: this.getOrderedRoleIds(member),
       isGuildOwner: guild.ownerId === member.id,
       hasAdministrator: member.permissions.has(PermissionFlagsBits.Administrator),
       hasManageGuild: member.permissions.has(PermissionFlagsBits.ManageGuild),
@@ -467,6 +575,201 @@ export class BotRuntime {
 
     await (channel as GuildTextBasedChannel).send({ embeds: [embed] });
     await this.services.configService.markAnnounced(this.env.GUILD_ID, version);
+  }
+
+  public async clearRedemptionButtons(channelId: string, messageId: string, statusLine: string): Promise<void> {
+    if (!this.client) {
+      return;
+    }
+
+    const channel = await this.client.channels.fetch(channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      return;
+    }
+
+    const message = await (channel as GuildTextBasedChannel).messages.fetch(messageId).catch(() => null);
+    if (!message) {
+      return;
+    }
+
+    const original = message.content ?? "";
+    const suffix = statusLine ? `\n\n${statusLine}` : "";
+    await message
+      .edit({
+        content: `${original}${suffix}`,
+        components: [],
+        allowedMentions: { parse: [] },
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to clear redemption buttons", error);
+      });
+  }
+
+  private buildRedemptionActionRow(redemptionId: string) {
+    return new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`redemption:fulfil:${redemptionId}`)
+        .setLabel("Mark fulfilled")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`redemption:cancel:${redemptionId}`)
+        .setLabel("Cancel & refund")
+        .setStyle(ButtonStyle.Danger),
+    );
+  }
+
+  private async postRedemptionFulfilmentNotice(params: {
+    channelId: string;
+    ownerUserId: string | null;
+    buyerUserId: string;
+    buyerMention: string;
+    shopItemName: string;
+    shopItemEmoji: string;
+    quantity: number;
+    redemptionId: string;
+    audience: "INDIVIDUAL" | "GROUP";
+    groupName: string;
+    fulfillmentInstructions: string | null;
+  }): Promise<{ channelId: string; messageId: string } | null> {
+    if (!this.client) {
+      return null;
+    }
+
+    const channel = await this.client.channels.fetch(params.channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      return null;
+    }
+
+    const validOwnerId = isDiscordSnowflake(params.ownerUserId) ? params.ownerUserId : null;
+    const ownerMention = validOwnerId ? `<@${validOwnerId}>` : null;
+    const subject =
+      params.audience === "GROUP"
+        ? `${params.buyerMention} (on behalf of **${params.groupName}**)`
+        : params.buyerMention;
+    const fulfilmentLine = params.fulfillmentInstructions
+      ? `\nFulfilment notes: ${params.fulfillmentInstructions}`
+      : "";
+    const header = ownerMention ? `${ownerMention} heads up — ` : "";
+    const content = `${header}${subject} purchased ${params.shopItemEmoji} **${params.shopItemName}**${
+      params.quantity > 1 ? ` x${params.quantity}` : ""
+    }.\nRedemption ID: \`${params.redemptionId}\`${fulfilmentLine}`;
+
+    const mentionUsers = [params.buyerUserId, ...(validOwnerId ? [validOwnerId] : [])].filter(
+      isDiscordSnowflake,
+    );
+
+    const sent = await (channel as GuildTextBasedChannel)
+      .send({
+        content,
+        components: [this.buildRedemptionActionRow(params.redemptionId)],
+        allowedMentions: { users: mentionUsers },
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to post redemption fulfilment notice", error);
+        return null;
+      });
+
+    if (!sent) {
+      return null;
+    }
+
+    return { channelId: sent.channelId, messageId: sent.id };
+  }
+
+  private async handleRedemptionButton(interaction: ButtonInteraction) {
+    const parts = interaction.customId.split(":");
+    if (parts.length !== 3 || parts[0] !== "redemption") {
+      return;
+    }
+
+    const [, action, redemptionId] = parts;
+    if (action !== "fulfil" && action !== "cancel") {
+      return;
+    }
+
+    const redemption = await this.services.shopService.getRedemption(this.env.GUILD_ID, redemptionId);
+    if (!redemption) {
+      await interaction.reply({ content: "Redemption not found.", ephemeral: true });
+      return;
+    }
+
+    const guildMember = await interaction.guild?.members
+      .fetch(interaction.user.id)
+      .catch(() => null) ?? null;
+    const rawMember = interaction.member;
+    const apiRoleIds =
+      rawMember && "roles" in rawMember && Array.isArray((rawMember as { roles: unknown }).roles)
+        ? ((rawMember as { roles: string[] }).roles)
+        : [];
+    const roleIds = guildMember ? this.getOrderedRoleIds(guildMember) : apiRoleIds;
+    // Authorize against the owner snapshot taken when the notice was posted,
+    // so that re-assigning the item later doesn't yank fulfil/cancel rights
+    // away from the person actually @mentioned in the channel. The
+    // fulfilmentMessageId presence indicates a snapshot was taken (even when
+    // its value is null = explicitly no owner at purchase time); only fall
+    // back to the current item owner for legacy rows that never recorded one.
+    const snapshotTaken = redemption.fulfilmentMessageId !== null;
+    const ownerForRedemption = snapshotTaken
+      ? redemption.ownerUserIdAtPurchase
+      : redemption.shopItem.ownerUserId;
+    const isOwner = ownerForRedemption !== null && ownerForRedemption === interaction.user.id;
+    const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
+    const hasStaffPerms = memberPermissions
+      ? memberPermissions.has(PermissionFlagsBits.Administrator) ||
+        memberPermissions.has(PermissionFlagsBits.ManageGuild)
+      : false;
+
+    let isStaff = hasStaffPerms;
+    if (!isStaff) {
+      const capabilities = await this.services.roleCapabilityService.listForRoleIds(this.env.GUILD_ID, roleIds);
+      const resolved = resolveCapabilities(capabilities);
+      isStaff = resolved.canManageDashboard || resolved.canAward || resolved.canDeduct;
+    }
+
+    if (!isOwner && !isStaff) {
+      await interaction.reply({
+        content: "Only the item owner or staff can act on this purchase.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await interaction.deferUpdate();
+
+    const nextStatus = action === "fulfil" ? "FULFILLED" : "CANCELED";
+
+    try {
+      const { redemption: updated, changed } = await this.services.shopService.updateRedemptionStatus({
+        guildId: this.env.GUILD_ID,
+        redemptionId,
+        status: nextStatus,
+        actorUserId: interaction.user.id,
+        actorUsername: interaction.user.username,
+      });
+
+      if (!changed) {
+        await interaction.followUp({
+          content: `Redemption \`${redemptionId}\` is already **${updated.status}**.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const actionLabel =
+        nextStatus === "FULFILLED"
+          ? `fulfilled by <@${interaction.user.id}>`
+          : `cancelled and refunded by <@${interaction.user.id}>`;
+
+      const originalContent = interaction.message?.content ?? `Redemption \`${redemptionId}\``;
+      await interaction.editReply({
+        content: `${originalContent}\n\n**Status:** ${updated.status} — ${actionLabel}.`,
+        components: [],
+        allowedMentions: { parse: [] },
+      });
+    } catch (error) {
+      const message = error instanceof AppError ? error.message : "Failed to update redemption.";
+      await interaction.followUp({ content: message, ephemeral: true });
+    }
   }
 
   private async assertCanManageSubmissions(member: GuildMember | null, roleIds: string[]) {
@@ -567,6 +870,66 @@ export class BotRuntime {
     };
   }
 
+  private checkBettingCooldown(
+    userId: string,
+    cooldownSeconds: number,
+  ): string | null {
+    if (cooldownSeconds <= 0) {
+      return null;
+    }
+
+    const key = `${this.env.GUILD_ID}:${userId}:bet`;
+    const entry = this.bettingCooldowns.get(key);
+    if (!entry) {
+      return null;
+    }
+
+    const now = Date.now();
+    const cooldownMs = cooldownSeconds * 1000;
+    const elapsed = now - entry.lastBetAt;
+    if (elapsed >= cooldownMs) {
+      return null;
+    }
+
+    const offenses = entry.offenses + 1;
+    this.bettingCooldowns.set(key, { lastBetAt: entry.lastBetAt, offenses });
+
+    const remaining = this.formatDuration(Math.max(1, Math.ceil((cooldownMs - elapsed) / 1000)));
+    return this.buildBettingRebuke(offenses, remaining);
+  }
+
+  private recordBetPlaced(userId: string, cooldownSeconds: number) {
+    if (cooldownSeconds <= 0) {
+      return;
+    }
+    const key = `${this.env.GUILD_ID}:${userId}:bet`;
+    this.bettingCooldowns.set(key, { lastBetAt: Date.now(), offenses: 0 });
+  }
+
+  private buildBettingRebuke(offenses: number, remaining: string): string {
+    switch (offenses) {
+      case 1:
+        return `🛑 OK hang on. ${remaining} more before you can bet. Go touch some grass.`;
+      case 2:
+        return `😅 Still ${remaining} to go. Wait a bit OK.`;
+      case 3:
+        return `🚧 ${remaining} more. Go find a proper hobby.`;
+      case 4:
+        return `🧠 Another ${remaining}. This isn't a cry for points... it's a cry for help.`;
+      default:
+        return `⛔ ${remaining}. I'm calling security. You need help.`;
+    }
+  }
+
+  private formatDuration(seconds: number): string {
+    if (seconds < 60) {
+      return `${seconds}s`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
+  }
+
   private resolveActiveAssignment(assignments: ActiveAssignment[], identifier: string): AssignmentLookupResult {
     const value = identifier.trim();
     if (!value) {
@@ -605,6 +968,28 @@ export class BotRuntime {
 
   private formatGroupPurchaseProgress(approvalsCount: number, threshold: number) {
     return `${approvalsCount}/${threshold} approval${threshold === 1 ? "" : "s"}`;
+  }
+
+  private formatUserReference(discordUserId: string | null | undefined, fallbackLabel: string) {
+    return discordUserId ? `<@${discordUserId}>` : fallbackLabel;
+  }
+
+  private formatGroupReference(group: { roleId?: string | null; displayName: string }) {
+    return group.roleId ? `<@&${group.roleId}>` : group.displayName;
+  }
+
+  private formatParticipantReference(
+    participant: {
+      discordUserId?: string | null;
+      discordUsername?: string | null;
+      indexId: string;
+    },
+    fallbackLabel?: string,
+  ) {
+    return this.formatUserReference(
+      participant.discordUserId,
+      fallbackLabel ?? participant.discordUsername ?? participant.indexId,
+    );
   }
 
   private formatRankMarker(index: number) {
@@ -690,13 +1075,19 @@ export class BotRuntime {
     const totalCurrency = leaderboard.reduce((sum, participant) => sum + participant.currencyBalance, 0);
     const standings = featuredParticipants
       .map((participant, index) => {
-        const displayName = displayNames.get(participant.id) ?? participant.discordUsername ?? participant.indexId;
+        const displayName = this.formatParticipantReference(
+          participant,
+          displayNames.get(participant.id) ?? participant.discordUsername ?? participant.indexId,
+        );
         return `${this.formatRankMarker(index)} **${displayName}**\n${this.formatCurrencyAmount(participant.currencyBalance, config)}`;
       })
       .join("\n\n");
     const compactStandings = compactParticipants
       .map((participant, index) => {
-        const displayName = displayNames.get(participant.id) ?? participant.discordUsername ?? participant.indexId;
+        const displayName = this.formatParticipantReference(
+          participant,
+          displayNames.get(participant.id) ?? participant.discordUsername ?? participant.indexId,
+        );
         return `#${LEADERBOARD_FEATURED_COUNT + index + 1} **${displayName}** · ${this.formatCurrencyAmount(participant.currencyBalance, config)}`;
       })
       .join("\n");
@@ -715,6 +1106,51 @@ export class BotRuntime {
       )
       .addFields(fields)
       .setFooter({ text: "Server display names are shown when Discord can resolve them." });
+  }
+
+  private formatStoreLine(item: ShopListItem, priceLabel: string) {
+    const emoji = item.emoji ? `${item.emoji} ` : "";
+    const parts = [`${emoji}**${item.name}**`, priceLabel];
+    if (item.stock !== null) {
+      parts.push(item.stock > 0 ? `${item.stock} left` : "sold out");
+    }
+    return `• ${parts.join(" · ")}`;
+  }
+
+  private buildStoreEmbed(items: ShopListItem[], config: GuildConfig) {
+    const enabled = items.filter((item) => item.enabled);
+    const personalItems = enabled
+      .filter((item) => item.audience === "INDIVIDUAL")
+      .slice(0, STORE_ITEMS_PER_SECTION);
+    const groupItems = enabled
+      .filter((item) => item.audience === "GROUP")
+      .slice(0, STORE_ITEMS_PER_SECTION);
+
+    const fields: { name: string; value: string; inline: boolean }[] = [];
+    if (personalItems.length > 0) {
+      const value = personalItems
+        .map((item) => this.formatStoreLine(item, this.formatCurrencyAmount(item.cost.toString(), config)))
+        .join("\n");
+      fields.push({ name: `Personal items — spend ${config.currencyName}`, value, inline: false });
+    }
+    if (groupItems.length > 0) {
+      const value = groupItems
+        .map((item) => this.formatStoreLine(item, this.formatPointsAmount(item.cost.toString(), config)))
+        .join("\n");
+      fields.push({ name: `Group items — spend shared ${config.pointsName}`, value, inline: false });
+    }
+    fields.push({ name: "Items available", value: `${enabled.length}`, inline: true });
+
+    return new EmbedBuilder()
+      .setColor(STORE_EMBED_COLOUR)
+      .setTitle("Store")
+      .setDescription(
+        `Browse items buyable with ${config.currencyName} or shared ${config.pointsName}. Pick an item by name with /buyforme or /buyforgroup.`,
+      )
+      .addFields(fields)
+      .setFooter({
+        text: `/buyforme spends your ${config.currencyName} · /buyforgroup spends shared ${config.pointsName} · /donate converts between them.`,
+      });
   }
 
   private async resolveActiveParticipant(params: {
@@ -755,7 +1191,7 @@ export class BotRuntime {
     const eligibleMembers = await Promise.all(
       candidates.map(async (candidate) => {
         const resolvedGroup = await this.services.groupService
-          .resolveGroupFromRoleIds(this.env.GUILD_ID, Array.from(candidate.roles.cache.keys()))
+          .resolveGroupFromRoleIds(this.env.GUILD_ID, this.getOrderedRoleIds(candidate))
           .catch(() => null);
 
         return resolvedGroup?.id === params.groupId ? candidate : null;
@@ -944,7 +1380,7 @@ export class BotRuntime {
       const { participant } = await this.resolveActiveParticipant({
         discordUserId: message.author.id,
         discordUsername: message.author.username,
-        roleIds: Array.from(member.roles.cache.keys()),
+        roleIds: this.getOrderedRoleIds(member),
       });
 
       // --- 5. Resolve assignment --------------------------------------------
@@ -1045,6 +1481,41 @@ export class BotRuntime {
     }
   }
 
+  private async handleAutocomplete(interaction: AutocompleteInteraction) {
+    const { commandName } = interaction;
+    if (commandName !== "buyforme" && commandName !== "buyforgroup") {
+      return;
+    }
+    const focused = interaction.options.getFocused(true);
+    if (focused.name !== "item_id") {
+      await interaction.respond([]);
+      return;
+    }
+    const audience = commandName === "buyforgroup" ? "GROUP" : "INDIVIDUAL";
+    const [config, items] = await Promise.all([
+      this.services.configService.getOrCreate(this.env.GUILD_ID),
+      this.services.shopService.list(this.env.GUILD_ID),
+    ]);
+    const query = focused.value.trim().toLowerCase();
+    const matches = items
+      .filter((item) => item.enabled && item.audience === audience)
+      .filter((item) => (query.length === 0 ? true : item.name.toLowerCase().includes(query)))
+      .slice(0, AUTOCOMPLETE_CHOICE_LIMIT)
+      .map((item) => {
+        const priceLabel =
+          audience === "GROUP"
+            ? this.formatPointsAmount(item.cost.toString(), config)
+            : this.formatCurrencyAmount(item.cost.toString(), config);
+        const label = `${item.name} · ${priceLabel}`;
+        const name =
+          label.length > AUTOCOMPLETE_CHOICE_NAME_MAX
+            ? `${label.slice(0, AUTOCOMPLETE_CHOICE_NAME_MAX - 1)}…`
+            : label;
+        return { name, value: item.id };
+      });
+    await interaction.respond(matches);
+  }
+
   private async handleCommand(interaction: ChatInputCommandInteraction) {
     if (interaction.commandName === "leaderboard") {
       await interaction.deferReply();
@@ -1079,7 +1550,7 @@ export class BotRuntime {
     }
 
     const member = await interaction.guild?.members.fetch(interaction.user.id);
-    const roleIds = member ? Array.from(member.roles.cache.keys()) : [];
+    const roleIds = this.getOrderedRoleIds(member ?? null);
     const actor = {
       userId: interaction.user.id,
       username: interaction.user.username,
@@ -1105,10 +1576,9 @@ export class BotRuntime {
       case "ledger": {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const page = interaction.options.getInteger("page") ?? 1;
-        const limit = 10;
-        const offset = (page - 1) * limit;
+        const offset = (page - 1) * LEDGER_PAGE_SIZE;
         const entries = await this.services.economyService.getLedger(this.env.GUILD_ID, {
-          limit,
+          limit: LEDGER_PAGE_SIZE,
           offset,
         });
 
@@ -1122,15 +1592,14 @@ export class BotRuntime {
           return;
         }
 
-        const content = this.formatLedgerResponse(entries, config, page, offset);
-
-        await interaction.reply({ content });
+        await interaction.reply({ embeds: [this.buildLedgerEmbed(entries, config, page, offset)] });
         return;
       }
       case "transfer": {
         const targetUser = interaction.options.getUser("member", true);
         const amount = interaction.options.getNumber("amount", true);
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const sourceLabel = this.formatUserReference(interaction.user.id, member?.displayName ?? interaction.user.username);
         const { participant: sourceParticipant } = await this.resolveActiveParticipant({
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
@@ -1140,10 +1609,14 @@ export class BotRuntime {
         if (!targetMember) {
           throw new AppError("Target user is not in this server.", 404);
         }
+        const targetLabel = this.formatUserReference(
+          targetUser.id,
+          targetMember.displayName || targetUser.globalName || targetUser.username,
+        );
         const { participant: targetParticipant } = await this.resolveActiveParticipant({
           discordUserId: targetUser.id,
           discordUsername: targetUser.username,
-          roleIds: Array.from(targetMember.roles.cache.keys()),
+          roleIds: this.getOrderedRoleIds(targetMember),
         });
         await this.services.participantCurrencyService.transferCurrency({
           guildId: this.env.GUILD_ID,
@@ -1153,9 +1626,7 @@ export class BotRuntime {
           amount,
           description: `${interaction.user.username} transferred ${amount} to ${targetUser.username}`,
         });
-        await interaction.reply(
-          `${interaction.user.username} transferred ${this.formatCurrencyAmount(amount, config)} to ${targetUser.username}.`,
-        );
+        await interaction.reply(`${sourceLabel} transferred ${this.formatCurrencyAmount(amount, config)} to ${targetLabel}.`);
         return;
       }
       case "donate": {
@@ -1175,8 +1646,10 @@ export class BotRuntime {
           conversionRate: config.groupPointsPerCurrencyDonation.toNumber(),
           description: `${interaction.user.username} donated ${this.formatCurrencyAmount(amount, config)} to ${group.displayName}`,
         });
+        const sourceLabel = this.formatUserReference(interaction.user.id, member?.displayName ?? interaction.user.username);
+        const groupLabel = this.formatGroupReference(group);
         await interaction.reply(
-          `${interaction.user.username} donated ${this.formatCurrencyAmount(amount, config)} to ${group.displayName}, adding ${this.formatPointsAmount(donation.groupPointsAward, config)}.`,
+          `${sourceLabel} donated ${this.formatCurrencyAmount(amount, config)} to ${groupLabel}, adding ${this.formatPointsAmount(donation.groupPointsAward, config)}.`,
         );
         return;
       }
@@ -1244,7 +1717,7 @@ export class BotRuntime {
               ({ participant: currencyParticipant } = await this.resolveActiveParticipant({
                 discordUserId: targetMember.id,
                 discordUsername: targetMember.username,
-                roleIds: Array.from(memberRecord.roles.cache.keys()),
+                roleIds: this.getOrderedRoleIds(memberRecord),
               }));
             }
           }
@@ -1270,7 +1743,10 @@ export class BotRuntime {
               new Set(syncedTargetGroups.flatMap((syncedGroup) => syncedGroup.participantIds)),
             );
             bulkCurrencyGroupSummary = syncedTargetGroups
-              .map((syncedGroup, index) => ({ displayName: targetGroups[index]!.displayName, count: syncedGroup.count }))
+              .map((syncedGroup, index) => ({
+                displayName: this.formatGroupReference(targetGroups[index]!),
+                count: syncedGroup.count,
+              }))
               .filter((group) => group.count > 0)
               .map((group) => `${group.displayName} (${group.count})`)
               .join(", ");
@@ -1332,12 +1808,13 @@ export class BotRuntime {
           const direction = commandConfig.isDeduction ? "from" : "to";
           const summaries = [
             commandConfig.includesGroupPoints && targetGroups.length > 0
-              ? `${this.formatPointsAmount(Math.abs(points), config)} ${direction} ${targetGroups.map((group) => group.displayName).join(", ")}`
+              ? `${this.formatPointsAmount(Math.abs(points), config)} ${direction} ${targetGroups.map((group) => this.formatGroupReference(group)).join(", ")}`
               : null,
             currencyParticipant && currency !== 0
-              ? `${this.formatCurrencyAmount(Math.abs(currency), config)} ${direction} ${
-                  currencyMemberLabel ?? currencyParticipant.discordUsername ?? currencyParticipant.indexId
-                }`
+              ? `${this.formatCurrencyAmount(Math.abs(currency), config)} ${direction} ${this.formatUserReference(
+                  targetMember?.id,
+                  currencyMemberLabel ?? currencyParticipant.discordUsername ?? currencyParticipant.indexId,
+                )}`
               : null,
             bulkCurrencyParticipantIds.length > 0 && currency !== 0
               ? `${this.formatCurrencyAmount(Math.abs(currency), config)} each ${direction} ${bulkCurrencyParticipantIds.length} member${
@@ -1374,9 +1851,10 @@ export class BotRuntime {
         if (config.listingChannelId) {
           await this.postListing(
             config.listingChannelId,
-            `New listing from ${interaction.user.username}: **${listing.title}**\n${listing.description}\nQuantity: ${
-              listing.quantity ?? "infinite"
-            }`,
+            `New listing from ${this.formatUserReference(
+              interaction.user.id,
+              member?.displayName ?? interaction.user.username,
+            )}: **${listing.title}**\n${listing.description}\nQuantity: ${listing.quantity ?? "infinite"}`,
           );
         }
 
@@ -1384,26 +1862,15 @@ export class BotRuntime {
         return;
       }
       case "store": {
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-        const items = await this.services.shopService.list(this.env.GUILD_ID);
-        const enabledItems = items.filter((item) => item.enabled).slice(0, 20);
-        const personalLines = enabledItems
-          .filter((item) => item.audience === "INDIVIDUAL")
-          .map((item) => `${item.id}: ${item.name} (${this.formatCurrencyAmount(item.cost.toString(), config)})`);
-        const groupLines = enabledItems
-          .filter((item) => item.audience === "GROUP")
-          .map((item) => `${item.id}: ${item.name} (${this.formatPointsAmount(item.cost.toString(), config)})`);
-        const sections = [
-          personalLines.length > 0 ? `Personal items:\n${personalLines.join("\n")}` : null,
-          groupLines.length > 0 ? `Group items:\n${groupLines.join("\n")}` : null,
-        ].filter((value): value is string => value !== null);
-        await interaction.reply({
-          content:
-            sections.length > 0
-              ? `${sections.join("\n\n")}\nUse /buyforme for personal wallet purchases, /buyforgroup for shared ${config.pointsName} purchases, and /donate to convert ${config.currencyName} into ${config.pointsName}.`
-              : "Store is empty.",
-          ephemeral: true,
-        });
+        const [config, items] = await Promise.all([
+          this.services.configService.getOrCreate(this.env.GUILD_ID),
+          this.services.shopService.list(this.env.GUILD_ID),
+        ]);
+        if (!items.some((item) => item.enabled)) {
+          await interaction.reply({ content: "Store is empty.", ephemeral: true });
+          return;
+        }
+        await interaction.reply({ embeds: [this.buildStoreEmbed(items, config)], ephemeral: true });
         return;
       }
       case "buyforme":
@@ -1439,10 +1906,12 @@ export class BotRuntime {
         let sharedMessageSuffix = "";
         if (purchaseMode === "GROUP") {
           const announcementChannelId = config.redemptionChannelId ?? interaction.channelId;
+          const requesterLabel = this.formatUserReference(interaction.user.id, member?.displayName ?? interaction.user.username);
+          const groupLabel = this.formatGroupReference(group);
           const posted = announcementChannelId
             ? await this.postListing(
                 announcementChannelId,
-                `Group purchase request for **${redemption.shopItem.name}** x${redemption.quantity} by **${group.displayName}**.\nRequest ID: \`${redemption.id}\`\n${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded.\nApprove with \`/approve_purchase purchase_id:${redemption.id}\`.`,
+                `Group purchase request for ${redemption.shopItem.emoji} **${redemption.shopItem.name}** x${redemption.quantity} from ${groupLabel}, requested by ${requesterLabel}.\nRequest ID: \`${redemption.id}\`\n${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded.\nApprove with \`/approve_purchase purchase_id:${redemption.id}\`.`,
               )
             : null;
           if (posted) {
@@ -1455,10 +1924,39 @@ export class BotRuntime {
             sharedMessageSuffix = " A shared approval message has been posted for your group.";
           }
         }
+
+        if (redemption.status === "PENDING") {
+          const fulfilmentChannelId = config.redemptionChannelId ?? interaction.channelId;
+          if (fulfilmentChannelId) {
+            const posted = await this.postRedemptionFulfilmentNotice({
+              channelId: fulfilmentChannelId,
+              ownerUserId: redemption.shopItem.ownerUserId,
+              buyerUserId: interaction.user.id,
+              buyerMention: `<@${interaction.user.id}>`,
+              shopItemName: redemption.shopItem.name,
+              shopItemEmoji: redemption.shopItem.emoji,
+              quantity: redemption.quantity,
+              redemptionId: redemption.id,
+              audience: redemption.shopItem.audience,
+              groupName: group.displayName,
+              fulfillmentInstructions: redemption.shopItem.fulfillmentInstructions,
+            });
+            if (posted) {
+              await this.services.shopService.setFulfilmentMessage({
+                guildId: this.env.GUILD_ID,
+                redemptionId: redemption.id,
+                channelId: posted.channelId,
+                messageId: posted.messageId,
+                ownerUserIdAtPurchase: redemption.shopItem.ownerUserId,
+              });
+            }
+          }
+        }
+
         await interaction.reply({
           content:
             purchaseMode === "GROUP"
-              ? `Group purchase request created for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase and spend shared ${config.pointsName} if it passes.${sharedMessageSuffix}`
+              ? `Group purchase request created for ${this.formatGroupReference(group)} for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase and spend shared ${config.pointsName} if it passes.${sharedMessageSuffix}`
               : `Purchase recorded for ${quantity} item(s). Request ID: ${redemption.id}. Cost uses your ${config.currencyName}.`,
           ephemeral: true,
         });
@@ -1491,13 +1989,46 @@ export class BotRuntime {
         const progress = this.formatGroupPurchaseProgress(result.approvalsCount, result.threshold);
         const blockingSuffix =
           "blockingGroup" in result && result.blockingGroup
-            ? ` ${result.blockingGroup} does not currently have enough ${config.pointsName}, so the request stays open until more are earned or donated.`
+            ? ` ${this.formatGroupReference(group)} does not currently have enough ${config.pointsName}, so the request stays open until more are earned or donated.`
             : "";
+
+        if (result.justExecuted) {
+          const fulfilmentChannelId = config.redemptionChannelId ?? interaction.channelId;
+          const fullRedemption = await this.services.shopService.getRedemption(
+            this.env.GUILD_ID,
+            result.redemption.id,
+          );
+          if (fulfilmentChannelId && fullRedemption) {
+            const buyerUserId = fullRedemption.requestedByUserId;
+            const posted = await this.postRedemptionFulfilmentNotice({
+              channelId: fulfilmentChannelId,
+              ownerUserId: fullRedemption.shopItem.ownerUserId,
+              buyerUserId,
+              buyerMention: `<@${buyerUserId}>`,
+              shopItemName: fullRedemption.shopItem.name,
+              shopItemEmoji: fullRedemption.shopItem.emoji,
+              quantity: fullRedemption.quantity,
+              redemptionId: fullRedemption.id,
+              audience: fullRedemption.shopItem.audience,
+              groupName: fullRedemption.group.displayName,
+              fulfillmentInstructions: fullRedemption.shopItem.fulfillmentInstructions,
+            });
+            if (posted) {
+              await this.services.shopService.setFulfilmentMessage({
+                guildId: this.env.GUILD_ID,
+                redemptionId: fullRedemption.id,
+                channelId: posted.channelId,
+                messageId: posted.messageId,
+                ownerUserIdAtPurchase: fullRedemption.shopItem.ownerUserId,
+              });
+            }
+          }
+        }
 
         await interaction.reply({
           content: result.executed
-            ? `Approval recorded. ${progress}. The group purchase is now funded and pending fulfilment.${blockingSuffix}`
-            : `Approval recorded. ${progress}.${blockingSuffix}`,
+            ? `Approval recorded for ${this.formatGroupReference(group)}. ${progress}. The group purchase is now funded and pending fulfilment.${blockingSuffix}`
+            : `Approval recorded for ${this.formatGroupReference(group)}. ${progress}.${blockingSuffix}`,
           ephemeral: true,
         });
         return;
@@ -1683,6 +2214,17 @@ export class BotRuntime {
       }
       case "bet": {
         const amount = interaction.options.getNumber("amount", true);
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+
+        const rebuke = this.checkBettingCooldown(
+          interaction.user.id,
+          config.bettingCooldownSeconds,
+        );
+        if (rebuke) {
+          await interaction.reply(`<@${interaction.user.id}> ${rebuke}`);
+          return;
+        }
+
         const { participant } = await this.resolveActiveParticipant({
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
@@ -1694,8 +2236,8 @@ export class BotRuntime {
           participantId: participant.id,
           amount,
         });
+        this.recordBetPlaced(interaction.user.id, config.bettingCooldownSeconds);
 
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         if (result.won) {
           await interaction.reply(
             `🎉 **You won!** You bet ${this.formatCurrencyAmount(amount, config)} from your wallet and won. New balance: ${this.formatCurrencyAmount(result.newCurrencyBalance, config)}.`,
@@ -1713,12 +2255,11 @@ export class BotRuntime {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
 
         if (stats.totalBets === 0) {
-          await interaction.reply({
-            content: targetUser.id === interaction.user.id
+          await interaction.reply(
+            targetUser.id === interaction.user.id
               ? "You haven't placed any bets yet."
               : `${targetUser.username} hasn't placed any bets yet.`,
-            ephemeral: true,
-          });
+          );
           return;
         }
 
@@ -1733,7 +2274,7 @@ export class BotRuntime {
           `Net gain: ${this.formatSignedCurrencyAmount(stats.netGain, config)}`,
         ];
 
-        await interaction.reply({ content: lines.join("\n"), ephemeral: true });
+        await interaction.reply(lines.join("\n"));
         return;
       }
       default:
@@ -1741,40 +2282,79 @@ export class BotRuntime {
     }
   }
 
-  private formatLedgerResponse(
-    entries: CommandLedgerEntry[],
-    config: GuildConfig,
-    page: number,
-    offset: number,
-  ) {
-    return [
-      `Recent transactions, page ${page}:`,
-      ...entries.map((entry, index) => this.formatLedgerLine(entry, config, offset + index + 1)),
-      "Use /ledger with page:2, page:3, and so on to go back further.",
-    ].join("\n");
+  private static readonly LEDGER_ENTRY_LABELS: Record<string, { emoji: string; label: string }> = {
+    MESSAGE_REWARD: { emoji: "💬", label: "Message reward" },
+    MANUAL_AWARD: { emoji: "🎁", label: "Award" },
+    MANUAL_DEDUCT: { emoji: "📉", label: "Deduction" },
+    CORRECTION: { emoji: "🛠️", label: "Correction" },
+    TRANSFER: { emoji: "🔀", label: "Transfer" },
+    DONATION: { emoji: "🎗️", label: "Donation" },
+    SHOP_REDEMPTION: { emoji: "🛍️", label: "Shop redemption" },
+    ADJUSTMENT: { emoji: "🧮", label: "Adjustment" },
+    SUBMISSION_REWARD: { emoji: "📝", label: "Submission reward" },
+    BET_WIN: { emoji: "💰", label: "Bet win" },
+    BET_LOSS: { emoji: "💸", label: "Bet loss" },
+  };
+
+  private formatLedgerEntryType(type: string) {
+    const mapping = BotRuntime.LEDGER_ENTRY_LABELS[type];
+    if (mapping) {
+      return `${mapping.emoji} ${mapping.label}`;
+    }
+    const pretty = type
+      .toLowerCase()
+      .split("_")
+      .map((segment) => (segment.length === 0 ? segment : segment[0]!.toUpperCase() + segment.slice(1)))
+      .join(" ");
+    return `• ${pretty}`;
   }
 
-  private formatLedgerLine(
+  private formatLedgerSplitLine(
+    split: CommandLedgerEntry["splits"][number],
+    config: GuildConfig,
+  ) {
+    const deltas = [
+      split.pointsDelta === 0 ? null : this.formatSignedPointsAmount(split.pointsDelta, config),
+      split.currencyDelta === 0 ? null : this.formatSignedCurrencyAmount(split.currencyDelta, config),
+    ].filter((value): value is string => value !== null);
+    const amount = deltas.length > 0 ? deltas.join(" / ") : "no change";
+    return `**${split.group.displayName}** ${amount}`;
+  }
+
+  private buildLedgerEntryField(
     entry: CommandLedgerEntry,
     config: GuildConfig,
     index: number,
   ) {
     const timestamp = Math.floor(new Date(entry.createdAt).getTime() / 1000);
-    const splitSummary = entry.splits
-      .map((split) => {
-        const deltas = [
-          split.pointsDelta === 0 ? null : this.formatSignedPointsAmount(split.pointsDelta, config),
-          split.currencyDelta === 0 ? null : this.formatSignedCurrencyAmount(split.currencyDelta, config),
-        ].filter((value): value is string => value !== null);
+    const name = `#${index} · ${this.formatLedgerEntryType(entry.type)}`;
+    const splitLines = entry.splits.map((split) => this.formatLedgerSplitLine(split, config));
+    const lines = [`<t:${timestamp}:R>`, ...splitLines];
+    const description = entry.description?.trim();
+    if (description) {
+      lines.push(`> ${this.truncateText(description, LEDGER_DESCRIPTION_MAX)}`);
+    }
+    const value = this.truncateText(lines.join("\n"), LEDGER_FIELD_VALUE_MAX);
+    return { name, value, inline: false };
+  }
 
-        return `${split.group.displayName} ${deltas.join(" / ")}`;
-      })
-      .join("; ");
-
-    return this.truncateText(
-      `${index}. <t:${timestamp}:g> · ${entry.type} · ${splitSummary} · ${entry.description}`,
-      MAX_LEDGER_LINE_LENGTH,
+  private buildLedgerEmbed(
+    entries: CommandLedgerEntry[],
+    config: GuildConfig,
+    page: number,
+    offset: number,
+  ) {
+    const fields = entries.map((entry, index) =>
+      this.buildLedgerEntryField(entry, config, offset + index + 1),
     );
+    const firstIndex = offset + 1;
+    const lastIndex = offset + entries.length;
+    return new EmbedBuilder()
+      .setColor(LEDGER_EMBED_COLOUR)
+      .setTitle("Transaction ledger")
+      .setDescription(`Page ${page} · showing entries ${firstIndex}–${lastIndex}.`)
+      .addFields(fields)
+      .setFooter({ text: "Use /ledger page:N to browse further back." });
   }
 
   private formatSignedNumber(value: number) {
@@ -1847,12 +2427,24 @@ export class BotRuntime {
       new SlashCommandBuilder()
         .setName("buyforme")
         .setDescription("Buy a shop item for yourself.")
-        .addStringOption((option) => option.setName("item_id").setDescription("Shop item id").setRequired(true))
+        .addStringOption((option) =>
+          option
+            .setName("item_id")
+            .setDescription("Item to buy — start typing to search by name")
+            .setRequired(true)
+            .setAutocomplete(true),
+        )
         .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
       new SlashCommandBuilder()
         .setName("buyforgroup")
         .setDescription("Start a group purchase request for a shop item.")
-        .addStringOption((option) => option.setName("item_id").setDescription("Shop item id").setRequired(true))
+        .addStringOption((option) =>
+          option
+            .setName("item_id")
+            .setDescription("Item to buy — start typing to search by name")
+            .setRequired(true)
+            .setAutocomplete(true),
+        )
         .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
       new SlashCommandBuilder()
         .setName("approve_purchase")
