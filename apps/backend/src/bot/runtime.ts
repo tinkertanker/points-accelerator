@@ -634,7 +634,13 @@ export class BotRuntime {
         ? ((rawMember as { roles: string[] }).roles)
         : [];
     const roleIds = guildMember ? Array.from(guildMember.roles.cache.keys()) : apiRoleIds;
-    const isOwner = redemption.shopItem.ownerUserId === interaction.user.id;
+    // Authorize against the owner snapshot taken when the notice was posted,
+    // so that re-assigning the item later doesn't yank fulfil/cancel rights
+    // away from the person actually @mentioned in the channel. Falls back to
+    // the current item owner for legacy redemptions created before the
+    // snapshot column existed.
+    const ownerForRedemption = redemption.ownerUserIdAtPurchase ?? redemption.shopItem.ownerUserId;
+    const isOwner = ownerForRedemption === interaction.user.id;
     const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
     const hasStaffPerms = memberPermissions
       ? memberPermissions.has(PermissionFlagsBits.Administrator) ||
@@ -1703,6 +1709,7 @@ export class BotRuntime {
                 redemptionId: redemption.id,
                 channelId: posted.channelId,
                 messageId: posted.messageId,
+                ownerUserIdAtPurchase: redemption.shopItem.ownerUserId,
               });
             }
           }
@@ -1774,6 +1781,7 @@ export class BotRuntime {
                 redemptionId: fullRedemption.id,
                 channelId: posted.channelId,
                 messageId: posted.messageId,
+                ownerUserIdAtPurchase: fullRedemption.shopItem.ownerUserId,
               });
             }
           }

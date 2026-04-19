@@ -133,10 +133,11 @@ export default function ShopPanel({
       return { ...item, ownerUserId: value, ownerUsername: null };
     }
 
-    // Freeform text that matches nothing: preserve whatever ownerUserId was
-    // already bound so a cosmetic edit (or a mistyped character) doesn't
-    // silently unbind the owner. Clearing requires emptying the input.
-    return { ...item, ownerUsername: value };
+    // Freeform text that matches nothing: clear the bound ID so the displayed
+    // name can never disagree with the actual owner. The UI shows a hint when
+    // ownerUsername is set but ownerUserId is null, so the staffer can pick a
+    // suggestion or paste a snowflake.
+    return { ...item, ownerUserId: null, ownerUsername: value };
   };
 
   const updateShopDraft = (index: number, nextDraft: ShopItemDraft) => {
@@ -312,6 +313,9 @@ export default function ShopPanel({
                           onChange={(event) => updateShopDraft(index, handleOwnerInput(item, event.target.value))}
                           placeholder="Pick a participant or type a user ID"
                         />
+                        {item.ownerUsername && !item.ownerUserId ? (
+                          <small className="shop-owner-hint">No match — pick a suggestion or paste a Discord user ID.</small>
+                        ) : null}
                       </td>
                       <td className="col-enabled">
                         <input
@@ -425,6 +429,9 @@ export default function ShopPanel({
                       onChange={(event) => updateShopDraft(index, handleOwnerInput(item, event.target.value))}
                       placeholder="Pick a participant or type a user ID"
                     />
+                    {item.ownerUsername && !item.ownerUserId ? (
+                      <small className="shop-owner-hint">No match — pick a suggestion or paste a Discord user ID.</small>
+                    ) : null}
                   </label>
                   <label className="shop-field shop-field--checkbox shop-field--full">
                     <span className="shop-field__label">Enabled</span>

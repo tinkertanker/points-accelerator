@@ -360,6 +360,7 @@ export class ShopService {
     redemptionId: string;
     channelId: string;
     messageId: string;
+    ownerUserIdAtPurchase: string | null;
   }) {
     return this.prisma.shopRedemption.updateMany({
       where: {
@@ -369,6 +370,7 @@ export class ShopService {
       data: {
         fulfilmentMessageChannelId: params.channelId,
         fulfilmentMessageId: params.messageId,
+        ownerUserIdAtPurchase: params.ownerUserIdAtPurchase,
       },
     });
   }

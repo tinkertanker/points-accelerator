@@ -214,6 +214,7 @@ model ShopRedemption {
   approvalMessageId String?
   fulfilmentMessageChannelId String?
   fulfilmentMessageId String?
+  ownerUserIdAtPurchase String?
   currencyEntryId   String?
   ledgerEntryId     String?
   stockHeld         Int?
