@@ -133,7 +133,10 @@ export default function ShopPanel({
       return { ...item, ownerUserId: value, ownerUsername: null };
     }
 
-    return { ...item, ownerUserId: null, ownerUsername: value };
+    // Freeform text that matches nothing: preserve whatever ownerUserId was
+    // already bound so a cosmetic edit (or a mistyped character) doesn't
+    // silently unbind the owner. Clearing requires emptying the input.
+    return { ...item, ownerUsername: value };
   };
 
   const updateShopDraft = (index: number, nextDraft: ShopItemDraft) => {

@@ -221,10 +221,13 @@ function isDiscordUnknownMemberError(error: unknown): boolean {
   );
 }
 
+const MEMBERS_CACHE_TTL_MS = 60_000;
+
 export class BotRuntime {
   private readonly passiveCooldowns = new Map<string, CooldownEntry>();
   private readonly actionCooldowns = new Map<string, CooldownEntry>();
   private client: Client | null = null;
+  private membersCache: { fetchedAt: number; value: Array<{ id: string; name: string }> } | null = null;
 
   public constructor(
     private readonly env: AppEnv,
@@ -384,27 +387,35 @@ export class BotRuntime {
   }
 
   public async getMembers() {
+    const now = Date.now();
+    if (this.membersCache && now - this.membersCache.fetchedAt < MEMBERS_CACHE_TTL_MS) {
+      return this.membersCache.value;
+    }
+
     if (!this.client) {
-      return [];
+      return this.membersCache?.value ?? [];
     }
 
     const guild = await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null);
     if (!guild) {
-      return [];
+      return this.membersCache?.value ?? [];
     }
 
     const members = await guild.members.fetch().catch(() => null);
     if (!members) {
-      return [];
+      return this.membersCache?.value ?? [];
     }
 
-    return Array.from(members.values())
+    const value = Array.from(members.values())
       .filter((member) => !member.user.bot)
       .map((member) => ({
         id: member.user.id,
         name: member.displayName || member.user.username,
       }))
       .sort((left, right) => left.name.localeCompare(right.name));
+
+    this.membersCache = { fetchedAt: now, value };
+    return value;
   }
 
   public async getDashboardMember(userId: string): Promise<DashboardMember | null> {
