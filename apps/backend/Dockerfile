@@ -25,5 +25,6 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/backend/dist ./dist
 COPY --from=build /app/apps/backend/package.json ./package.json
 COPY --from=build /app/apps/backend/prisma ./prisma
+COPY --from=build /app/CHANGELOG.md ./CHANGELOG.md
 
 CMD ["node", "dist/index.js"]

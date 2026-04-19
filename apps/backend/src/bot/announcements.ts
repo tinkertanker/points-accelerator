@@ -3,8 +3,14 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
-const PACKAGE_JSON_PATH = resolve(MODULE_DIR, "..", "..", "package.json");
-const CHANGELOG_PATH = resolve(MODULE_DIR, "..", "..", "..", "..", "CHANGELOG.md");
+const PACKAGE_DIR = resolve(MODULE_DIR, "..", "..");
+const PACKAGE_JSON_PATH = resolve(PACKAGE_DIR, "package.json");
+// Production Docker copies CHANGELOG.md next to package.json (/app/CHANGELOG.md).
+// Local dev keeps it at the monorepo root, two levels above the backend package.
+const CHANGELOG_CANDIDATES = [
+  resolve(PACKAGE_DIR, "CHANGELOG.md"),
+  resolve(PACKAGE_DIR, "..", "..", "CHANGELOG.md"),
+];
 
 export type ChangelogEntry = {
   version: string;
@@ -22,13 +28,15 @@ export async function readBackendVersion(): Promise<string | null> {
 }
 
 export async function readChangelogEntry(version: string): Promise<ChangelogEntry | null> {
-  let raw: string;
-  try {
-    raw = await readFile(CHANGELOG_PATH, "utf8");
-  } catch {
-    return null;
+  for (const candidate of CHANGELOG_CANDIDATES) {
+    try {
+      const raw = await readFile(candidate, "utf8");
+      return parseChangelogEntry(raw, version);
+    } catch {
+      continue;
+    }
   }
-  return parseChangelogEntry(raw, version);
+  return null;
 }
 
 export function parseChangelogEntry(changelog: string, version: string): ChangelogEntry | null {
