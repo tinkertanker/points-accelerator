@@ -24,6 +24,11 @@ type CooldownEntry = {
   seenAt: number;
 };
 
+type BettingCooldownEntry = {
+  lastBetAt: number;
+  offenses: number;
+};
+
 type CommandLedgerEntry = Awaited<ReturnType<AppServices["economyService"]["getLedger"]>>[number];
 type GroupLeaderboardEntry = Awaited<ReturnType<AppServices["economyService"]["getLeaderboard"]>>[number];
 type GuildConfig = Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>;
@@ -213,6 +218,7 @@ function isDiscordUnknownMemberError(error: unknown): boolean {
 export class BotRuntime {
   private readonly passiveCooldowns = new Map<string, CooldownEntry>();
   private readonly actionCooldowns = new Map<string, CooldownEntry>();
+  private readonly bettingCooldowns = new Map<string, BettingCooldownEntry>();
   private client: Client | null = null;
 
   public constructor(
@@ -535,6 +541,63 @@ export class BotRuntime {
         this.actionCooldowns.delete(cooldownKey);
       }
     };
+  }
+
+  private checkBettingCooldown(
+    userId: string,
+    cooldownSeconds: number,
+  ): { rebuke: string; displayName: string } | null {
+    if (cooldownSeconds <= 0) {
+      return null;
+    }
+
+    const key = `${this.env.GUILD_ID}:${userId}:bet`;
+    const entry = this.bettingCooldowns.get(key);
+    if (!entry) {
+      return null;
+    }
+
+    const now = Date.now();
+    const cooldownMs = cooldownSeconds * 1000;
+    const elapsed = now - entry.lastBetAt;
+    if (elapsed >= cooldownMs) {
+      return null;
+    }
+
+    const offenses = entry.offenses + 1;
+    this.bettingCooldowns.set(key, { lastBetAt: entry.lastBetAt, offenses });
+
+    const remaining = this.formatDuration(Math.max(1, Math.ceil((cooldownMs - elapsed) / 1000)));
+    return { rebuke: this.buildBettingRebuke(offenses, remaining), displayName: "" };
+  }
+
+  private recordBetPlaced(userId: string) {
+    const key = `${this.env.GUILD_ID}:${userId}:bet`;
+    this.bettingCooldowns.set(key, { lastBetAt: Date.now(), offenses: 0 });
+  }
+
+  private buildBettingRebuke(offenses: number, remaining: string): string {
+    switch (offenses) {
+      case 1:
+        return `🛑 **No more betting for you for another ${remaining}!** Step away from the table, champ.`;
+      case 2:
+        return `😤 Seriously? Still **${remaining}** left on that cooldown. Put. The. Dice. Down.`;
+      case 3:
+        return `🚨 **You need help.** I'm cutting you off for another **${remaining}**. This is an intervention.`;
+      case 4:
+        return `🧠 Friend, this isn't a cry for points — it's a cry for help. **${remaining}** to reflect on your life choices.`;
+      default:
+        return `⛔ The house has called security. Come back in **${remaining}**, and maybe bring a hobby.`;
+    }
+  }
+
+  private formatDuration(seconds: number): string {
+    if (seconds < 60) {
+      return `${seconds}s`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
   }
 
   private resolveActiveAssignment(assignments: ActiveAssignment[], identifier: string): AssignmentLookupResult {
@@ -1653,6 +1716,17 @@ export class BotRuntime {
       }
       case "bet": {
         const amount = interaction.options.getNumber("amount", true);
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+
+        const cooldownCheck = this.checkBettingCooldown(
+          interaction.user.id,
+          config.bettingCooldownSeconds,
+        );
+        if (cooldownCheck) {
+          await interaction.reply(`<@${interaction.user.id}> ${cooldownCheck.rebuke}`);
+          return;
+        }
+
         const { participant } = await this.resolveActiveParticipant({
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
@@ -1664,8 +1738,8 @@ export class BotRuntime {
           participantId: participant.id,
           amount,
         });
+        this.recordBetPlaced(interaction.user.id);
 
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         if (result.won) {
           await interaction.reply(
             `🎉 **You won!** You bet ${this.formatCurrencyAmount(amount, config)} from your wallet and won. New balance: ${this.formatCurrencyAmount(result.newCurrencyBalance, config)}.`,
@@ -1683,12 +1757,11 @@ export class BotRuntime {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
 
         if (stats.totalBets === 0) {
-          await interaction.reply({
-            content: targetUser.id === interaction.user.id
+          await interaction.reply(
+            targetUser.id === interaction.user.id
               ? "You haven't placed any bets yet."
               : `${targetUser.username} hasn't placed any bets yet.`,
-            ephemeral: true,
-          });
+          );
           return;
         }
 
@@ -1703,7 +1776,7 @@ export class BotRuntime {
           `Net gain: ${this.formatSignedCurrencyAmount(stats.netGain, config)}`,
         ];
 
-        await interaction.reply({ content: lines.join("\n"), ephemeral: true });
+        await interaction.reply(lines.join("\n"));
         return;
       }
       default:

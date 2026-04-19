@@ -79,6 +79,7 @@ model GuildConfig {
   redemptionChannelId          String?
   listingChannelId             String?
   betWinChance                 Int                   @default(50)
+  bettingCooldownSeconds       Int                   @default(0)
   createdAt                    DateTime              @default(now())
   updatedAt                    DateTime              @updatedAt
   groups                       Group[]

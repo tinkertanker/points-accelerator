@@ -359,6 +359,21 @@ export default function SettingsPanel({
                     }
                   />
                 </label>
+                <label className="settings-field settings-field--compact">
+                  Betting cooldown (seconds)
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={settingsDraft.bettingCooldownSeconds}
+                    onChange={(event) =>
+                      onSettingsChange({
+                        ...settingsDraft,
+                        bettingCooldownSeconds: Math.max(0, Math.round(Number(event.target.value))),
+                      })
+                    }
+                  />
+                </label>
               </div>
             </fieldset>
             <fieldset className="settings-section span-full">

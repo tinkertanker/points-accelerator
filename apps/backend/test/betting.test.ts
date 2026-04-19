@@ -31,6 +31,7 @@ async function seedSettingsAndGroup() {
       redemptionChannelId: null,
       listingChannelId: null,
       betWinChance: 50,
+      bettingCooldownSeconds: 0,
     },
   });
 
@@ -296,6 +297,7 @@ describe("betting system", () => {
         redemptionChannelId: null,
         listingChannelId: null,
         betWinChance: 75,
+        bettingCooldownSeconds: 0,
       },
     });
 

@@ -44,6 +44,7 @@ const settingsSchema = z.object({
   redemptionChannelId: z.string().nullable(),
   listingChannelId: z.string().nullable(),
   betWinChance: z.number().int().min(0).max(100),
+  bettingCooldownSeconds: z.number().int().nonnegative(),
 });
 
 const roleCapabilitySchema = z.object({
@@ -389,6 +390,7 @@ export function createApp(params: {
     redemptionChannelId: settings.redemptionChannelId,
     listingChannelId: settings.listingChannelId,
     betWinChance: settings.betWinChance,
+    bettingCooldownSeconds: settings.bettingCooldownSeconds,
   });
 
   const serialiseGroup = (group: Awaited<ReturnType<AppServices["groupService"]["list"]>>[number]) => ({
