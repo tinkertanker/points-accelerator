@@ -199,6 +199,7 @@ export type DashboardMember = {
 export interface BotRuntimeApi {
   getRoles(): Promise<Array<{ id: string; name: string }>>;
   getTextChannels(): Promise<Array<{ id: string; name: string }>>;
+  getMembers(): Promise<Array<{ id: string; name: string }>>;
   getDashboardMember(userId: string): Promise<DashboardMember | null>;
   getGroupMemberCount(roleId: string): Promise<number | null>;
   getGroupMemberDiscordUserIds(roleId: string): Promise<string[] | null>;
@@ -372,6 +373,30 @@ export class BotRuntime {
       .map((channel) => ({
         id: channel!.id,
         name: channel!.name,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  public async getMembers() {
+    if (!this.client) {
+      return [];
+    }
+
+    const guild = await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null);
+    if (!guild) {
+      return [];
+    }
+
+    const members = await guild.members.fetch().catch(() => null);
+    if (!members) {
+      return [];
+    }
+
+    return Array.from(members.values())
+      .filter((member) => !member.user.bot)
+      .map((member) => ({
+        id: member.user.id,
+        name: member.displayName || member.user.username,
       }))
       .sort((left, right) => left.name.localeCompare(right.name));
   }

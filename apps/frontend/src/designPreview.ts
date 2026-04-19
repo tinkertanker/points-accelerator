@@ -415,6 +415,12 @@ function createInitialBootstrap(): BootstrapPayload {
         { id: "ch-redeem", name: "redemptions" },
         { id: "ch-listings", name: "listings" },
       ],
+      members: [
+        { id: "preview-staff-1", name: "Staff Alice" },
+        { id: "preview-student-1", name: "Ava" },
+        { id: "preview-student-2", name: "Mika" },
+        { id: "preview-student-3", name: "Jordan" },
+      ],
     },
     assignments: [
       {

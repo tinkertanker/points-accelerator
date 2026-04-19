@@ -24,6 +24,7 @@ let currentDashboardMember = { ...defaultDashboardMember };
 const botRuntime: BotRuntimeApi = {
   getRoles: vi.fn().mockResolvedValue([]),
   getTextChannels: vi.fn().mockResolvedValue([]),
+  getMembers: vi.fn().mockResolvedValue([]),
   getDashboardMember: vi.fn(async (userId: string) => (userId === currentDashboardMember.userId ? currentDashboardMember : null)),
   getGroupMemberCount: vi.fn().mockResolvedValue(null),
   getGroupMemberDiscordUserIds: vi.fn().mockResolvedValue(null),

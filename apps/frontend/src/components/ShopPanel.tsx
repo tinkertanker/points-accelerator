@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import type { Participant, ShopItemDraft } from "../types";
+import type { DiscordOption, Participant, ShopItemDraft } from "../types";
 
 const OWNER_DATALIST_ID = "shop-owner-participants";
 
@@ -63,6 +63,7 @@ type ShopPanelProps = {
   shopDrafts: ShopItemDraft[];
   isBusy: boolean;
   participants?: Participant[];
+  members?: DiscordOption[];
   createShopDraft: () => ShopItemDraft;
   onShopDraftsChange: (next: ShopItemDraft[]) => void;
   onSaveShop: () => Promise<void>;
@@ -72,6 +73,7 @@ export default function ShopPanel({
   shopDrafts,
   isBusy,
   participants = [],
+  members = [],
   createShopDraft,
   onShopDraftsChange,
   onSaveShop,
@@ -80,21 +82,27 @@ export default function ShopPanel({
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
 
   const ownerSuggestions = useMemo(() => {
-    const seen = new Set<string>();
-    return participants
-      .filter((participant) => {
-        if (!participant.discordUserId || seen.has(participant.discordUserId)) {
-          return false;
-        }
-        seen.add(participant.discordUserId);
-        return true;
-      })
-      .map((participant) => ({
+    const byUserId = new Map<string, { userId: string; username: string }>();
+
+    for (const member of members) {
+      if (!member.id || byUserId.has(member.id)) {
+        continue;
+      }
+      byUserId.set(member.id, { userId: member.id, username: member.name || member.id });
+    }
+
+    for (const participant of participants) {
+      if (!participant.discordUserId || byUserId.has(participant.discordUserId)) {
+        continue;
+      }
+      byUserId.set(participant.discordUserId, {
         userId: participant.discordUserId,
         username: participant.discordUsername ?? participant.indexId,
-      }))
-      .sort((left, right) => left.username.localeCompare(right.username));
-  }, [participants]);
+      });
+    }
+
+    return Array.from(byUserId.values()).sort((left, right) => left.username.localeCompare(right.username));
+  }, [members, participants]);
 
   const resolveOwnerUsername = (ownerUserId: string | null) => {
     if (!ownerUserId) {

@@ -588,7 +588,7 @@ export function createApp(params: {
     const canManageAdminPages = session.canManageSettings || session.canManageGroups;
     const canManageMentorPages = session.canManageShop || session.canManageAssignments;
 
-    const [settings, leaderboard, capabilities, groups, shopItems, listings, ledger, roles, channels, assignments, participants, submissions] =
+    const [settings, leaderboard, capabilities, groups, shopItems, listings, ledger, roles, channels, members, assignments, participants, submissions] =
       await Promise.all([
         services.configService.getOrCreate(params.env.GUILD_ID),
         services.economyService.getLeaderboard(params.env.GUILD_ID),
@@ -599,6 +599,7 @@ export function createApp(params: {
         canManageAdminPages ? services.economyService.getLedger(params.env.GUILD_ID, 25) : Promise.resolve([]),
         canManageAdminPages ? params.botRuntime?.getRoles() ?? [] : Promise.resolve([]),
         canManageAdminPages ? params.botRuntime?.getTextChannels() ?? [] : Promise.resolve([]),
+        canManageMentorPages ? params.botRuntime?.getMembers() ?? [] : Promise.resolve([]),
         canManageMentorPages ? services.assignmentService.list(params.env.GUILD_ID) : Promise.resolve([]),
         canManageAdminPages ? services.participantService.list(params.env.GUILD_ID) : Promise.resolve([]),
         canManageMentorPages ? services.submissionService.list(params.env.GUILD_ID) : Promise.resolve([]),
@@ -622,6 +623,7 @@ export function createApp(params: {
       discord: {
         roles,
         channels,
+        members,
       },
       assignments,
       participants,

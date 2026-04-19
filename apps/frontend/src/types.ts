@@ -185,6 +185,7 @@ export type BootstrapPayload = {
   discord: {
     roles: DiscordOption[];
     channels: DiscordOption[];
+    members: DiscordOption[];
   };
   assignments: Assignment[];
   participants: Participant[];

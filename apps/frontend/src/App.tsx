@@ -469,6 +469,7 @@ export default function App() {
             shopDrafts={shopDrafts}
             isBusy={isMutating}
             participants={bootstrap.participants}
+            members={bootstrap.discord.members}
             createShopDraft={() => toShopItemDraft()}
             onShopDraftsChange={setShopDrafts}
             onSaveShop={handleSaveShop}
