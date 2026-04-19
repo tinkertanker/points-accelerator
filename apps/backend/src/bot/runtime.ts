@@ -579,15 +579,15 @@ export class BotRuntime {
   private buildBettingRebuke(offenses: number, remaining: string): string {
     switch (offenses) {
       case 1:
-        return `🛑 **No more betting for you for another ${remaining}!** Step away from the table, champ.`;
+        return `🛑 OK hang on. ${remaining} more before you can bet. Go touch some grass.`;
       case 2:
-        return `😤 Seriously? Still **${remaining}** left on that cooldown. Put. The. Dice. Down.`;
+        return `😅 Still ${remaining} to go. Wait a bit OK.`;
       case 3:
-        return `🚨 **You need help.** I'm cutting you off for another **${remaining}**. This is an intervention.`;
+        return `🚧 ${remaining} more. Go find a proper hobby.`;
       case 4:
-        return `🧠 Friend, this isn't a cry for points — it's a cry for help. **${remaining}** to reflect on your life choices.`;
+        return `🧠 Another ${remaining}. This isn't a cry for points... it's a cry for help.`;
       default:
-        return `⛔ The house has called security. Come back in **${remaining}**, and maybe bring a hobby.`;
+        return `⛔ ${remaining}. I'm calling security. You need help.`;
     }
   }
 
