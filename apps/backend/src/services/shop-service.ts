@@ -523,10 +523,15 @@ export class ShopService {
       }
     }
 
-    if (redemption.shopItem.stock !== null) {
+    // Restore exactly what was held back at redemption time. For legacy
+    // rows without `stockHeld`, fall back to inferring from the current item
+    // configuration (best effort — see migration add_redemption_stock_held).
+    const stockToRestore =
+      redemption.stockHeld ?? (redemption.shopItem.stock !== null ? redemption.quantity : 0);
+    if (stockToRestore > 0 && redemption.shopItem.stock !== null) {
       await tx.shopItem.update({
         where: { id: redemption.shopItemId },
-        data: { stock: { increment: redemption.quantity } },
+        data: { stock: { increment: stockToRestore } },
       });
     }
   }
@@ -621,18 +626,22 @@ export class ShopService {
         },
       });
 
-      if (item.stock !== null) {
+      const stockHeld = item.stock !== null ? quantity : 0;
+      if (stockHeld > 0) {
         await tx.shopItem.update({
           where: { id: item.id },
           data: {
-            stock: item.stock - quantity,
+            stock: item.stock! - quantity,
           },
         });
       }
 
       return tx.shopRedemption.update({
         where: { id: redemption.id },
-        data: { currencyEntryId: currencyEntry.id },
+        data: {
+          currencyEntryId: currencyEntry.id,
+          stockHeld,
+        },
         include: {
           shopItem: true,
           group: true,
@@ -871,11 +880,12 @@ export class ShopService {
       externalRef: params.redemption.id,
     });
 
-    if (item.stock !== null) {
+    const stockHeld = item.stock !== null ? params.redemption.quantity : 0;
+    if (stockHeld > 0) {
       await params.tx.shopItem.update({
         where: { id: item.id },
         data: {
-          stock: item.stock - params.redemption.quantity,
+          stock: item.stock! - params.redemption.quantity,
         },
       });
     }
@@ -885,6 +895,7 @@ export class ShopService {
       data: {
         status: "PENDING",
         ledgerEntryId: ledgerEntry.id,
+        stockHeld,
       },
       include: {
         shopItem: true,

@@ -101,7 +101,16 @@ export default function ShopPanel({
       });
     }
 
-    return Array.from(byUserId.values()).sort((left, right) => left.username.localeCompare(right.username));
+    const entries = Array.from(byUserId.values()).sort((left, right) =>
+      left.username.localeCompare(right.username),
+    );
+
+    // Always disambiguate the datalist label with the user ID so duplicate
+    // display names don't silently bind to the wrong account on selection.
+    return entries.map((entry) => ({
+      ...entry,
+      label: `${entry.username} · ${entry.userId}`,
+    }));
   }, [members, participants]);
 
   const handleOwnerInput = (item: ShopItemDraft, rawValue: string): ShopItemDraft => {
@@ -110,9 +119,9 @@ export default function ShopPanel({
       return { ...item, ownerUserId: null, ownerUsername: null };
     }
 
-    const matchedByUsername = ownerSuggestions.find((suggestion) => suggestion.username === value);
-    if (matchedByUsername) {
-      return { ...item, ownerUserId: matchedByUsername.userId, ownerUsername: matchedByUsername.username };
+    const matchedByLabel = ownerSuggestions.find((suggestion) => suggestion.label === value);
+    if (matchedByLabel) {
+      return { ...item, ownerUserId: matchedByLabel.userId, ownerUsername: matchedByLabel.username };
     }
 
     const matchedByUserId = ownerSuggestions.find((suggestion) => suggestion.userId === value);
@@ -145,8 +154,8 @@ export default function ShopPanel({
       {ownerSuggestions.length > 0 ? (
         <datalist id={OWNER_DATALIST_ID}>
           {ownerSuggestions.map((suggestion) => (
-            <option key={suggestion.userId} value={suggestion.username}>
-              {suggestion.userId}
+            <option key={suggestion.userId} value={suggestion.label}>
+              {suggestion.username}
             </option>
           ))}
         </datalist>

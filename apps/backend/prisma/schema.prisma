@@ -214,6 +214,7 @@ model ShopRedemption {
   approvalMessageId String?
   currencyEntryId   String?
   ledgerEntryId     String?
+  stockHeld         Int?
   status            RedemptionStatus @default(PENDING)
   notes             String?
   createdAt         DateTime         @default(now())
