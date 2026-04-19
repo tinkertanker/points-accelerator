@@ -16,6 +16,7 @@ export type Settings = {
   redemptionChannelId: string | null;
   listingChannelId: string | null;
   betWinChance: number;
+  bettingCooldownSeconds: number;
 };
 
 export type RoleCapability = {

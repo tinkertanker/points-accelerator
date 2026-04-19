@@ -92,6 +92,7 @@ async function seedSettings(overrides: Partial<{ mentorRoleIds: string[] }> = {}
       redemptionChannelId: null,
       listingChannelId: null,
       betWinChance: 50,
+      bettingCooldownSeconds: 0,
     },
   });
 }

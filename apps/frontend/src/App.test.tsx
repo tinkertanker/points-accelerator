@@ -98,6 +98,7 @@ const bootstrapPayload = {
     redemptionChannelId: null,
     listingChannelId: null,
     betWinChance: 50,
+    bettingCooldownSeconds: 0,
   },
   capabilities: [
     {
