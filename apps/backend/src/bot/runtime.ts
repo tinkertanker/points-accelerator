@@ -24,6 +24,7 @@ import { resolveCapabilities } from "../domain/permissions.js";
 import type { AppServices } from "../services/app-services.js";
 import type { StorageService } from "../services/storage-service.js";
 import { AppError } from "../utils/app-error.js";
+import { readBackendVersion, readChangelogEntry } from "./announcements.js";
 
 type CooldownEntry = {
   seenAt: number;
@@ -268,6 +269,9 @@ export class BotRuntime {
 
     this.client.once("ready", async () => {
       await this.registerCommands();
+      await this.announceDeploymentIfNew().catch((error) => {
+        console.error("Failed to post deploy announcement", error);
+      });
     });
 
     this.client.on("messageCreate", async (message) => {
@@ -545,6 +549,32 @@ export class BotRuntime {
       channelId: sent.channelId,
       messageId: sent.id,
     };
+  }
+
+  private async announceDeploymentIfNew() {
+    if (!this.client) return;
+
+    const version = await readBackendVersion();
+    if (!version) return;
+
+    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    if (!config.announcementsChannelId) return;
+    if (config.lastAnnouncedVersion === version) return;
+
+    const entry = await readChangelogEntry(version);
+    if (!entry || entry.body.length === 0) return;
+
+    const channel = await this.client.channels.fetch(config.announcementsChannelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) return;
+
+    const appName = config.appName || this.env.PUBLIC_APP_NAME;
+    const embed = new EmbedBuilder()
+      .setColor(0x22c55e)
+      .setTitle(`${appName} — v${version}`)
+      .setDescription(entry.body.slice(0, 4000));
+
+    await (channel as GuildTextBasedChannel).send({ embeds: [embed] });
+    await this.services.configService.markAnnounced(this.env.GUILD_ID, version);
   }
 
   public async clearRedemptionButtons(channelId: string, messageId: string, statusLine: string): Promise<void> {

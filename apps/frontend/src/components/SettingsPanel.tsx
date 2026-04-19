@@ -439,6 +439,25 @@ export default function SettingsPanel({
                     ))}
                   </select>
                 </label>
+                <label>
+                  Announcements channel
+                  <select
+                    value={settingsDraft.announcementsChannelId ?? ""}
+                    onChange={(event) =>
+                      onSettingsChange({
+                        ...settingsDraft,
+                        announcementsChannelId: event.target.value || null,
+                      })
+                    }
+                  >
+                    <option value="">Unset</option>
+                    {discordChannels.map((channel) => (
+                      <option key={channel.id} value={channel.id}>
+                        {channel.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
             </fieldset>
             <fieldset className="settings-section span-full">

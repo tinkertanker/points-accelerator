@@ -25,12 +25,13 @@ Set these in your `.env` file before deploying:
 
 ## Docker Compose deploy
 
-1. Ensure the external `devtksg` Docker network exists.
-2. Copy `.env.example` to `.env` and fill in real values.
-3. Run `docker compose up -d --build`.
-4. Run `docker compose exec backend npx prisma migrate deploy`.
-5. In the Discord Developer Portal OAuth2 settings, add `${APP_PUBLIC_URL}/api/auth/discord/callback` as a redirect URI unless you set `DISCORD_OAUTH_REDIRECT_URI` explicitly.
-6. Visit the public app URL and sign in with Discord.
+1. Draft release notes: run the `/release-announce` Claude skill. It generates a new `CHANGELOG.md` entry from git history since the last version, bumps `apps/backend/package.json`, and leaves both changes for you to review. Commit them before building the image. Skip this step only if the redeploy genuinely has no user-visible changes — the bot will stay silent in that case.
+2. Ensure the external `devtksg` Docker network exists.
+3. Copy `.env.example` to `.env` and fill in real values.
+4. Run `docker compose up -d --build`.
+5. Run `docker compose exec backend npx prisma migrate deploy`.
+6. In the Discord Developer Portal OAuth2 settings, add `${APP_PUBLIC_URL}/api/auth/discord/callback` as a redirect URI unless you set `DISCORD_OAUTH_REDIRECT_URI` explicitly.
+7. Visit the public app URL and sign in with Discord. On first deploy, pick an announcements channel in Settings → Discord channels so the next version bump posts there.
 
 ## Database and runtime notes
 
@@ -48,6 +49,6 @@ Set these in your `.env` file before deploying:
 1. Configure role capability rules.
 2. Ensure at least one trusted admin role has `canManageDashboard` enabled, or rely on Discord server admins for fallback access.
 3. Create group mappings for the Discord roles that represent teams.
-4. Set listing, redemption, and log channels if you want channel output.
+4. Set listing, redemption, log, and announcements channels if you want channel output. The announcements channel receives one embed per backend version bump, read from the matching `## [x.y.z]` entry in `CHANGELOG.md`.
 5. Create shop items.
 6. Test `/awardpoints`, `/awardcurrency`, `/awardcurrencybulk`, `/deductgroup`, `/deductmember`, `/deductmixed`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, and `/sell` in the class server.

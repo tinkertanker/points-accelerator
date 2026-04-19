@@ -62,6 +62,14 @@ Useful backend commands:
 - Prefer validating submission flows end-to-end as well: auto-provisioned participants, `/submit`, `/submissions`, `/missing`, `/review_submission`, and dashboard review.
 - Include `/bet` and `/betstats` when touching betting or participant currency flow behaviour.
 
+## Release announcements
+
+- The bot posts the latest `CHANGELOG.md` entry to `GuildConfig.announcementsChannelId` once per backend version on `ready`. `lastAnnouncedVersion` on `GuildConfig` keeps restarts idempotent.
+- Version is read from `apps/backend/package.json`. CHANGELOG is parsed by matching `## [x.y.z]` headings — keep that format.
+- Before a deploy that should announce something, run the `/release-announce` skill: it drafts a grouped entry (Added / Changed / Fixed) from git history since the previous version, bumps `apps/backend/package.json`, and prepends the entry to `CHANGELOG.md`. Without a version bump + new entry, the bot stays silent on redeploy.
+- `CHANGELOG.md` must be copied into the backend image (the Dockerfile already does this) — the runtime looks for it next to `package.json` in prod, monorepo root in dev.
+- The announcements channel is selected in the dashboard Settings → Discord channels dropdown; `lastAnnouncedVersion` is bot-managed and not user-editable.
+
 ## Deployment
 
 - Production deploys use `docker-compose.prod.yml`.

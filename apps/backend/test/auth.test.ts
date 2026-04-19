@@ -91,6 +91,7 @@ async function seedSettings(overrides: Partial<{ mentorRoleIds: string[] }> = {}
       commandLogChannelId: null,
       redemptionChannelId: null,
       listingChannelId: null,
+      announcementsChannelId: null,
       betWinChance: 50,
       bettingCooldownSeconds: 0,
     },
