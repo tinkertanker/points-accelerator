@@ -64,21 +64,72 @@ function isDiscordSnowflake(value: string | null | undefined): value is string {
   return typeof value === "string" && DISCORD_SNOWFLAKE_PATTERN.test(value);
 }
 
-const LEDGER_PAGE_SIZE = 10;
+const PAGINATION_VERSION = "v1";
+const PAGINATION_PAGE_SIZE = 10;
 const LEDGER_EMBED_COLOUR = 0x8b5cf6;
 const LEDGER_DESCRIPTION_MAX = 300;
 const LEDGER_FIELD_VALUE_MAX = 1024;
-const LEADERBOARD_EMBED_LIMIT = 10;
 const LEADERBOARD_FEATURED_COUNT = 4;
 const GROUP_LEADERBOARD_COLOUR = 0xf59e0b;
 const FORBES_EMBED_COLOUR = 0x38bdf8;
 const STORE_EMBED_COLOUR = 0x10b981;
-const STORE_ITEMS_PER_SECTION = 15;
 const INVENTORY_EMBED_COLOUR = 0xec4899;
-const INVENTORY_ITEMS_LIMIT = 15;
 const AUTOCOMPLETE_CHOICE_LIMIT = 25;
 const AUTOCOMPLETE_CHOICE_NAME_MAX = 100;
 const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
+
+type PaginationKind = "inventory" | "store" | "ledger" | "leaderboard" | "forbes";
+type InventoryAudience = "personal" | "group";
+type StoreAudience = "personal" | "group";
+
+type PaginationCustomId = {
+  kind: PaginationKind;
+  subkey: string;
+  ownerId: string;
+  page: number;
+};
+
+function buildPaginationCustomId(
+  kind: PaginationKind,
+  subkey: string,
+  ownerId: string,
+  page: number,
+): string {
+  return [PAGINATION_VERSION, "page", kind, subkey, ownerId, String(page)].join(":");
+}
+
+function parsePaginationCustomId(raw: string): PaginationCustomId | null {
+  const parts = raw.split(":");
+  if (parts.length !== 6) return null;
+  const [version, tag, kind, subkey, ownerId, pageRaw] = parts as [
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  if (version !== PAGINATION_VERSION || tag !== "page") return null;
+  if (!["inventory", "store", "ledger", "leaderboard", "forbes"].includes(kind)) return null;
+  const page = Number.parseInt(pageRaw, 10);
+  if (!Number.isFinite(page) || page < 1) return null;
+  return { kind: kind as PaginationKind, subkey, ownerId, page };
+}
+
+function paginateArray<T>(items: T[], page: number) {
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGINATION_PAGE_SIZE));
+  const clampedPage = Math.min(Math.max(1, page), totalPages);
+  const start = (clampedPage - 1) * PAGINATION_PAGE_SIZE;
+  const slice = items.slice(start, start + PAGINATION_PAGE_SIZE);
+  return {
+    slice,
+    totalPages,
+    clampedPage,
+    hasPrev: clampedPage > 1,
+    hasNext: clampedPage < totalPages,
+    startIndex: start,
+  };
+}
 
 function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: string) {
   const config = getAwardCommandConfig(commandName);
@@ -321,6 +372,25 @@ export class BotRuntime {
           await this.handleRedemptionButton(interaction);
         } catch (error) {
           console.error("Redemption button handling failed", error);
+          const message = error instanceof AppError ? error.message : "Unexpected button error.";
+          try {
+            if (interaction.replied || interaction.deferred) {
+              await interaction.editReply({ content: message });
+            } else {
+              await interaction.reply({ content: message, ephemeral: true });
+            }
+          } catch (replyError) {
+            console.error("Failed to send button error response", replyError);
+          }
+        }
+        return;
+      }
+
+      if (interaction.isButton() && interaction.customId.startsWith(`${PAGINATION_VERSION}:page:`)) {
+        try {
+          await this.handlePaginationButton(interaction);
+        } catch (error) {
+          console.error("Pagination button handling failed", error);
           const message = error instanceof AppError ? error.message : "Unexpected button error.";
           try {
             if (interaction.replied || interaction.deferred) {
@@ -679,6 +749,162 @@ export class BotRuntime {
     return { channelId: sent.channelId, messageId: sent.id };
   }
 
+  private buildPaginationRow(
+    kind: PaginationKind,
+    subkey: string,
+    ownerId: string,
+    page: number,
+    hasPrev: boolean,
+    hasNext: boolean,
+  ) {
+    if (!hasPrev && !hasNext) {
+      return null;
+    }
+    const prev = new ButtonBuilder()
+      .setCustomId(buildPaginationCustomId(kind, subkey, ownerId, Math.max(1, page - 1)))
+      .setLabel("Prev")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!hasPrev);
+    const next = new ButtonBuilder()
+      .setCustomId(buildPaginationCustomId(kind, subkey, ownerId, page + 1))
+      .setLabel("Next")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!hasNext);
+    return new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next);
+  }
+
+  private async handlePaginationButton(interaction: ButtonInteraction) {
+    const parsed = parsePaginationCustomId(interaction.customId);
+    if (!parsed) {
+      return;
+    }
+
+    const isEphemeralSource = Boolean(interaction.message.flags?.has?.(64));
+    if (!isEphemeralSource && parsed.ownerId !== interaction.user.id) {
+      await interaction.reply({
+        content: "Only the person who ran this command can page through it.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    switch (parsed.kind) {
+      case "inventory":
+        await this.updateInventoryPage(interaction, parsed);
+        return;
+      case "store":
+        await this.updateStorePage(interaction, parsed);
+        return;
+      case "ledger":
+        await this.updateLedgerPage(interaction, parsed);
+        return;
+      case "leaderboard":
+        await this.updateLeaderboardPage(interaction, parsed);
+        return;
+      case "forbes":
+        await this.updateForbesPage(interaction, parsed);
+        return;
+    }
+  }
+
+  private async updateInventoryPage(interaction: ButtonInteraction, parsed: PaginationCustomId) {
+    const audience: InventoryAudience = parsed.subkey === "group" ? "group" : "personal";
+    const [config, redemptions] = await Promise.all([
+      this.services.configService.getOrCreate(this.env.GUILD_ID),
+      this.services.shopService.listRedemptionsByUser(this.env.GUILD_ID, parsed.ownerId),
+    ]);
+    const filtered = redemptions.filter((redemption) =>
+      audience === "group" ? redemption.purchaseMode === "GROUP" : redemption.purchaseMode !== "GROUP",
+    );
+    const member = await interaction.guild?.members.fetch(parsed.ownerId).catch(() => null);
+    const displayName = member?.displayName ?? interaction.user.username;
+    const { embed, paged } = this.buildInventoryEmbed({
+      redemptions: filtered,
+      config,
+      displayName,
+      audience,
+      page: parsed.page,
+    });
+    const row = this.buildPaginationRow(
+      "inventory",
+      audience,
+      parsed.ownerId,
+      paged.clampedPage,
+      paged.hasPrev,
+      paged.hasNext,
+    );
+    await interaction.update({ embeds: [embed], components: row ? [row] : [] });
+  }
+
+  private async updateStorePage(interaction: ButtonInteraction, parsed: PaginationCustomId) {
+    const audience: StoreAudience = parsed.subkey === "group" ? "group" : "personal";
+    const [config, items] = await Promise.all([
+      this.services.configService.getOrCreate(this.env.GUILD_ID),
+      this.services.shopService.list(this.env.GUILD_ID),
+    ]);
+    const { embed, paged } = this.buildStoreEmbed({ items, config, audience, page: parsed.page });
+    const row = this.buildPaginationRow(
+      "store",
+      audience,
+      parsed.ownerId,
+      paged.clampedPage,
+      paged.hasPrev,
+      paged.hasNext,
+    );
+    await interaction.update({ embeds: [embed], components: row ? [row] : [] });
+  }
+
+  private async updateLedgerPage(interaction: ButtonInteraction, parsed: PaginationCustomId) {
+    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    const page = Math.max(1, parsed.page);
+    const offset = (page - 1) * PAGINATION_PAGE_SIZE;
+    const entries = await this.services.economyService.getLedger(this.env.GUILD_ID, {
+      limit: PAGINATION_PAGE_SIZE + 1,
+      offset,
+    });
+    const hasNext = entries.length > PAGINATION_PAGE_SIZE;
+    const visible = entries.slice(0, PAGINATION_PAGE_SIZE);
+    const embed = this.buildLedgerEmbed(visible, config, page, offset);
+    const row = this.buildPaginationRow("ledger", "-", parsed.ownerId, page, page > 1, hasNext);
+    await interaction.update({ embeds: [embed], components: row ? [row] : [] });
+  }
+
+  private async updateLeaderboardPage(interaction: ButtonInteraction, parsed: PaginationCustomId) {
+    const [leaderboard, config] = await Promise.all([
+      this.services.economyService.getLeaderboard(this.env.GUILD_ID),
+      this.services.configService.getOrCreate(this.env.GUILD_ID),
+    ]);
+    const { embed, paged } = this.buildGroupLeaderboardEmbed(leaderboard, config, parsed.page);
+    const row = this.buildPaginationRow(
+      "leaderboard",
+      "-",
+      parsed.ownerId,
+      paged.clampedPage,
+      paged.hasPrev,
+      paged.hasNext,
+    );
+    await interaction.update({ embeds: [embed], components: row ? [row] : [] });
+  }
+
+  private async updateForbesPage(interaction: ButtonInteraction, parsed: PaginationCustomId) {
+    const [leaderboard, config] = await Promise.all([
+      this.services.participantService.getCurrencyLeaderboard(this.env.GUILD_ID),
+      this.services.configService.getOrCreate(this.env.GUILD_ID),
+    ]);
+    const paged = paginateArray(leaderboard, parsed.page);
+    const displayNames = await this.resolveParticipantDisplayNames(interaction.guild, paged.slice);
+    const { embed } = this.buildForbesEmbed(leaderboard, displayNames, config, parsed.page);
+    const row = this.buildPaginationRow(
+      "forbes",
+      "-",
+      parsed.ownerId,
+      paged.clampedPage,
+      paged.hasPrev,
+      paged.hasNext,
+    );
+    await interaction.update({ embeds: [embed], components: row ? [row] : [] });
+  }
+
   private async handleRedemptionButton(interaction: ButtonInteraction) {
     const parts = interaction.customId.split(":");
     if (parts.length !== 3 || parts[0] !== "redemption") {
@@ -1008,11 +1234,17 @@ export class BotRuntime {
     }
   }
 
-  private buildGroupLeaderboardEmbed(leaderboard: GroupLeaderboardEntry[], config: GuildConfig) {
-    const rankedGroups = leaderboard.slice(0, LEADERBOARD_EMBED_LIMIT);
-    const featuredGroups = rankedGroups.slice(0, LEADERBOARD_FEATURED_COUNT);
-    const compactGroups = rankedGroups.slice(LEADERBOARD_FEATURED_COUNT);
+  private buildGroupLeaderboardEmbed(
+    leaderboard: GroupLeaderboardEntry[],
+    config: GuildConfig,
+    page: number,
+  ) {
+    const paged = paginateArray(leaderboard, page);
     const totalPoints = leaderboard.reduce((sum, group) => sum + group.pointsBalance, 0);
+    const onFirstPage = paged.clampedPage === 1;
+    const featuredCount = onFirstPage ? Math.min(LEADERBOARD_FEATURED_COUNT, paged.slice.length) : 0;
+    const featuredGroups = paged.slice.slice(0, featuredCount);
+    const compactGroups = paged.slice.slice(featuredCount);
     const standings = featuredGroups
       .map(
         (group, index) =>
@@ -1020,19 +1252,22 @@ export class BotRuntime {
       )
       .join("\n\n");
     const compactStandings = compactGroups
-      .map(
-        (group, index) =>
-          `#${LEADERBOARD_FEATURED_COUNT + index + 1} **${group.displayName}** · ${this.formatPointsAmount(group.pointsBalance, config)}`,
-      )
+      .map((group, index) => {
+        const rank = paged.startIndex + featuredCount + index + 1;
+        return `#${rank} **${group.displayName}** · ${this.formatPointsAmount(group.pointsBalance, config)}`;
+      })
       .join("\n");
-    const fields = [
-      { name: "Standings", value: standings, inline: false },
-      ...(compactStandings ? [{ name: "Also ranked", value: compactStandings, inline: false }] : []),
-      { name: "Groups", value: `${leaderboard.length}`, inline: true },
-      { name: "Total in play", value: this.formatPointsAmount(totalPoints, config), inline: true },
-    ];
+    const fields: { name: string; value: string; inline: boolean }[] = [];
+    if (standings) fields.push({ name: "Standings", value: standings, inline: false });
+    if (compactStandings)
+      fields.push({ name: onFirstPage ? "Also ranked" : "Standings", value: compactStandings, inline: false });
+    fields.push({ name: "Groups", value: `${leaderboard.length}`, inline: true });
+    fields.push({ name: "Total in play", value: this.formatPointsAmount(totalPoints, config), inline: true });
+    if (paged.totalPages > 1) {
+      fields.push({ name: "Page", value: `${paged.clampedPage}/${paged.totalPages}`, inline: true });
+    }
 
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
       .setColor(GROUP_LEADERBOARD_COLOUR)
       .setTitle("Group Leaderboard")
       .setDescription(
@@ -1040,6 +1275,7 @@ export class BotRuntime {
       )
       .addFields(fields)
       .setFooter({ text: `Shared ${config.pointsName} drive the public board and /buyforgroup.` });
+    return { embed, paged };
   }
 
   private async resolveParticipantDisplayNames(
@@ -1071,11 +1307,14 @@ export class BotRuntime {
     leaderboard: CurrencyLeaderboardEntry[],
     displayNames: Map<string, string>,
     config: GuildConfig,
+    page: number,
   ) {
-    const rankedParticipants = leaderboard.slice(0, LEADERBOARD_EMBED_LIMIT);
-    const featuredParticipants = rankedParticipants.slice(0, LEADERBOARD_FEATURED_COUNT);
-    const compactParticipants = rankedParticipants.slice(LEADERBOARD_FEATURED_COUNT);
+    const paged = paginateArray(leaderboard, page);
     const totalCurrency = leaderboard.reduce((sum, participant) => sum + participant.currencyBalance, 0);
+    const onFirstPage = paged.clampedPage === 1;
+    const featuredCount = onFirstPage ? Math.min(LEADERBOARD_FEATURED_COUNT, paged.slice.length) : 0;
+    const featuredParticipants = paged.slice.slice(0, featuredCount);
+    const compactParticipants = paged.slice.slice(featuredCount);
     const standings = featuredParticipants
       .map((participant, index) => {
         const displayName = this.formatParticipantReference(
@@ -1091,17 +1330,21 @@ export class BotRuntime {
           participant,
           displayNames.get(participant.id) ?? participant.discordUsername ?? participant.indexId,
         );
-        return `#${LEADERBOARD_FEATURED_COUNT + index + 1} **${displayName}** · ${this.formatCurrencyAmount(participant.currencyBalance, config)}`;
+        const rank = paged.startIndex + featuredCount + index + 1;
+        return `#${rank} **${displayName}** · ${this.formatCurrencyAmount(participant.currencyBalance, config)}`;
       })
       .join("\n");
-    const fields = [
-      { name: "Standings", value: standings, inline: false },
-      ...(compactStandings ? [{ name: "Also ranked", value: compactStandings, inline: false }] : []),
-      { name: "Wallets tracked", value: `${leaderboard.length}`, inline: true },
-      { name: "Total held", value: this.formatCurrencyAmount(totalCurrency, config), inline: true },
-    ];
+    const fields: { name: string; value: string; inline: boolean }[] = [];
+    if (standings) fields.push({ name: "Standings", value: standings, inline: false });
+    if (compactStandings)
+      fields.push({ name: onFirstPage ? "Also ranked" : "Standings", value: compactStandings, inline: false });
+    fields.push({ name: "Wallets tracked", value: `${leaderboard.length}`, inline: true });
+    fields.push({ name: "Total held", value: this.formatCurrencyAmount(totalCurrency, config), inline: true });
+    if (paged.totalPages > 1) {
+      fields.push({ name: "Page", value: `${paged.clampedPage}/${paged.totalPages}`, inline: true });
+    }
 
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
       .setColor(FORBES_EMBED_COLOUR)
       .setTitle("Forbes Wallet Board")
       .setDescription(
@@ -1109,6 +1352,7 @@ export class BotRuntime {
       )
       .addFields(fields)
       .setFooter({ text: "Server display names are shown when Discord can resolve them." });
+    return { embed, paged };
   }
 
   private formatStoreLine(item: ShopListItem, priceLabel: string) {
@@ -1150,68 +1394,97 @@ export class BotRuntime {
     return lines.join("\n");
   }
 
-  private buildInventoryEmbed(redemptions: UserRedemption[], config: GuildConfig, displayName: string) {
-    const visible = redemptions.slice(0, INVENTORY_ITEMS_LIMIT);
+  private buildInventoryEmbed(params: {
+    redemptions: UserRedemption[];
+    config: GuildConfig;
+    displayName: string;
+    audience: InventoryAudience;
+    page: number;
+  }) {
+    const { redemptions, config, displayName, audience, page } = params;
     const fulfilled = redemptions.filter((redemption) => redemption.status === "FULFILLED");
     const totalItems = fulfilled.reduce((sum, redemption) => sum + redemption.quantity, 0);
     const pendingCount = redemptions.filter(
       (redemption) => redemption.status === "PENDING" || redemption.status === "AWAITING_APPROVAL",
     ).length;
 
+    const paged = paginateArray(redemptions, page);
+    const titleSuffix = audience === "personal" ? "personal inventory" : "group purchases";
+    const emptyHint =
+      audience === "personal"
+        ? "Nothing yet — try `/store personal` to see what's for sale."
+        : "No group purchases yet — try `/store group` to see what's for sale.";
     const description =
-      visible.length === 0
-        ? "Nothing yet — try `/store` to see what's for sale."
-        : visible.map((redemption) => `• ${this.formatInventoryLine(redemption, config)}`).join("\n\n");
+      redemptions.length === 0
+        ? emptyHint
+        : paged.slice
+            .map((redemption) => `• ${this.formatInventoryLine(redemption, config)}`)
+            .join("\n\n");
 
     const footerParts = [
       `${totalItems} item${totalItems === 1 ? "" : "s"} fulfilled`,
       `${pendingCount} in progress`,
     ];
-    if (redemptions.length > INVENTORY_ITEMS_LIMIT) {
-      footerParts.push(`showing latest ${INVENTORY_ITEMS_LIMIT} of ${redemptions.length}`);
+    if (paged.totalPages > 1) {
+      footerParts.push(`page ${paged.clampedPage}/${paged.totalPages}`);
     }
 
-    return new EmbedBuilder()
-      .setColor(INVENTORY_EMBED_COLOUR)
-      .setTitle(`${displayName}'s inventory`)
-      .setDescription(description)
-      .setFooter({ text: footerParts.join(" · ") });
+    return {
+      embed: new EmbedBuilder()
+        .setColor(INVENTORY_EMBED_COLOUR)
+        .setTitle(`${displayName}'s ${titleSuffix}`)
+        .setDescription(description)
+        .setFooter({ text: footerParts.join(" · ") }),
+      paged,
+    };
   }
 
-  private buildStoreEmbed(items: ShopListItem[], config: GuildConfig) {
-    const enabled = items.filter((item) => item.enabled);
-    const personalItems = enabled
-      .filter((item) => item.audience === "INDIVIDUAL")
-      .slice(0, STORE_ITEMS_PER_SECTION);
-    const groupItems = enabled
-      .filter((item) => item.audience === "GROUP")
-      .slice(0, STORE_ITEMS_PER_SECTION);
+  private buildStoreEmbed(params: {
+    items: ShopListItem[];
+    config: GuildConfig;
+    audience: StoreAudience;
+    page: number;
+  }) {
+    const { items, config, audience, page } = params;
+    const filtered = items.filter(
+      (item) => item.enabled && item.audience === (audience === "group" ? "GROUP" : "INDIVIDUAL"),
+    );
+    const paged = paginateArray(filtered, page);
+    const priceFormatter = (item: ShopListItem) =>
+      audience === "group"
+        ? this.formatPointsAmount(item.cost.toString(), config)
+        : this.formatCurrencyAmount(item.cost.toString(), config);
+    const title = audience === "group" ? "Group store" : "Personal store";
+    const headline =
+      audience === "group"
+        ? `Items buyable with shared ${config.pointsName}.`
+        : `Items buyable with your ${config.currencyName}.`;
+    const description =
+      filtered.length === 0
+        ? audience === "group"
+          ? "No group-purchase items are available right now."
+          : "No personal items are available right now."
+        : paged.slice.map((item) => this.formatStoreLine(item, priceFormatter(item))).join("\n");
 
-    const fields: { name: string; value: string; inline: boolean }[] = [];
-    if (personalItems.length > 0) {
-      const value = personalItems
-        .map((item) => this.formatStoreLine(item, this.formatCurrencyAmount(item.cost.toString(), config)))
-        .join("\n");
-      fields.push({ name: `Personal items — spend ${config.currencyName}`, value, inline: false });
+    const fields = [{ name: "Items available", value: `${filtered.length}`, inline: true }];
+    if (paged.totalPages > 1) {
+      fields.push({ name: "Page", value: `${paged.clampedPage}/${paged.totalPages}`, inline: true });
     }
-    if (groupItems.length > 0) {
-      const value = groupItems
-        .map((item) => this.formatStoreLine(item, this.formatPointsAmount(item.cost.toString(), config)))
-        .join("\n");
-      fields.push({ name: `Group items — spend shared ${config.pointsName}`, value, inline: false });
-    }
-    fields.push({ name: "Items available", value: `${enabled.length}`, inline: true });
 
-    return new EmbedBuilder()
-      .setColor(STORE_EMBED_COLOUR)
-      .setTitle("Store")
-      .setDescription(
-        `Browse items buyable with ${config.currencyName} or shared ${config.pointsName}. Pick an item by name with /buyforme or /buyforgroup.`,
-      )
-      .addFields(fields)
-      .setFooter({
-        text: `/buyforme spends your ${config.currencyName} · /buyforgroup spends shared ${config.pointsName} · /donate converts between them.`,
-      });
+    const footer =
+      audience === "group"
+        ? `/buyforgroup spends shared ${config.pointsName} · /donate converts currency into points.`
+        : `/buyforme spends your ${config.currencyName} · /donate converts currency into points.`;
+
+    return {
+      embed: new EmbedBuilder()
+        .setColor(STORE_EMBED_COLOUR)
+        .setTitle(title)
+        .setDescription(`${headline}\n\n${description}`)
+        .addFields(fields)
+        .setFooter({ text: footer }),
+      paged,
+    };
   }
 
   private async resolveActiveParticipant(params: {
@@ -1589,7 +1862,16 @@ export class BotRuntime {
         return;
       }
 
-      await interaction.editReply({ embeds: [this.buildGroupLeaderboardEmbed(leaderboard, config)] });
+      const { embed, paged } = this.buildGroupLeaderboardEmbed(leaderboard, config, 1);
+      const row = this.buildPaginationRow(
+        "leaderboard",
+        "-",
+        interaction.user.id,
+        paged.clampedPage,
+        paged.hasPrev,
+        paged.hasNext,
+      );
+      await interaction.editReply({ embeds: [embed], components: row ? [row] : [] });
       return;
     }
 
@@ -1604,9 +1886,18 @@ export class BotRuntime {
         return;
       }
 
-      const visibleParticipants = leaderboard.slice(0, LEADERBOARD_EMBED_LIMIT);
-      const displayNames = await this.resolveParticipantDisplayNames(interaction.guild, visibleParticipants);
-      await interaction.editReply({ embeds: [this.buildForbesEmbed(leaderboard, displayNames, config)] });
+      const paged = paginateArray(leaderboard, 1);
+      const displayNames = await this.resolveParticipantDisplayNames(interaction.guild, paged.slice);
+      const { embed } = this.buildForbesEmbed(leaderboard, displayNames, config, 1);
+      const row = this.buildPaginationRow(
+        "forbes",
+        "-",
+        interaction.user.id,
+        paged.clampedPage,
+        paged.hasPrev,
+        paged.hasNext,
+      );
+      await interaction.editReply({ embeds: [embed], components: row ? [row] : [] });
       return;
     }
 
@@ -1636,24 +1927,23 @@ export class BotRuntime {
       }
       case "ledger": {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-        const page = interaction.options.getInteger("page") ?? 1;
-        const offset = (page - 1) * LEDGER_PAGE_SIZE;
+        const page = 1;
+        const offset = 0;
         const entries = await this.services.economyService.getLedger(this.env.GUILD_ID, {
-          limit: LEDGER_PAGE_SIZE,
+          limit: PAGINATION_PAGE_SIZE + 1,
           offset,
         });
 
         if (entries.length === 0) {
-          await interaction.reply({
-            content:
-              page === 1
-                ? "No ledger entries yet."
-                : `No ledger entries found on page ${page}. Try a smaller page number.`,
-          });
+          await interaction.reply({ content: "No ledger entries yet." });
           return;
         }
 
-        await interaction.reply({ embeds: [this.buildLedgerEmbed(entries, config, page, offset)] });
+        const hasNext = entries.length > PAGINATION_PAGE_SIZE;
+        const visible = entries.slice(0, PAGINATION_PAGE_SIZE);
+        const embed = this.buildLedgerEmbed(visible, config, page, offset);
+        const row = this.buildPaginationRow("ledger", "-", interaction.user.id, page, false, hasNext);
+        await interaction.reply({ embeds: [embed], components: row ? [row] : [] });
         return;
       }
       case "transfer": {
@@ -1923,25 +2213,68 @@ export class BotRuntime {
         return;
       }
       case "store": {
+        const subcommand = interaction.options.getSubcommand();
+        const audience: StoreAudience = subcommand === "group" ? "group" : "personal";
         const [config, items] = await Promise.all([
           this.services.configService.getOrCreate(this.env.GUILD_ID),
           this.services.shopService.list(this.env.GUILD_ID),
         ]);
-        if (!items.some((item) => item.enabled)) {
-          await interaction.reply({ content: "Store is empty.", ephemeral: true });
+        const wantedAudience = audience === "group" ? "GROUP" : "INDIVIDUAL";
+        if (!items.some((item) => item.enabled && item.audience === wantedAudience)) {
+          await interaction.reply({
+            content:
+              audience === "group"
+                ? "No group-purchase items are available right now."
+                : "No personal items are available right now.",
+            ephemeral: true,
+          });
           return;
         }
-        await interaction.reply({ embeds: [this.buildStoreEmbed(items, config)], ephemeral: true });
+        const { embed, paged } = this.buildStoreEmbed({ items, config, audience, page: 1 });
+        const row = this.buildPaginationRow(
+          "store",
+          audience,
+          interaction.user.id,
+          paged.clampedPage,
+          paged.hasPrev,
+          paged.hasNext,
+        );
+        await interaction.reply({
+          embeds: [embed],
+          components: row ? [row] : [],
+          ephemeral: true,
+        });
         return;
       }
       case "inventory": {
+        const subcommand = interaction.options.getSubcommand();
+        const audience: InventoryAudience = subcommand === "group" ? "group" : "personal";
         const [config, redemptions] = await Promise.all([
           this.services.configService.getOrCreate(this.env.GUILD_ID),
           this.services.shopService.listRedemptionsByUser(this.env.GUILD_ID, interaction.user.id),
         ]);
+        const filtered = redemptions.filter((redemption) =>
+          audience === "group" ? redemption.purchaseMode === "GROUP" : redemption.purchaseMode !== "GROUP",
+        );
         const displayName = member?.displayName ?? interaction.user.username;
+        const { embed, paged } = this.buildInventoryEmbed({
+          redemptions: filtered,
+          config,
+          displayName,
+          audience,
+          page: 1,
+        });
+        const row = this.buildPaginationRow(
+          "inventory",
+          audience,
+          interaction.user.id,
+          paged.clampedPage,
+          paged.hasPrev,
+          paged.hasNext,
+        );
         await interaction.reply({
-          embeds: [this.buildInventoryEmbed(redemptions, config, displayName)],
+          embeds: [embed],
+          components: row ? [row] : [],
           ephemeral: true,
         });
         return;
@@ -2425,9 +2758,12 @@ export class BotRuntime {
     return new EmbedBuilder()
       .setColor(LEDGER_EMBED_COLOUR)
       .setTitle("Transaction ledger")
-      .setDescription(`Page ${page} · showing entries ${firstIndex}–${lastIndex}.`)
-      .addFields(fields)
-      .setFooter({ text: "Use /ledger page:N to browse further back." });
+      .setDescription(
+        entries.length === 0
+          ? `Page ${page} · no entries.`
+          : `Page ${page} · showing entries ${firstIndex}–${lastIndex}.`,
+      )
+      .addFields(fields);
   }
 
   private formatSignedNumber(value: number) {
@@ -2474,10 +2810,7 @@ export class BotRuntime {
       new SlashCommandBuilder().setName("balance").setDescription("Show your group points and personal wallet."),
       new SlashCommandBuilder()
         .setName("ledger")
-        .setDescription("Show the 10 most recent ledger entries.")
-        .addIntegerOption((option) =>
-          option.setName("page").setDescription("Page number, 10 entries per page").setRequired(false).setMinValue(1),
-        ),
+        .setDescription("Show the 10 most recent ledger entries."),
       new SlashCommandBuilder()
         .setName("transfer")
         .setDescription("Send wallet currency to another student.")
@@ -2496,10 +2829,22 @@ export class BotRuntime {
       buildAwardLikeCommand("deductmixed", "Deduct group points and participant currency together."),
       new SlashCommandBuilder()
         .setName("store")
-        .setDescription("Browse the custom shop."),
+        .setDescription("Browse the custom shop.")
+        .addSubcommand((sub) =>
+          sub.setName("personal").setDescription("Items buyable with your wallet currency."),
+        )
+        .addSubcommand((sub) =>
+          sub.setName("group").setDescription("Items buyable with shared group points."),
+        ),
       new SlashCommandBuilder()
         .setName("inventory")
-        .setDescription("Show the shop items you've bought."),
+        .setDescription("Show the shop items you've bought.")
+        .addSubcommand((sub) =>
+          sub.setName("personal").setDescription("Items you bought with your wallet currency."),
+        )
+        .addSubcommand((sub) =>
+          sub.setName("group").setDescription("Group purchases you're part of."),
+        ),
       new SlashCommandBuilder()
         .setName("buyforme")
         .setDescription("Buy a shop item for yourself.")
