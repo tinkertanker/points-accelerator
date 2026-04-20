@@ -183,18 +183,21 @@ export class SubmissionService {
         throw new AppError(`This submission has already been reviewed (status: ${submission.status}).`, 409);
       }
 
-      let currencyAwarded = 0;
-      let pointsAwarded = 0;
+      let currencyAwardedDecimal = decimal(0);
+      let pointsAwardedDecimal = decimal(0);
 
       if (params.status === "APPROVED" || params.status === "OUTSTANDING") {
-        currencyAwarded = decimalToNumber(submission.assignment.baseCurrencyReward);
-        pointsAwarded = decimalToNumber(submission.assignment.basePointsReward);
+        currencyAwardedDecimal = submission.assignment.baseCurrencyReward;
+        pointsAwardedDecimal = submission.assignment.basePointsReward;
 
         if (params.status === "OUTSTANDING") {
-          currencyAwarded += decimalToNumber(submission.assignment.bonusCurrencyReward);
-          pointsAwarded += decimalToNumber(submission.assignment.bonusPointsReward);
+          currencyAwardedDecimal = currencyAwardedDecimal.add(submission.assignment.bonusCurrencyReward);
+          pointsAwardedDecimal = pointsAwardedDecimal.add(submission.assignment.bonusPointsReward);
         }
       }
+
+      const currencyAwarded = decimalToNumber(currencyAwardedDecimal);
+      const pointsAwarded = decimalToNumber(pointsAwardedDecimal);
 
       // Claim the pending submission before creating any ledger entries so concurrent reviews cannot double-award it.
       const claim = await tx.submission.updateMany({
@@ -208,8 +211,8 @@ export class SubmissionService {
           reviewedByUserId: params.reviewedByUserId,
           reviewedByUsername: params.reviewedByUsername,
           reviewNote: params.reviewNote ?? null,
-          currencyAwarded: currencyAwarded > 0 ? decimal(currencyAwarded) : null,
-          pointsAwarded: pointsAwarded > 0 ? decimal(pointsAwarded) : null,
+          currencyAwarded: currencyAwarded > 0 ? currencyAwardedDecimal : null,
+          pointsAwarded: pointsAwarded > 0 ? pointsAwardedDecimal : null,
         },
       });
 
