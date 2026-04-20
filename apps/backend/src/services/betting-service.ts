@@ -168,16 +168,17 @@ export class BettingService {
       }),
     ]);
 
-    const totalWon = decimalToNumber(winTotals._sum?.currencyDelta ?? decimal(0));
-    const totalLost = Math.abs(decimalToNumber(lossTotals._sum?.currencyDelta ?? decimal(0)));
+    const totalWonDecimal = winTotals._sum?.currencyDelta ?? decimal(0);
+    const totalLostDecimal = (lossTotals._sum?.currencyDelta ?? decimal(0)).abs();
+    const netGainDecimal = totalWonDecimal.sub(totalLostDecimal);
 
     return {
       totalBets: wins + losses,
       wins,
       losses,
-      totalWon,
-      totalLost,
-      netGain: totalWon - totalLost,
+      totalWon: decimalToNumber(totalWonDecimal),
+      totalLost: decimalToNumber(totalLostDecimal),
+      netGain: decimalToNumber(netGainDecimal),
     };
   }
 }

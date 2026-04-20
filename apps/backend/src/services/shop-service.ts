@@ -603,7 +603,8 @@ export class ShopService {
         throw new AppError("This item can only be purchased with /buyforme.", 409);
       }
 
-      const totalCost = decimalToNumber(item.cost) * quantity;
+      const totalCostDecimal = item.cost.mul(quantity);
+      const totalCost = decimalToNumber(totalCostDecimal);
       const participantBalance = await this.getParticipantCurrencyBalance(tx, participant.id);
       if (participantBalance < totalCost) {
         throw new AppError("You do not have enough currency.", 409);
@@ -619,7 +620,7 @@ export class ShopService {
           requestedByUsername: params.requestedByUsername,
           purchaseMode: "INDIVIDUAL",
           quantity,
-          totalCost: decimal(totalCost),
+          totalCost: totalCostDecimal,
           status: "PENDING",
         },
       });
@@ -746,7 +747,7 @@ export class ShopService {
         throw new AppError("This item can only be purchased with /buyforgroup.", 409);
       }
 
-      const totalCost = decimalToNumber(item.cost) * quantity;
+      const totalCostDecimal = item.cost.mul(quantity);
 
       const redemption = await tx.shopRedemption.create({
         data: {
@@ -758,7 +759,7 @@ export class ShopService {
           requestedByUsername: params.requestedByUsername,
           purchaseMode: "GROUP",
           quantity,
-          totalCost: decimal(totalCost),
+          totalCost: totalCostDecimal,
           approvalThreshold,
           status: "AWAITING_APPROVAL",
           approvals: {
