@@ -334,7 +334,8 @@ describe("bot runtime", () => {
         ],
       },
     ]);
-    const update = vi.fn().mockResolvedValue(undefined);
+    const deferUpdate = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handlePaginationButton({
@@ -342,7 +343,8 @@ describe("bot runtime", () => {
       message: { flags: { has: () => false } },
       user: { id: "user-1", username: "Alice" },
       guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
-      update,
+      deferUpdate,
+      editReply,
       reply,
     });
 
@@ -351,7 +353,8 @@ describe("bot runtime", () => {
       offset: 10,
     });
     expect(reply).not.toHaveBeenCalled();
-    const call = update.mock.calls[0][0];
+    expect(deferUpdate).toHaveBeenCalledTimes(1);
+    const call = editReply.mock.calls[0][0];
     const embed = call.embeds[0].data;
     expect(embed.description).toContain("Page 2");
     expect(embed.fields[0].name).toContain("#11");
@@ -360,7 +363,8 @@ describe("bot runtime", () => {
 
   it("rejects pagination button clicks from non-invokers on public messages", async () => {
     const { runtime, services } = createRuntimeFixture();
-    const update = vi.fn().mockResolvedValue(undefined);
+    const deferUpdate = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handlePaginationButton({
@@ -368,12 +372,14 @@ describe("bot runtime", () => {
       message: { flags: { has: () => false } },
       user: { id: "stranger-1", username: "Stranger" },
       guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
-      update,
+      deferUpdate,
+      editReply,
       reply,
     });
 
     expect(services.economyService.getLedger).not.toHaveBeenCalled();
-    expect(update).not.toHaveBeenCalled();
+    expect(deferUpdate).not.toHaveBeenCalled();
+    expect(editReply).not.toHaveBeenCalled();
     expect(reply).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringMatching(/only the person who ran/i),
@@ -385,7 +391,8 @@ describe("bot runtime", () => {
   it("skips the owner check when paginating an ephemeral-source message", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.shopService.listPersonalRedemptionsByUser = vi.fn().mockResolvedValue([]);
-    const update = vi.fn().mockResolvedValue(undefined);
+    const deferUpdate = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handlePaginationButton({
@@ -393,12 +400,39 @@ describe("bot runtime", () => {
       message: { flags: { has: (flag: number) => flag === 64 } },
       user: { id: "owner-1", username: "Owner" },
       guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
-      update,
+      deferUpdate,
+      editReply,
       reply,
     });
 
     expect(reply).not.toHaveBeenCalled();
-    expect(update).toHaveBeenCalledTimes(1);
+    expect(deferUpdate).toHaveBeenCalledTimes(1);
+    expect(editReply).toHaveBeenCalledTimes(1);
+  });
+
+  it("defers the interaction before running DB work on the pagination path", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const callOrder: string[] = [];
+    const deferUpdate = vi.fn(async () => {
+      callOrder.push("deferUpdate");
+    });
+    services.economyService.getLedger.mockImplementationOnce(async () => {
+      callOrder.push("getLedger");
+      return [];
+    });
+
+    await (runtime as any).handlePaginationButton({
+      customId: "v1:page:ledger:-:user-1:1",
+      message: { flags: { has: () => false } },
+      user: { id: "user-1", username: "Alice" },
+      guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
+      deferUpdate,
+      editReply: vi.fn(),
+      reply: vi.fn(),
+    });
+
+    expect(callOrder[0]).toBe("deferUpdate");
+    expect(callOrder).toContain("getLedger");
   });
 
   it("falls back to page 1 when a stale ledger button lands past the last page", async () => {
@@ -421,14 +455,15 @@ describe("bot runtime", () => {
           ],
         },
       ]);
-    const update = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handlePaginationButton({
       customId: "v1:page:ledger:-:user-1:5",
       message: { flags: { has: () => false } },
       user: { id: "user-1", username: "Alice" },
       guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
-      update,
+      deferUpdate: vi.fn().mockResolvedValue(undefined),
+      editReply,
       reply: vi.fn(),
     });
 
@@ -440,7 +475,7 @@ describe("bot runtime", () => {
       limit: 11,
       offset: 0,
     });
-    const embed = update.mock.calls[0][0].embeds[0].data;
+    const embed = editReply.mock.calls[0][0].embeds[0].data;
     expect(embed.description).toContain("Page 1");
     expect(embed.fields[0].name).toContain("#1");
   });

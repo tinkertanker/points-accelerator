@@ -791,6 +791,10 @@ export class BotRuntime {
       return;
     }
 
+    // Acknowledge within Discord's 3-second window before running DB/guild fetches,
+    // which for /forbes pagination can exceed the limit on cold caches.
+    await interaction.deferUpdate();
+
     const view = await (async () => {
       switch (parsed.kind) {
         case "inventory":
@@ -819,7 +823,7 @@ export class BotRuntime {
       }
     })();
 
-    await interaction.update({ embeds: [view.embed], components: view.row ? [view.row] : [] });
+    await interaction.editReply({ embeds: [view.embed], components: view.row ? [view.row] : [] });
   }
 
   private async buildInventoryView(params: {
