@@ -380,6 +380,69 @@ describe("bot runtime", () => {
     );
   });
 
+  it("skips the owner check when paginating an ephemeral-source message", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.shopService.listRedemptionsByUser = vi.fn().mockResolvedValue([]);
+    const update = vi.fn().mockResolvedValue(undefined);
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handlePaginationButton({
+      customId: "v1:page:inventory:personal:owner-1:1",
+      message: { flags: { has: (flag: number) => flag === 64 } },
+      user: { id: "owner-1", username: "Owner" },
+      guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
+      update,
+      reply,
+    });
+
+    expect(reply).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to page 1 when a stale ledger button lands past the last page", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.economyService.getLedger
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "entry-fresh",
+          type: "MANUAL_AWARD",
+          description: "Back at page 1",
+          createdAt: "2026-04-01T12:00:00.000Z",
+          splits: [
+            {
+              id: "split-fresh",
+              group: { displayName: "Gryffindor" },
+              pointsDelta: 5,
+              currencyDelta: 0,
+            },
+          ],
+        },
+      ]);
+    const update = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handlePaginationButton({
+      customId: "v1:page:ledger:-:user-1:5",
+      message: { flags: { has: () => false } },
+      user: { id: "user-1", username: "Alice" },
+      guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
+      update,
+      reply: vi.fn(),
+    });
+
+    expect(services.economyService.getLedger).toHaveBeenNthCalledWith(1, "guild-test", {
+      limit: 11,
+      offset: 40,
+    });
+    expect(services.economyService.getLedger).toHaveBeenNthCalledWith(2, "guild-test", {
+      limit: 11,
+      offset: 0,
+    });
+    const embed = update.mock.calls[0][0].embeds[0].data;
+    expect(embed.description).toContain("Page 1");
+    expect(embed.fields[0].name).toContain("#1");
+  });
+
   it("keeps ledger entry field values within Discord's 1024 character limit", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.economyService.getLedger.mockResolvedValue(
