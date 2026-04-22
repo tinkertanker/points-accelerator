@@ -6,6 +6,7 @@ import {
   Client,
   EmbedBuilder,
   GatewayIntentBits,
+  MessageFlags,
   Partials,
   PermissionFlagsBits,
   REST,
@@ -41,6 +42,9 @@ type GuildConfig = Awaited<ReturnType<AppServices["configService"]["getOrCreate"
 type ActiveAssignment = Awaited<ReturnType<AppServices["assignmentService"]["listActive"]>>[number];
 type CurrencyLeaderboardEntry = Awaited<ReturnType<AppServices["participantService"]["getCurrencyLeaderboard"]>>[number];
 type ShopListItem = Awaited<ReturnType<AppServices["shopService"]["list"]>>[number];
+type UserRedemption = Awaited<
+  ReturnType<AppServices["shopService"]["listPersonalRedemptionsByUser"]>
+>[number];
 type GuildMemberCollection = Awaited<
   ReturnType<NonNullable<ChatInputCommandInteraction["guild"]>["members"]["fetch"]>
 >;
@@ -63,19 +67,72 @@ function isDiscordSnowflake(value: string | null | undefined): value is string {
   return typeof value === "string" && DISCORD_SNOWFLAKE_PATTERN.test(value);
 }
 
-const LEDGER_PAGE_SIZE = 10;
+const PAGINATION_VERSION = "v1";
+const PAGINATION_PAGE_SIZE = 10;
 const LEDGER_EMBED_COLOUR = 0x8b5cf6;
 const LEDGER_DESCRIPTION_MAX = 300;
 const LEDGER_FIELD_VALUE_MAX = 1024;
-const LEADERBOARD_EMBED_LIMIT = 10;
 const LEADERBOARD_FEATURED_COUNT = 4;
 const GROUP_LEADERBOARD_COLOUR = 0xf59e0b;
 const FORBES_EMBED_COLOUR = 0x38bdf8;
 const STORE_EMBED_COLOUR = 0x10b981;
-const STORE_ITEMS_PER_SECTION = 15;
+const INVENTORY_EMBED_COLOUR = 0xec4899;
 const AUTOCOMPLETE_CHOICE_LIMIT = 25;
 const AUTOCOMPLETE_CHOICE_NAME_MAX = 100;
 const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
+
+type PaginationKind = "inventory" | "store" | "ledger" | "leaderboard" | "forbes";
+type InventoryAudience = "personal" | "group";
+type StoreAudience = "personal" | "group";
+
+type PaginationCustomId = {
+  kind: PaginationKind;
+  subkey: string;
+  ownerId: string;
+  page: number;
+};
+
+function buildPaginationCustomId(
+  kind: PaginationKind,
+  subkey: string,
+  ownerId: string,
+  page: number,
+): string {
+  return [PAGINATION_VERSION, "page", kind, subkey, ownerId, String(page)].join(":");
+}
+
+function parsePaginationCustomId(raw: string): PaginationCustomId | null {
+  const parts = raw.split(":");
+  if (parts.length !== 6) return null;
+  const [version, tag, kind, subkey, ownerId, pageRaw] = parts as [
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  if (version !== PAGINATION_VERSION || tag !== "page") return null;
+  if (!["inventory", "store", "ledger", "leaderboard", "forbes"].includes(kind)) return null;
+  const page = Number.parseInt(pageRaw, 10);
+  if (!Number.isFinite(page) || page < 1) return null;
+  return { kind: kind as PaginationKind, subkey, ownerId, page };
+}
+
+function paginateArray<T>(items: T[], page: number) {
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGINATION_PAGE_SIZE));
+  const clampedPage = Math.min(Math.max(1, page), totalPages);
+  const start = (clampedPage - 1) * PAGINATION_PAGE_SIZE;
+  const slice = items.slice(start, start + PAGINATION_PAGE_SIZE);
+  return {
+    slice,
+    totalPages,
+    clampedPage,
+    hasPrev: clampedPage > 1,
+    hasNext: clampedPage < totalPages,
+    startIndex: start,
+  };
+}
 
 function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: string) {
   const config = getAwardCommandConfig(commandName);
@@ -318,6 +375,25 @@ export class BotRuntime {
           await this.handleRedemptionButton(interaction);
         } catch (error) {
           console.error("Redemption button handling failed", error);
+          const message = error instanceof AppError ? error.message : "Unexpected button error.";
+          try {
+            if (interaction.replied || interaction.deferred) {
+              await interaction.editReply({ content: message });
+            } else {
+              await interaction.reply({ content: message, ephemeral: true });
+            }
+          } catch (replyError) {
+            console.error("Failed to send button error response", replyError);
+          }
+        }
+        return;
+      }
+
+      if (interaction.isButton() && interaction.customId.startsWith(`${PAGINATION_VERSION}:page:`)) {
+        try {
+          await this.handlePaginationButton(interaction);
+        } catch (error) {
+          console.error("Pagination button handling failed", error);
           const message = error instanceof AppError ? error.message : "Unexpected button error.";
           try {
             if (interaction.replied || interaction.deferred) {
@@ -676,6 +752,231 @@ export class BotRuntime {
     return { channelId: sent.channelId, messageId: sent.id };
   }
 
+  private buildPaginationRow(
+    kind: PaginationKind,
+    subkey: string,
+    ownerId: string,
+    page: number,
+    hasPrev: boolean,
+    hasNext: boolean,
+  ) {
+    if (!hasPrev && !hasNext) {
+      return null;
+    }
+    const prev = new ButtonBuilder()
+      .setCustomId(buildPaginationCustomId(kind, subkey, ownerId, Math.max(1, page - 1)))
+      .setLabel("Prev")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!hasPrev);
+    const next = new ButtonBuilder()
+      .setCustomId(buildPaginationCustomId(kind, subkey, ownerId, page + 1))
+      .setLabel("Next")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!hasNext);
+    return new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next);
+  }
+
+  private async handlePaginationButton(interaction: ButtonInteraction) {
+    const parsed = parsePaginationCustomId(interaction.customId);
+    if (!parsed) {
+      return;
+    }
+
+    const isEphemeralSource = Boolean(interaction.message.flags?.has?.(MessageFlags.Ephemeral));
+    if (!isEphemeralSource && parsed.ownerId !== interaction.user.id) {
+      await interaction.reply({
+        content: "Only the person who ran this command can page through it.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    // Acknowledge within Discord's 3-second window before running DB/guild fetches,
+    // which for /forbes pagination can exceed the limit on cold caches.
+    await interaction.deferUpdate();
+
+    const view = await (async () => {
+      switch (parsed.kind) {
+        case "inventory":
+          return this.buildInventoryView({
+            ownerId: parsed.ownerId,
+            audience: parsed.subkey === "group" ? "group" : "personal",
+            page: parsed.page,
+            guild: interaction.guild,
+          });
+        case "store":
+          return this.buildStoreView({
+            ownerId: parsed.ownerId,
+            audience: parsed.subkey === "group" ? "group" : "personal",
+            page: parsed.page,
+          });
+        case "ledger":
+          return this.buildLedgerView({ ownerId: parsed.ownerId, page: parsed.page });
+        case "leaderboard":
+          return this.buildLeaderboardView({ ownerId: parsed.ownerId, page: parsed.page });
+        case "forbes":
+          return this.buildForbesView({
+            ownerId: parsed.ownerId,
+            page: parsed.page,
+            guild: interaction.guild,
+          });
+      }
+    })();
+
+    await interaction.editReply({ embeds: [view.embed], components: view.row ? [view.row] : [] });
+  }
+
+  private async buildInventoryView(params: {
+    ownerId: string;
+    audience: InventoryAudience;
+    page: number;
+    guild: ChatInputCommandInteraction["guild"] | null;
+    displayName?: string;
+  }) {
+    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    const redemptions = await this.fetchInventoryRedemptions(params);
+    const paged = paginateArray(redemptions, params.page);
+    const displayName = params.displayName ?? (await this.resolveOwnerDisplayName(params.guild, params.ownerId));
+    const embed = this.buildInventoryEmbed({
+      redemptions,
+      config,
+      displayName,
+      audience: params.audience,
+      paged,
+    });
+    const row = this.buildPaginationRow(
+      "inventory",
+      params.audience,
+      params.ownerId,
+      paged.clampedPage,
+      paged.hasPrev,
+      paged.hasNext,
+    );
+    return { embed, row };
+  }
+
+  private async fetchInventoryRedemptions(params: {
+    ownerId: string;
+    audience: InventoryAudience;
+    guild: ChatInputCommandInteraction["guild"] | null;
+  }): Promise<UserRedemption[]> {
+    if (params.audience === "personal") {
+      return this.services.shopService.listPersonalRedemptionsByUser(this.env.GUILD_ID, params.ownerId);
+    }
+    const member = await params.guild?.members.fetch(params.ownerId).catch(() => null);
+    const roleIds = member ? this.getOrderedRoleIds(member) : [];
+    const group = await this.services.groupService
+      .resolveGroupFromRoleIds(this.env.GUILD_ID, roleIds)
+      .catch(() => null);
+    if (!group) {
+      return [];
+    }
+    return this.services.shopService.listGroupRedemptionsByGroup(this.env.GUILD_ID, group.id);
+  }
+
+  private async resolveOwnerDisplayName(
+    guild: ChatInputCommandInteraction["guild"] | null,
+    ownerId: string,
+  ) {
+    const member = await guild?.members.fetch(ownerId).catch(() => null);
+    return member?.displayName ?? member?.user?.globalName ?? member?.user?.username ?? ownerId;
+  }
+
+  private async buildStoreView(params: {
+    ownerId: string;
+    audience: StoreAudience;
+    page: number;
+  }) {
+    const [config, items] = await Promise.all([
+      this.services.configService.getOrCreate(this.env.GUILD_ID),
+      this.services.shopService.list(this.env.GUILD_ID),
+    ]);
+    const wantedAudience = params.audience === "group" ? "GROUP" : "INDIVIDUAL";
+    const filtered = items.filter((item) => item.enabled && item.audience === wantedAudience);
+    const paged = paginateArray(filtered, params.page);
+    const embed = this.buildStoreEmbed({
+      config,
+      audience: params.audience,
+      totalItems: filtered.length,
+      paged,
+    });
+    const row = this.buildPaginationRow(
+      "store",
+      params.audience,
+      params.ownerId,
+      paged.clampedPage,
+      paged.hasPrev,
+      paged.hasNext,
+    );
+    return { embed, row, totalItems: filtered.length };
+  }
+
+  private async buildLedgerView(params: { ownerId: string; page: number }) {
+    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    let page = Math.max(1, params.page);
+    let offset = (page - 1) * PAGINATION_PAGE_SIZE;
+    let entries = await this.services.economyService.getLedger(this.env.GUILD_ID, {
+      limit: PAGINATION_PAGE_SIZE + 1,
+      offset,
+    });
+    // Stale custom_id can point past the end (data shrank since the buttons were posted).
+    // Fall back to page 1 so users aren't stranded on an empty page.
+    if (entries.length === 0 && page > 1) {
+      page = 1;
+      offset = 0;
+      entries = await this.services.economyService.getLedger(this.env.GUILD_ID, {
+        limit: PAGINATION_PAGE_SIZE + 1,
+        offset,
+      });
+    }
+    const hasNext = entries.length > PAGINATION_PAGE_SIZE;
+    const visible = entries.slice(0, PAGINATION_PAGE_SIZE);
+    const embed = this.buildLedgerEmbed(visible, config, page, offset);
+    const row = this.buildPaginationRow("ledger", "-", params.ownerId, page, page > 1, hasNext);
+    return { embed, row, entryCount: visible.length };
+  }
+
+  private async buildLeaderboardView(params: { ownerId: string; page: number }) {
+    const [leaderboard, config] = await Promise.all([
+      this.services.economyService.getLeaderboard(this.env.GUILD_ID),
+      this.services.configService.getOrCreate(this.env.GUILD_ID),
+    ]);
+    const paged = paginateArray(leaderboard, params.page);
+    const embed = this.buildGroupLeaderboardEmbed(leaderboard, config, paged);
+    const row = this.buildPaginationRow(
+      "leaderboard",
+      "-",
+      params.ownerId,
+      paged.clampedPage,
+      paged.hasPrev,
+      paged.hasNext,
+    );
+    return { embed, row, totalEntries: leaderboard.length };
+  }
+
+  private async buildForbesView(params: {
+    ownerId: string;
+    page: number;
+    guild: ChatInputCommandInteraction["guild"] | null;
+  }) {
+    const [leaderboard, config] = await Promise.all([
+      this.services.participantService.getCurrencyLeaderboard(this.env.GUILD_ID),
+      this.services.configService.getOrCreate(this.env.GUILD_ID),
+    ]);
+    const paged = paginateArray(leaderboard, params.page);
+    const displayNames = await this.resolveParticipantDisplayNames(params.guild, paged.slice);
+    const embed = this.buildForbesEmbed(leaderboard, displayNames, config, paged);
+    const row = this.buildPaginationRow(
+      "forbes",
+      "-",
+      params.ownerId,
+      paged.clampedPage,
+      paged.hasPrev,
+      paged.hasNext,
+    );
+    return { embed, row, totalEntries: leaderboard.length };
+  }
+
   private async handleRedemptionButton(interaction: ButtonInteraction) {
     const parts = interaction.customId.split(":");
     if (parts.length !== 3 || parts[0] !== "redemption") {
@@ -1005,11 +1306,16 @@ export class BotRuntime {
     }
   }
 
-  private buildGroupLeaderboardEmbed(leaderboard: GroupLeaderboardEntry[], config: GuildConfig) {
-    const rankedGroups = leaderboard.slice(0, LEADERBOARD_EMBED_LIMIT);
-    const featuredGroups = rankedGroups.slice(0, LEADERBOARD_FEATURED_COUNT);
-    const compactGroups = rankedGroups.slice(LEADERBOARD_FEATURED_COUNT);
+  private buildGroupLeaderboardEmbed(
+    leaderboard: GroupLeaderboardEntry[],
+    config: GuildConfig,
+    paged: ReturnType<typeof paginateArray<GroupLeaderboardEntry>>,
+  ) {
     const totalPoints = leaderboard.reduce((sum, group) => sum + group.pointsBalance, 0);
+    const onFirstPage = paged.clampedPage === 1;
+    const featuredCount = onFirstPage ? Math.min(LEADERBOARD_FEATURED_COUNT, paged.slice.length) : 0;
+    const featuredGroups = paged.slice.slice(0, featuredCount);
+    const compactGroups = paged.slice.slice(featuredCount);
     const standings = featuredGroups
       .map(
         (group, index) =>
@@ -1017,19 +1323,22 @@ export class BotRuntime {
       )
       .join("\n\n");
     const compactStandings = compactGroups
-      .map(
-        (group, index) =>
-          `#${LEADERBOARD_FEATURED_COUNT + index + 1} **${group.displayName}** · ${this.formatPointsAmount(group.pointsBalance, config)}`,
-      )
+      .map((group, index) => {
+        const rank = paged.startIndex + featuredCount + index + 1;
+        return `#${rank} **${group.displayName}** · ${this.formatPointsAmount(group.pointsBalance, config)}`;
+      })
       .join("\n");
-    const fields = [
-      { name: "Standings", value: standings, inline: false },
-      ...(compactStandings ? [{ name: "Also ranked", value: compactStandings, inline: false }] : []),
-      { name: "Groups", value: `${leaderboard.length}`, inline: true },
-      { name: "Total in play", value: this.formatPointsAmount(totalPoints, config), inline: true },
-    ];
+    const fields: { name: string; value: string; inline: boolean }[] = [];
+    if (standings) fields.push({ name: "Standings", value: standings, inline: false });
+    if (compactStandings)
+      fields.push({ name: onFirstPage ? "Also ranked" : "Standings", value: compactStandings, inline: false });
+    fields.push({ name: "Groups", value: `${leaderboard.length}`, inline: true });
+    fields.push({ name: "Total in play", value: this.formatPointsAmount(totalPoints, config), inline: true });
+    if (paged.totalPages > 1) {
+      fields.push({ name: "Page", value: `${paged.clampedPage}/${paged.totalPages}`, inline: true });
+    }
 
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
       .setColor(GROUP_LEADERBOARD_COLOUR)
       .setTitle("Group Leaderboard")
       .setDescription(
@@ -1037,6 +1346,7 @@ export class BotRuntime {
       )
       .addFields(fields)
       .setFooter({ text: `Shared ${config.pointsName} drive the public board and /buyforgroup.` });
+    return embed;
   }
 
   private async resolveParticipantDisplayNames(
@@ -1068,11 +1378,13 @@ export class BotRuntime {
     leaderboard: CurrencyLeaderboardEntry[],
     displayNames: Map<string, string>,
     config: GuildConfig,
+    paged: ReturnType<typeof paginateArray<CurrencyLeaderboardEntry>>,
   ) {
-    const rankedParticipants = leaderboard.slice(0, LEADERBOARD_EMBED_LIMIT);
-    const featuredParticipants = rankedParticipants.slice(0, LEADERBOARD_FEATURED_COUNT);
-    const compactParticipants = rankedParticipants.slice(LEADERBOARD_FEATURED_COUNT);
     const totalCurrency = leaderboard.reduce((sum, participant) => sum + participant.currencyBalance, 0);
+    const onFirstPage = paged.clampedPage === 1;
+    const featuredCount = onFirstPage ? Math.min(LEADERBOARD_FEATURED_COUNT, paged.slice.length) : 0;
+    const featuredParticipants = paged.slice.slice(0, featuredCount);
+    const compactParticipants = paged.slice.slice(featuredCount);
     const standings = featuredParticipants
       .map((participant, index) => {
         const displayName = this.formatParticipantReference(
@@ -1088,17 +1400,21 @@ export class BotRuntime {
           participant,
           displayNames.get(participant.id) ?? participant.discordUsername ?? participant.indexId,
         );
-        return `#${LEADERBOARD_FEATURED_COUNT + index + 1} **${displayName}** · ${this.formatCurrencyAmount(participant.currencyBalance, config)}`;
+        const rank = paged.startIndex + featuredCount + index + 1;
+        return `#${rank} **${displayName}** · ${this.formatCurrencyAmount(participant.currencyBalance, config)}`;
       })
       .join("\n");
-    const fields = [
-      { name: "Standings", value: standings, inline: false },
-      ...(compactStandings ? [{ name: "Also ranked", value: compactStandings, inline: false }] : []),
-      { name: "Wallets tracked", value: `${leaderboard.length}`, inline: true },
-      { name: "Total held", value: this.formatCurrencyAmount(totalCurrency, config), inline: true },
-    ];
+    const fields: { name: string; value: string; inline: boolean }[] = [];
+    if (standings) fields.push({ name: "Standings", value: standings, inline: false });
+    if (compactStandings)
+      fields.push({ name: onFirstPage ? "Also ranked" : "Standings", value: compactStandings, inline: false });
+    fields.push({ name: "Wallets tracked", value: `${leaderboard.length}`, inline: true });
+    fields.push({ name: "Total held", value: this.formatCurrencyAmount(totalCurrency, config), inline: true });
+    if (paged.totalPages > 1) {
+      fields.push({ name: "Page", value: `${paged.clampedPage}/${paged.totalPages}`, inline: true });
+    }
 
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
       .setColor(FORBES_EMBED_COLOUR)
       .setTitle("Forbes Wallet Board")
       .setDescription(
@@ -1106,6 +1422,7 @@ export class BotRuntime {
       )
       .addFields(fields)
       .setFooter({ text: "Server display names are shown when Discord can resolve them." });
+    return embed;
   }
 
   private formatStoreLine(item: ShopListItem, priceLabel: string) {
@@ -1117,40 +1434,116 @@ export class BotRuntime {
     return `• ${parts.join(" · ")}`;
   }
 
-  private buildStoreEmbed(items: ShopListItem[], config: GuildConfig) {
-    const enabled = items.filter((item) => item.enabled);
-    const personalItems = enabled
-      .filter((item) => item.audience === "INDIVIDUAL")
-      .slice(0, STORE_ITEMS_PER_SECTION);
-    const groupItems = enabled
-      .filter((item) => item.audience === "GROUP")
-      .slice(0, STORE_ITEMS_PER_SECTION);
+  private formatInventoryStatus(status: UserRedemption["status"]) {
+    switch (status) {
+      case "FULFILLED":
+        return "✅ Fulfilled";
+      case "PENDING":
+        return "📦 Pending fulfilment";
+      case "AWAITING_APPROVAL":
+        return "⏳ Awaiting approval";
+      case "CANCELED":
+        return "🚫 Canceled";
+      default:
+        return status;
+    }
+  }
 
-    const fields: { name: string; value: string; inline: boolean }[] = [];
-    if (personalItems.length > 0) {
-      const value = personalItems
-        .map((item) => this.formatStoreLine(item, this.formatCurrencyAmount(item.cost.toString(), config)))
-        .join("\n");
-      fields.push({ name: `Personal items — spend ${config.currencyName}`, value, inline: false });
+  private formatInventoryLine(redemption: UserRedemption, config: GuildConfig) {
+    const emoji = redemption.shopItem.emoji ? `${redemption.shopItem.emoji} ` : "";
+    const unitLabel =
+      redemption.purchaseMode === "GROUP"
+        ? this.formatPointsAmount(redemption.totalCost.toString(), config)
+        : this.formatCurrencyAmount(redemption.totalCost.toString(), config);
+    const timestamp = Math.floor(new Date(redemption.createdAt).getTime() / 1000);
+    const quantityLabel = redemption.quantity > 1 ? ` ×${redemption.quantity}` : "";
+    const lines = [
+      `${emoji}**${redemption.shopItem.name}**${quantityLabel}`,
+      `${this.formatInventoryStatus(redemption.status)} · ${unitLabel} · <t:${timestamp}:R>`,
+    ];
+    return lines.join("\n");
+  }
+
+  private buildInventoryEmbed(params: {
+    redemptions: UserRedemption[];
+    config: GuildConfig;
+    displayName: string;
+    audience: InventoryAudience;
+    paged: ReturnType<typeof paginateArray<UserRedemption>>;
+  }) {
+    const { redemptions, config, displayName, audience, paged } = params;
+    const fulfilled = redemptions.filter((redemption) => redemption.status === "FULFILLED");
+    const totalItems = fulfilled.reduce((sum, redemption) => sum + redemption.quantity, 0);
+    const pendingCount = redemptions.filter(
+      (redemption) => redemption.status === "PENDING" || redemption.status === "AWAITING_APPROVAL",
+    ).length;
+
+    const titleSuffix = audience === "personal" ? "personal inventory" : "group purchases";
+    const emptyHint =
+      audience === "personal"
+        ? "Nothing yet — try `/store personal` to see what's for sale."
+        : "No group purchases yet — try `/store group` to see what's for sale.";
+    const description =
+      redemptions.length === 0
+        ? emptyHint
+        : paged.slice
+            .map((redemption) => `• ${this.formatInventoryLine(redemption, config)}`)
+            .join("\n\n");
+
+    const footerParts = [
+      `${totalItems} item${totalItems === 1 ? "" : "s"} fulfilled`,
+      `${pendingCount} in progress`,
+    ];
+    if (paged.totalPages > 1) {
+      footerParts.push(`page ${paged.clampedPage}/${paged.totalPages}`);
     }
-    if (groupItems.length > 0) {
-      const value = groupItems
-        .map((item) => this.formatStoreLine(item, this.formatPointsAmount(item.cost.toString(), config)))
-        .join("\n");
-      fields.push({ name: `Group items — spend shared ${config.pointsName}`, value, inline: false });
+
+    return new EmbedBuilder()
+      .setColor(INVENTORY_EMBED_COLOUR)
+      .setTitle(`${displayName}'s ${titleSuffix}`)
+      .setDescription(description)
+      .setFooter({ text: footerParts.join(" · ") });
+  }
+
+  private buildStoreEmbed(params: {
+    config: GuildConfig;
+    audience: StoreAudience;
+    totalItems: number;
+    paged: ReturnType<typeof paginateArray<ShopListItem>>;
+  }) {
+    const { config, audience, totalItems, paged } = params;
+    const priceFormatter = (item: ShopListItem) =>
+      audience === "group"
+        ? this.formatPointsAmount(item.cost.toString(), config)
+        : this.formatCurrencyAmount(item.cost.toString(), config);
+    const title = audience === "group" ? "Group store" : "Personal store";
+    const headline =
+      audience === "group"
+        ? `Items buyable with shared ${config.pointsName}.`
+        : `Items buyable with your ${config.currencyName}.`;
+    const description =
+      totalItems === 0
+        ? audience === "group"
+          ? "No group-purchase items are available right now."
+          : "No personal items are available right now."
+        : paged.slice.map((item) => this.formatStoreLine(item, priceFormatter(item))).join("\n");
+
+    const fields = [{ name: "Items available", value: `${totalItems}`, inline: true }];
+    if (paged.totalPages > 1) {
+      fields.push({ name: "Page", value: `${paged.clampedPage}/${paged.totalPages}`, inline: true });
     }
-    fields.push({ name: "Items available", value: `${enabled.length}`, inline: true });
+
+    const footer =
+      audience === "group"
+        ? `/buyforgroup spends shared ${config.pointsName} · /donate converts currency into points.`
+        : `/buyforme spends your ${config.currencyName} · /donate converts currency into points.`;
 
     return new EmbedBuilder()
       .setColor(STORE_EMBED_COLOUR)
-      .setTitle("Store")
-      .setDescription(
-        `Browse items buyable with ${config.currencyName} or shared ${config.pointsName}. Pick an item by name with /buyforme or /buyforgroup.`,
-      )
+      .setTitle(title)
+      .setDescription(`${headline}\n\n${description}`)
       .addFields(fields)
-      .setFooter({
-        text: `/buyforme spends your ${config.currencyName} · /buyforgroup spends shared ${config.pointsName} · /donate converts between them.`,
-      });
+      .setFooter({ text: footer });
   }
 
   private async resolveActiveParticipant(params: {
@@ -1519,33 +1912,27 @@ export class BotRuntime {
   private async handleCommand(interaction: ChatInputCommandInteraction) {
     if (interaction.commandName === "leaderboard") {
       await interaction.deferReply();
-      const [leaderboard, config] = await Promise.all([
-        this.services.economyService.getLeaderboard(this.env.GUILD_ID),
-        this.services.configService.getOrCreate(this.env.GUILD_ID),
-      ]);
-      if (leaderboard.length === 0) {
+      const view = await this.buildLeaderboardView({ ownerId: interaction.user.id, page: 1 });
+      if (view.totalEntries === 0) {
         await interaction.editReply({ content: "No groups yet." });
         return;
       }
-
-      await interaction.editReply({ embeds: [this.buildGroupLeaderboardEmbed(leaderboard, config)] });
+      await interaction.editReply({ embeds: [view.embed], components: view.row ? [view.row] : [] });
       return;
     }
 
     if (interaction.commandName === "forbes") {
       await interaction.deferReply();
-      const [leaderboard, config] = await Promise.all([
-        this.services.participantService.getCurrencyLeaderboard(this.env.GUILD_ID),
-        this.services.configService.getOrCreate(this.env.GUILD_ID),
-      ]);
-      if (leaderboard.length === 0) {
+      const view = await this.buildForbesView({
+        ownerId: interaction.user.id,
+        page: 1,
+        guild: interaction.guild,
+      });
+      if (view.totalEntries === 0) {
         await interaction.editReply({ content: "No participants yet." });
         return;
       }
-
-      const visibleParticipants = leaderboard.slice(0, LEADERBOARD_EMBED_LIMIT);
-      const displayNames = await this.resolveParticipantDisplayNames(interaction.guild, visibleParticipants);
-      await interaction.editReply({ embeds: [this.buildForbesEmbed(leaderboard, displayNames, config)] });
+      await interaction.editReply({ embeds: [view.embed], components: view.row ? [view.row] : [] });
       return;
     }
 
@@ -1574,25 +1961,12 @@ export class BotRuntime {
         return;
       }
       case "ledger": {
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-        const page = interaction.options.getInteger("page") ?? 1;
-        const offset = (page - 1) * LEDGER_PAGE_SIZE;
-        const entries = await this.services.economyService.getLedger(this.env.GUILD_ID, {
-          limit: LEDGER_PAGE_SIZE,
-          offset,
-        });
-
-        if (entries.length === 0) {
-          await interaction.reply({
-            content:
-              page === 1
-                ? "No ledger entries yet."
-                : `No ledger entries found on page ${page}. Try a smaller page number.`,
-          });
+        const view = await this.buildLedgerView({ ownerId: interaction.user.id, page: 1 });
+        if (view.entryCount === 0) {
+          await interaction.reply({ content: "No ledger entries yet." });
           return;
         }
-
-        await interaction.reply({ embeds: [this.buildLedgerEmbed(entries, config, page, offset)] });
+        await interaction.reply({ embeds: [view.embed], components: view.row ? [view.row] : [] });
         return;
       }
       case "transfer": {
@@ -1862,15 +2236,39 @@ export class BotRuntime {
         return;
       }
       case "store": {
-        const [config, items] = await Promise.all([
-          this.services.configService.getOrCreate(this.env.GUILD_ID),
-          this.services.shopService.list(this.env.GUILD_ID),
-        ]);
-        if (!items.some((item) => item.enabled)) {
-          await interaction.reply({ content: "Store is empty.", ephemeral: true });
+        const audience: StoreAudience = interaction.options.getSubcommand() === "group" ? "group" : "personal";
+        const view = await this.buildStoreView({ ownerId: interaction.user.id, audience, page: 1 });
+        if (view.totalItems === 0) {
+          await interaction.reply({
+            content:
+              audience === "group"
+                ? "No group-purchase items are available right now."
+                : "No personal items are available right now.",
+            ephemeral: true,
+          });
           return;
         }
-        await interaction.reply({ embeds: [this.buildStoreEmbed(items, config)], ephemeral: true });
+        await interaction.reply({
+          embeds: [view.embed],
+          components: view.row ? [view.row] : [],
+          ephemeral: true,
+        });
+        return;
+      }
+      case "inventory": {
+        const audience: InventoryAudience = interaction.options.getSubcommand() === "group" ? "group" : "personal";
+        const view = await this.buildInventoryView({
+          ownerId: interaction.user.id,
+          audience,
+          page: 1,
+          guild: interaction.guild,
+          displayName: member?.displayName ?? interaction.user.username,
+        });
+        await interaction.reply({
+          embeds: [view.embed],
+          components: view.row ? [view.row] : [],
+          ephemeral: true,
+        });
         return;
       }
       case "buyforme":
@@ -2352,9 +2750,12 @@ export class BotRuntime {
     return new EmbedBuilder()
       .setColor(LEDGER_EMBED_COLOUR)
       .setTitle("Transaction ledger")
-      .setDescription(`Page ${page} · showing entries ${firstIndex}–${lastIndex}.`)
-      .addFields(fields)
-      .setFooter({ text: "Use /ledger page:N to browse further back." });
+      .setDescription(
+        entries.length === 0
+          ? `Page ${page} · no entries.`
+          : `Page ${page} · showing entries ${firstIndex}–${lastIndex}.`,
+      )
+      .addFields(fields);
   }
 
   private formatSignedNumber(value: number) {
@@ -2401,10 +2802,7 @@ export class BotRuntime {
       new SlashCommandBuilder().setName("balance").setDescription("Show your group points and personal wallet."),
       new SlashCommandBuilder()
         .setName("ledger")
-        .setDescription("Show the 10 most recent ledger entries.")
-        .addIntegerOption((option) =>
-          option.setName("page").setDescription("Page number, 10 entries per page").setRequired(false).setMinValue(1),
-        ),
+        .setDescription("Show the 10 most recent ledger entries."),
       new SlashCommandBuilder()
         .setName("transfer")
         .setDescription("Send wallet currency to another student.")
@@ -2423,7 +2821,22 @@ export class BotRuntime {
       buildAwardLikeCommand("deductmixed", "Deduct group points and participant currency together."),
       new SlashCommandBuilder()
         .setName("store")
-        .setDescription("Browse the custom shop."),
+        .setDescription("Browse the custom shop.")
+        .addSubcommand((sub) =>
+          sub.setName("personal").setDescription("Items buyable with your wallet currency."),
+        )
+        .addSubcommand((sub) =>
+          sub.setName("group").setDescription("Items buyable with shared group points."),
+        ),
+      new SlashCommandBuilder()
+        .setName("inventory")
+        .setDescription("Show the shop items you've bought.")
+        .addSubcommand((sub) =>
+          sub.setName("personal").setDescription("Items you bought with your wallet currency."),
+        )
+        .addSubcommand((sub) =>
+          sub.setName("group").setDescription("Group purchases you're part of."),
+        ),
       new SlashCommandBuilder()
         .setName("buyforme")
         .setDescription("Buy a shop item for yourself.")

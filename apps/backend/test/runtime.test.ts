@@ -63,6 +63,8 @@ function createRuntimeFixture() {
       setApprovalMessage: vi.fn().mockResolvedValue(undefined),
       approveGroupPurchase: vi.fn().mockResolvedValue({ executed: false, approvalsCount: 1, threshold: 2 }),
       getRedemption: vi.fn().mockResolvedValue(null),
+      listPersonalRedemptionsByUser: vi.fn().mockResolvedValue([]),
+      listGroupRedemptionsByGroup: vi.fn().mockResolvedValue([]),
     },
     participantService: {
       findByDiscordUser: vi.fn(),
@@ -172,7 +174,7 @@ describe("bot runtime", () => {
     expect(roleIds).toEqual(["role-high", "role-mid", "role-low"]);
   });
 
-  it("renders /store as an embed without exposing raw shop item ids", async () => {
+  it("renders /store personal as an embed without exposing raw shop item ids", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.shopService.list.mockResolvedValue([
       {
@@ -205,7 +207,9 @@ describe("bot runtime", () => {
           fetch: vi.fn().mockResolvedValue(null),
         },
       },
-      options: {},
+      options: {
+        getSubcommand: () => "personal",
+      },
       reply,
       user: {
         id: "user-1",
@@ -217,27 +221,112 @@ describe("bot runtime", () => {
     expect(call.ephemeral).toBe(true);
     expect(call.embeds).toHaveLength(1);
     const embed = call.embeds[0].data;
-    expect(embed.title).toBe("Store");
+    expect(embed.title).toBe("Personal store");
     const rendered = JSON.stringify(embed);
     expect(rendered).not.toContain("shop-item-1234567890");
     expect(rendered).not.toContain("group-item-0987654321");
     expect(rendered).toContain("Bubble Tea");
-    expect(rendered).toContain("Pizza Party");
-    expect(rendered).toContain("Personal items");
-    expect(rendered).toContain("Group items");
+    expect(rendered).not.toContain("Pizza Party");
   });
 
-  it("shows a paged ledger summary in Discord", async () => {
+  it("renders /store group with only group items", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.shopService.list.mockResolvedValue([
+      {
+        id: "shop-item-1234567890",
+        enabled: true,
+        name: "Bubble Tea",
+        audience: "INDIVIDUAL",
+        stock: null,
+        cost: { toString: () => "3" },
+      },
+      {
+        id: "group-item-0987654321",
+        enabled: true,
+        name: "Pizza Party",
+        audience: "GROUP",
+        stock: null,
+        cost: { toString: () => "500" },
+      },
+    ]);
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "store",
+      guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
+      options: { getSubcommand: () => "group" },
+      reply,
+      user: { id: "user-1", username: "Alice" },
+    });
+
+    const call = reply.mock.calls[0][0];
+    const embed = call.embeds[0].data;
+    expect(embed.title).toBe("Group store");
+    const rendered = JSON.stringify(embed);
+    expect(rendered).toContain("Pizza Party");
+    expect(rendered).not.toContain("Bubble Tea");
+  });
+
+  it("renders the first ledger page with a Next button when more entries exist", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.economyService.getLedger.mockResolvedValue(
+      Array.from({ length: 11 }, (_, index) => ({
+        id: `entry-${index + 1}`,
+        type: "MANUAL_AWARD",
+        description: `Entry ${index + 1}`,
+        createdAt: "2026-04-01T12:00:00.000Z",
+        splits: [
+          {
+            id: `split-${index + 1}`,
+            group: { displayName: "Gryffindor" },
+            pointsDelta: 5,
+            currencyDelta: 0,
+          },
+        ],
+      })),
+    );
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "ledger",
+      guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
+      options: {},
+      reply,
+      user: { id: "user-1", username: "Alice" },
+    });
+
+    expect(services.economyService.getLedger).toHaveBeenCalledWith("guild-test", {
+      limit: 11,
+      offset: 0,
+    });
+    const call = reply.mock.calls[0][0];
+    const embed = call.embeds[0].data;
+    expect(embed.title).toBe("Transaction ledger");
+    expect(embed.description).toContain("Page 1");
+    expect(embed.fields).toHaveLength(10);
+    expect(embed.fields[0].name).toContain("#1");
+    const row = call.components?.[0]?.toJSON();
+    expect(row).toBeDefined();
+    const buttons = row.components;
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0].label).toBe("Prev");
+    expect(buttons[0].disabled).toBe(true);
+    expect(buttons[1].label).toBe("Next");
+    expect(buttons[1].disabled).toBe(false);
+    expect(buttons[1].custom_id).toBe("v1:page:ledger:-:user-1:2");
+  });
+
+  it("handles pagination button clicks by re-fetching the next ledger page", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.economyService.getLedger.mockResolvedValue([
       {
-        id: "entry-1",
+        id: "entry-11",
         type: "MANUAL_AWARD",
         description: "Answered the toughest warm-up question",
         createdAt: "2026-04-01T12:00:00.000Z",
         splits: [
           {
-            id: "split-1",
+            id: "split-11",
             group: { displayName: "Gryffindor" },
             pointsDelta: 5,
             currencyDelta: 0,
@@ -245,41 +334,190 @@ describe("bot runtime", () => {
         ],
       },
     ]);
+    const deferUpdate = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
     const reply = vi.fn().mockResolvedValue(undefined);
 
-    await (runtime as any).handleCommand({
-      commandName: "ledger",
-      guild: {
-        members: {
-          fetch: vi.fn().mockResolvedValue(null),
-        },
-      },
-      options: {
-        getInteger: vi.fn().mockReturnValue(2),
-      },
+    await (runtime as any).handlePaginationButton({
+      customId: "v1:page:ledger:-:user-1:2",
+      message: { flags: { has: () => false } },
+      user: { id: "user-1", username: "Alice" },
+      guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
+      deferUpdate,
+      editReply,
       reply,
-      user: {
-        id: "user-1",
-        username: "Alice",
-      },
     });
 
     expect(services.economyService.getLedger).toHaveBeenCalledWith("guild-test", {
-      limit: 10,
+      limit: 11,
       offset: 10,
     });
-    const call = reply.mock.calls[0][0];
-    expect(call.embeds).toHaveLength(1);
+    expect(reply).not.toHaveBeenCalled();
+    expect(deferUpdate).toHaveBeenCalledTimes(1);
+    const call = editReply.mock.calls[0][0];
     const embed = call.embeds[0].data;
-    expect(embed.title).toBe("Transaction ledger");
     expect(embed.description).toContain("Page 2");
-    expect(embed.fields).toHaveLength(1);
-    const [field] = embed.fields;
-    expect(field.name).toContain("#11");
-    expect(field.name).toContain("Award");
-    expect(field.value).toContain("Gryffindor");
-    expect(field.value).toContain("+5 blorgshj 🏅");
-    expect(field.value).toContain("Answered the toughest warm-up question");
+    expect(embed.fields[0].name).toContain("#11");
+    expect(embed.fields[0].value).toContain("Answered the toughest warm-up question");
+  });
+
+  it("rejects pagination button clicks from non-invokers on public messages", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const deferUpdate = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handlePaginationButton({
+      customId: "v1:page:ledger:-:owner-1:2",
+      message: { flags: { has: () => false } },
+      user: { id: "stranger-1", username: "Stranger" },
+      guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
+      deferUpdate,
+      editReply,
+      reply,
+    });
+
+    expect(services.economyService.getLedger).not.toHaveBeenCalled();
+    expect(deferUpdate).not.toHaveBeenCalled();
+    expect(editReply).not.toHaveBeenCalled();
+    expect(reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringMatching(/only the person who ran/i),
+        ephemeral: true,
+      }),
+    );
+  });
+
+  it("skips the owner check when paginating an ephemeral-source message", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.shopService.listPersonalRedemptionsByUser = vi.fn().mockResolvedValue([]);
+    const deferUpdate = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handlePaginationButton({
+      customId: "v1:page:inventory:personal:owner-1:1",
+      message: { flags: { has: (flag: number) => flag === 64 } },
+      user: { id: "owner-1", username: "Owner" },
+      guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
+      deferUpdate,
+      editReply,
+      reply,
+    });
+
+    expect(reply).not.toHaveBeenCalled();
+    expect(deferUpdate).toHaveBeenCalledTimes(1);
+    expect(editReply).toHaveBeenCalledTimes(1);
+  });
+
+  it("defers the interaction before running DB work on the pagination path", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const callOrder: string[] = [];
+    const deferUpdate = vi.fn(async () => {
+      callOrder.push("deferUpdate");
+    });
+    services.economyService.getLedger.mockImplementationOnce(async () => {
+      callOrder.push("getLedger");
+      return [];
+    });
+
+    await (runtime as any).handlePaginationButton({
+      customId: "v1:page:ledger:-:user-1:1",
+      message: { flags: { has: () => false } },
+      user: { id: "user-1", username: "Alice" },
+      guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
+      deferUpdate,
+      editReply: vi.fn(),
+      reply: vi.fn(),
+    });
+
+    expect(callOrder[0]).toBe("deferUpdate");
+    expect(callOrder).toContain("getLedger");
+  });
+
+  it("falls back to page 1 when a stale ledger button lands past the last page", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.economyService.getLedger
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "entry-fresh",
+          type: "MANUAL_AWARD",
+          description: "Back at page 1",
+          createdAt: "2026-04-01T12:00:00.000Z",
+          splits: [
+            {
+              id: "split-fresh",
+              group: { displayName: "Gryffindor" },
+              pointsDelta: 5,
+              currencyDelta: 0,
+            },
+          ],
+        },
+      ]);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handlePaginationButton({
+      customId: "v1:page:ledger:-:user-1:5",
+      message: { flags: { has: () => false } },
+      user: { id: "user-1", username: "Alice" },
+      guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
+      deferUpdate: vi.fn().mockResolvedValue(undefined),
+      editReply,
+      reply: vi.fn(),
+    });
+
+    expect(services.economyService.getLedger).toHaveBeenNthCalledWith(1, "guild-test", {
+      limit: 11,
+      offset: 40,
+    });
+    expect(services.economyService.getLedger).toHaveBeenNthCalledWith(2, "guild-test", {
+      limit: 11,
+      offset: 0,
+    });
+    const embed = editReply.mock.calls[0][0].embeds[0].data;
+    expect(embed.description).toContain("Page 1");
+    expect(embed.fields[0].name).toContain("#1");
+  });
+
+  it("queries /inventory group by the invoker's active group, not by requester id", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.shopService.listGroupRedemptionsByGroup = vi.fn().mockResolvedValue([
+      {
+        id: "redemption-from-teammate",
+        status: "FULFILLED",
+        purchaseMode: "GROUP",
+        quantity: 1,
+        createdAt: new Date("2026-04-01T12:00:00.000Z"),
+        totalCost: { toString: () => "500" },
+        shopItem: { name: "Pizza Party", emoji: "🍕" },
+      },
+    ]);
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const fetchMember = vi.fn(async () => ({
+      displayName: "Alice Jones",
+      roles: {
+        cache: new Map([["group-role", { id: "group-role", rawPosition: 1 }]]),
+      },
+    }));
+
+    await (runtime as any).handleCommand({
+      commandName: "inventory",
+      guild: { members: { fetch: fetchMember } },
+      options: { getSubcommand: () => "group" },
+      reply,
+      user: { id: "user-1", username: "Alice" },
+    });
+
+    expect(services.groupService.resolveGroupFromRoleIds).toHaveBeenCalledWith(
+      "guild-test",
+      ["group-role"],
+    );
+    expect(services.shopService.listGroupRedemptionsByGroup).toHaveBeenCalledWith("guild-test", "group-1");
+    expect(services.shopService.listPersonalRedemptionsByUser).not.toHaveBeenCalled();
+    const embed = reply.mock.calls[0][0].embeds[0].data;
+    expect(embed.title).toContain("group purchases");
+    expect(JSON.stringify(embed)).toContain("Pizza Party");
   });
 
   it("keeps ledger entry field values within Discord's 1024 character limit", async () => {
@@ -318,9 +556,7 @@ describe("bot runtime", () => {
           fetch: vi.fn().mockResolvedValue(null),
         },
       },
-      options: {
-        getInteger: vi.fn().mockReturnValue(1),
-      },
+      options: {},
       reply,
       user: {
         id: "user-1",
