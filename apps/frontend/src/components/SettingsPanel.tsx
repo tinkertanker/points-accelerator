@@ -35,6 +35,7 @@ const EMPTY_ROLE_CAPABILITY: RoleCapability = {
   canSell: false,
   canReceiveAwards: true,
   isGroupRole: false,
+  riggedBetWinChance: null,
 };
 
 const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
@@ -554,6 +555,11 @@ export default function SettingsPanel({
               <dd>Groups with this role can receive awards.</dd>
               <dt>Group</dt>
               <dd>Marks a Discord role as a student group.</dd>
+              <dt>Rigged %</dt>
+              <dd>
+                Bet win chance for this role (0–100). Leave blank for the guild default. When a member has multiple
+                rigged roles, the highest percentage wins.
+              </dd>
             </dl>
           </details>
 
@@ -584,6 +590,9 @@ export default function SettingsPanel({
                         <span className="capability-table__abbr">{column.abbr}</span>
                       </th>
                     ))}
+                    <th scope="col" className="capability-table__max" title="Rigged bet win chance (%)">
+                      Rigged %
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -675,6 +684,30 @@ export default function SettingsPanel({
                           />
                         </td>
                       ))}
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={1}
+                          value={role.riggedBetWinChance ?? ""}
+                          aria-label="Rigged bet win chance"
+                          onChange={(event) => {
+                            const next = [...roleDrafts];
+                            const raw = event.target.value;
+                            const numeric = raw === "" ? Number.NaN : Number(raw);
+                            const parsed = Number.isFinite(numeric)
+                              ? Math.min(100, Math.max(0, Math.round(numeric)))
+                              : null;
+                            next[index] = normaliseRoleCapability({
+                              ...role,
+                              riggedBetWinChance: parsed,
+                            });
+                            onRoleDraftsChange(next);
+                          }}
+                          placeholder="—"
+                        />
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -33,6 +33,7 @@ export type RoleCapability = {
   canSell: boolean;
   canReceiveAwards: boolean;
   isGroupRole: boolean;
+  riggedBetWinChance: number | null;
 };
 
 export type Group = {

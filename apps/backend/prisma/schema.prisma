@@ -142,6 +142,7 @@ model DiscordRoleCapability {
   canSell             Boolean     @default(false)
   canReceiveAwards    Boolean     @default(true)
   isGroupRole         Boolean     @default(false)
+  riggedBetWinChance  Int?
   createdAt           DateTime    @default(now())
   updatedAt           DateTime    @updatedAt
   guild               GuildConfig @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
