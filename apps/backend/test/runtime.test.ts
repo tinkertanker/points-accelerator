@@ -574,7 +574,7 @@ describe("bot runtime", () => {
     expect(longDescriptionField).toBeDefined();
   });
 
-  it("mentions the selected student in /awardcurrency replies for member currency awards", async () => {
+  it("mentions the selected student in /award currency replies for member currency awards", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.participantService.ensureForGroup.mockResolvedValue({
       id: "participant-2",
@@ -604,13 +604,14 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
-      commandName: "awardcurrency",
+      commandName: "award",
       guild: {
         members: {
           fetch: fetchMember,
         },
       },
       options: {
+        getSubcommand: () => "currency",
         getNumber: vi.fn((name: string) => (name === "amount" ? 100 : null)),
         getUser: vi.fn((name: string) =>
           name === "member"
@@ -797,13 +798,14 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
-      commandName: "awardcurrencybulk",
+      commandName: "award",
       guild: {
         members: {
           fetch: fetchMember,
         },
       },
       options: {
+        getSubcommand: () => "currencygroup",
         getNumber: vi.fn((name: string) => (name === "amount" ? 15 : null)),
         getString: vi.fn((name: string) => (name === "targets" ? "gryff" : "Team effort")),
       },
@@ -829,7 +831,7 @@ describe("bot runtime", () => {
     expect(reply).toHaveBeenCalledWith("Awarded 15 bananas 💲 each to 2 members across <@&group-role> (2). Reason: Team effort");
   });
 
-  it("echoes the reason in /awardpoints replies for group awards", async () => {
+  it("echoes the reason in /award points replies for group awards", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.groupService.resolveGroupByIdentifier.mockImplementation(async (_guildId: string, identifier: string) => {
       if (identifier === "gryff") {
@@ -851,13 +853,14 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
-      commandName: "awardpoints",
+      commandName: "award",
       guild: {
         members: {
           fetch: fetchMember,
         },
       },
       options: {
+        getSubcommand: () => "points",
         getNumber: vi.fn((name: string) => (name === "amount" ? 5 : null)),
         getString: vi.fn((name: string) => (name === "targets" ? "gryff" : "Helped another group")),
       },
@@ -921,9 +924,10 @@ describe("bot runtime", () => {
     });
 
     const awardInteraction = {
-      commandName: "awardcurrency",
+      commandName: "award",
       guild: { members: { fetch: fetchMember } },
       options: {
+        getSubcommand: () => "currency",
         getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
         getUser: vi.fn((name: string) =>
           name === "member"
@@ -947,9 +951,10 @@ describe("bot runtime", () => {
 
     await expect(
       (runtime as any).handleCommand({
-        commandName: "awardcurrency",
+        commandName: "award",
         guild: { members: { fetch: fetchMember } },
         options: {
+          getSubcommand: () => "currency",
           getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
           getUser: vi.fn((name: string) =>
             name === "member"
@@ -1011,9 +1016,10 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
-      commandName: "awardcurrency",
+      commandName: "award",
       guild: { members: { fetch: fetchMember } },
       options: {
+        getSubcommand: () => "currency",
         getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
         getUser: vi.fn((name: string) =>
           name === "member"
@@ -1083,9 +1089,10 @@ describe("bot runtime", () => {
     });
 
     const awardInteraction = {
-      commandName: "awardcurrency",
+      commandName: "award",
       guild: { members: { fetch: fetchMember } },
       options: {
+        getSubcommand: () => "currency",
         getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
         getUser: vi.fn((name: string) =>
           name === "member"
@@ -1717,32 +1724,6 @@ describe("bot runtime", () => {
     );
   });
 
-  it("rejects /awardmixed while the command is disabled", async () => {
-    const { runtime, services } = createRuntimeFixture();
-
-    await expect(
-      (runtime as any).handleCommand({
-        commandName: "awardmixed",
-        guild: {
-          members: {
-            fetch: vi.fn().mockResolvedValue({
-              roles: { cache: new Map([["group-role", {}]]) },
-            }),
-          },
-        },
-        options: {},
-        reply: vi.fn(),
-        user: {
-          id: "staff-1",
-          username: "Mentor",
-        },
-      }),
-    ).rejects.toThrow(/disabled for now/i);
-
-    expect(services.economyService.awardGroups).not.toHaveBeenCalled();
-    expect(services.participantCurrencyService.awardParticipants).not.toHaveBeenCalled();
-  });
-
   it("registers required award and deduct command options", async () => {
     const putSpy = vi.spyOn(REST.prototype, "put").mockResolvedValue({} as never);
     const { runtime } = createRuntimeFixture();
@@ -1758,43 +1739,53 @@ describe("bot runtime", () => {
       name: string;
       options?: Array<{
         name: string;
+        type?: number;
+        required?: boolean;
+        min_value?: number;
         options?: Array<{ name: string; required?: boolean; min_value?: number }>;
       }>;
     }>;
-    const awardPointsCommand = commands.find((command) => command.name === "awardpoints");
-    const awardCurrencyCommand = commands.find((command) => command.name === "awardcurrency");
-    const awardCurrencyBulkCommand = commands.find((command) => command.name === "awardcurrencybulk");
-    const awardMixedCommand = commands.find((command) => command.name === "awardmixed");
-    const deductMixedCommand = commands.find((command) => command.name === "deductmixed");
+
+    const awardCommand = commands.find((command) => command.name === "award");
+    const deductCommand = commands.find((command) => command.name === "deduct");
     const forbesCommand = commands.find((command) => command.name === "forbes");
+    const flatAwardPoints = commands.find((command) => command.name === "awardpoints");
+    const flatAwardMixed = commands.find((command) => command.name === "awardmixed");
 
     expect(forbesCommand).toEqual(expect.objectContaining({ name: "forbes" }));
-    expect(awardPointsCommand?.options).toEqual(
+    expect(flatAwardPoints).toBeUndefined();
+    expect(flatAwardMixed).toBeUndefined();
+
+    const awardPointsSub = awardCommand?.options?.find((option) => option.name === "points");
+    const awardCurrencySub = awardCommand?.options?.find((option) => option.name === "currency");
+    const awardCurrencyGroupSub = awardCommand?.options?.find((option) => option.name === "currencygroup");
+    const deductMixedSub = deductCommand?.options?.find((option) => option.name === "mixed");
+
+    expect(awardPointsSub?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "targets", required: true }),
         expect.objectContaining({ name: "amount", required: true, min_value: 0.01 }),
         expect.objectContaining({ name: "reason", required: false }),
       ]),
     );
-    expect(awardCurrencyCommand?.options).toEqual(
+    expect(awardCurrencySub?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "member", required: true }),
         expect.objectContaining({ name: "amount", required: true, min_value: 0.01 }),
         expect.objectContaining({ name: "reason", required: false }),
       ]),
     );
-    expect(awardCurrencyBulkCommand?.options).toEqual(
+    expect(awardCurrencyGroupSub?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "targets", required: true }),
         expect.objectContaining({ name: "amount", required: true, min_value: 0.01 }),
         expect.objectContaining({ name: "reason", required: false }),
       ]),
     );
-    expect(awardCurrencyBulkCommand?.options).not.toEqual(
+    expect(awardCurrencyGroupSub?.options).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "member" })]),
     );
-    expect(awardMixedCommand).toBeUndefined();
-    expect(deductMixedCommand?.options).toEqual(
+    expect(deductMixedSub?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "targets", required: true }),
         expect.objectContaining({ name: "points", required: true, min_value: 0.01 }),

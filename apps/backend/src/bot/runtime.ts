@@ -12,6 +12,7 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
+  SlashCommandSubcommandBuilder,
   type AutocompleteInteraction,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
@@ -52,14 +53,9 @@ type AssignmentLookupResult =
   | { kind: "resolved"; assignment: ActiveAssignment }
   | { kind: "ambiguous"; matches: ActiveAssignment[] }
   | { kind: "missing" };
-type AwardLikeCommandName =
-  | "awardpoints"
-  | "awardcurrency"
-  | "awardcurrencybulk"
-  | "awardmixed"
-  | "deductgroup"
-  | "deductmember"
-  | "deductmixed";
+type AwardSubcommand = "points" | "currency" | "currencygroup";
+type DeductSubcommand = "group" | "member" | "mixed";
+type AwardLikeCommandKey = `award:${AwardSubcommand}` | `deduct:${DeductSubcommand}`;
 
 const DISCORD_SNOWFLAKE_PATTERN = /^\d{17,20}$/;
 
@@ -134,22 +130,23 @@ function paginateArray<T>(items: T[], page: number) {
   };
 }
 
-function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: string) {
-  const config = getAwardCommandConfig(commandName);
-
-  const builder = new SlashCommandBuilder()
-    .setName(commandName)
-    .setDescription(description);
+function configureAwardLikeSubcommand(
+  sub: SlashCommandSubcommandBuilder,
+  commandKey: AwardLikeCommandKey,
+  subcommandName: string,
+  description: string,
+) {
+  const config = getAwardCommandConfig(commandKey);
+  sub.setName(subcommandName).setDescription(description);
 
   if (config.includesGroupTargets) {
-    builder
-      .addStringOption((option) =>
-        option.setName("targets").setDescription("Comma-separated group aliases or role mentions").setRequired(true),
-      );
+    sub.addStringOption((option) =>
+      option.setName("targets").setDescription("Comma-separated group aliases or role mentions").setRequired(true),
+    );
   }
 
   if (config.includesGroupPoints && config.groupAmountOptionName) {
-    builder.addNumberOption((option) =>
+    sub.addNumberOption((option) =>
       option
         .setName(config.groupAmountOptionName)
         .setDescription("Points delta for the target groups")
@@ -159,13 +156,13 @@ function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: s
   }
 
   if (config.includesSingleMemberCurrency) {
-    builder.addUserOption((option) =>
+    sub.addUserOption((option) =>
       option.setName("member").setDescription("Member whose wallet should change").setRequired(true),
     );
   }
 
   if ((config.includesSingleMemberCurrency || config.includesBulkMemberCurrency) && config.memberAmountOptionName) {
-    builder.addNumberOption((option) =>
+    sub.addNumberOption((option) =>
       option
         .setName(config.memberAmountOptionName)
         .setDescription(
@@ -178,19 +175,19 @@ function buildAwardLikeCommand(commandName: AwardLikeCommandName, description: s
     );
   }
 
-  builder.addStringOption((option) =>
+  sub.addStringOption((option) =>
     option
       .setName("reason")
       .setDescription(`${config.isDeduction ? "Deduction" : "Award"} reason`)
       .setRequired(false),
   );
 
-  return builder;
+  return sub;
 }
 
-function getAwardCommandConfig(commandName: AwardLikeCommandName) {
-  switch (commandName) {
-    case "awardpoints":
+function getAwardCommandConfig(commandKey: AwardLikeCommandKey) {
+  switch (commandKey) {
+    case "award:points":
       return {
         isDeduction: false,
         includesGroupTargets: true,
@@ -200,7 +197,7 @@ function getAwardCommandConfig(commandName: AwardLikeCommandName) {
         groupAmountOptionName: "amount",
         memberAmountOptionName: null,
       };
-    case "awardcurrency":
+    case "award:currency":
       return {
         isDeduction: false,
         includesGroupTargets: false,
@@ -210,7 +207,7 @@ function getAwardCommandConfig(commandName: AwardLikeCommandName) {
         groupAmountOptionName: null,
         memberAmountOptionName: "amount",
       };
-    case "awardcurrencybulk":
+    case "award:currencygroup":
       return {
         isDeduction: false,
         includesGroupTargets: true,
@@ -220,17 +217,7 @@ function getAwardCommandConfig(commandName: AwardLikeCommandName) {
         groupAmountOptionName: null,
         memberAmountOptionName: "amount",
       };
-    case "awardmixed":
-      return {
-        isDeduction: false,
-        includesGroupTargets: true,
-        includesGroupPoints: true,
-        includesSingleMemberCurrency: true,
-        includesBulkMemberCurrency: false,
-        groupAmountOptionName: "points",
-        memberAmountOptionName: "currency",
-      };
-    case "deductgroup":
+    case "deduct:group":
       return {
         isDeduction: true,
         includesGroupTargets: true,
@@ -240,7 +227,7 @@ function getAwardCommandConfig(commandName: AwardLikeCommandName) {
         groupAmountOptionName: "points",
         memberAmountOptionName: null,
       };
-    case "deductmember":
+    case "deduct:member":
       return {
         isDeduction: true,
         includesGroupTargets: false,
@@ -250,7 +237,7 @@ function getAwardCommandConfig(commandName: AwardLikeCommandName) {
         groupAmountOptionName: null,
         memberAmountOptionName: "currency",
       };
-    case "deductmixed":
+    case "deduct:mixed":
       return {
         isDeduction: true,
         includesGroupTargets: true,
@@ -2027,15 +2014,11 @@ export class BotRuntime {
         );
         return;
       }
-      case "awardpoints":
-      case "awardcurrency":
-      case "awardcurrencybulk":
-      case "deductgroup":
-      case "deductmember":
-      case "deductmixed": {
-        const commandConfig = getAwardCommandConfig(
-          interaction.commandName as AwardLikeCommandName,
-        );
+      case "award":
+      case "deduct": {
+        const subcommand = interaction.options.getSubcommand();
+        const commandKey = `${interaction.commandName}:${subcommand}` as AwardLikeCommandKey;
+        const commandConfig = getAwardCommandConfig(commandKey);
         const rollbackCooldown = await this.enforceAwardCommandCooldown({
           member: member ?? null,
           roleIds,
@@ -2206,8 +2189,6 @@ export class BotRuntime {
           throw error;
         }
       }
-      case "awardmixed":
-        throw new AppError("/awardmixed is disabled for now. Use /awardpoints and /awardcurrency separately.", 400);
       case "sell": {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const title = interaction.options.getString("title", true);
@@ -2812,13 +2793,32 @@ export class BotRuntime {
         .setName("donate")
         .setDescription("Convert your wallet currency into group points.")
         .addNumberOption((option) => option.setName("amount").setDescription("Currency amount").setRequired(true)),
-      buildAwardLikeCommand("awardpoints", "Award group points."),
-      buildAwardLikeCommand("awardcurrency", "Award participant currency."),
-      buildAwardLikeCommand("awardcurrencybulk", "Award participant currency to every eligible member in selected groups."),
-      // buildAwardLikeCommand("awardmixed", "Award group points and participant currency together."),
-      buildAwardLikeCommand("deductgroup", "Deduct group points."),
-      buildAwardLikeCommand("deductmember", "Deduct participant currency."),
-      buildAwardLikeCommand("deductmixed", "Deduct group points and participant currency together."),
+      new SlashCommandBuilder()
+        .setName("award")
+        .setDescription("Award group points or participant currency.")
+        .addSubcommand((sub) => configureAwardLikeSubcommand(sub, "award:points", "points", "Award group points."))
+        .addSubcommand((sub) => configureAwardLikeSubcommand(sub, "award:currency", "currency", "Award participant currency to one member."))
+        .addSubcommand((sub) =>
+          configureAwardLikeSubcommand(
+            sub,
+            "award:currencygroup",
+            "currencygroup",
+            "Award participant currency to every eligible member in selected groups.",
+          ),
+        ),
+      new SlashCommandBuilder()
+        .setName("deduct")
+        .setDescription("Deduct group points or participant currency.")
+        .addSubcommand((sub) => configureAwardLikeSubcommand(sub, "deduct:group", "group", "Deduct group points."))
+        .addSubcommand((sub) => configureAwardLikeSubcommand(sub, "deduct:member", "member", "Deduct participant currency from one member."))
+        .addSubcommand((sub) =>
+          configureAwardLikeSubcommand(
+            sub,
+            "deduct:mixed",
+            "mixed",
+            "Deduct group points and participant currency together.",
+          ),
+        ),
       new SlashCommandBuilder()
         .setName("store")
         .setDescription("Browse the custom shop.")
