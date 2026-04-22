@@ -91,7 +91,9 @@ export class RoleCapabilityService {
             canSell: capability.canSell,
             canReceiveAwards: capability.canReceiveAwards,
             isGroupRole: capability.isGroupRole,
-            riggedBetWinChance: capability.riggedBetWinChance ?? null,
+            ...(capability.riggedBetWinChance !== undefined
+              ? { riggedBetWinChance: capability.riggedBetWinChance }
+              : {}),
           },
         });
       }

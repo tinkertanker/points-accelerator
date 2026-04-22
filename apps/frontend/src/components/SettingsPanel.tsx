@@ -695,7 +695,10 @@ export default function SettingsPanel({
                           onChange={(event) => {
                             const next = [...roleDrafts];
                             const raw = event.target.value;
-                            const parsed = raw === "" ? null : Math.min(100, Math.max(0, Math.round(Number(raw))));
+                            const numeric = raw === "" ? Number.NaN : Number(raw);
+                            const parsed = Number.isFinite(numeric)
+                              ? Math.min(100, Math.max(0, Math.round(numeric)))
+                              : null;
                             next[index] = normaliseRoleCapability({
                               ...role,
                               riggedBetWinChance: parsed,

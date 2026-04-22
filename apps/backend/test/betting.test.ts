@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestApp, resetDatabase } from "./helpers/test-app.js";
 import { ensureTestDatabase } from "./helpers/test-database.js";
@@ -319,6 +319,118 @@ describe("betting system", () => {
         amount: 1,
       });
       expect(result.won).toBe(true);
+    }
+  });
+
+  it("picks the highest rigged chance when an actor has multiple rigged roles", async () => {
+    const { participant } = await seedSettingsAndGroup();
+
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-low",
+          roleName: "Low rigged",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: false,
+          riggedBetWinChance: 20,
+        },
+        {
+          roleId: "role-high",
+          roleName: "High rigged",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: false,
+          riggedBetWinChance: 90,
+        },
+        {
+          roleId: "role-alpha",
+          roleName: "Team Alpha",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: true,
+          riggedBetWinChance: null,
+        },
+      ],
+    });
+
+    // roll = floor(0.85 * 100) = 85 — wins at 90, loses at 20 or 50 (guild default).
+    const rand = vi.spyOn(Math, "random").mockReturnValue(0.85);
+    try {
+      const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha", "role-low", "role-high"] };
+      const result = await ctx.services.bettingService.placeBet({
+        guildId: GUILD_ID,
+        actor,
+        participantId: participant.id,
+        amount: 1,
+      });
+      expect(result.won).toBe(true);
+    } finally {
+      rand.mockRestore();
+    }
+  });
+
+  it("falls back to the guild default when no actor role is rigged", async () => {
+    const { participant } = await seedSettingsAndGroup();
+
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        appName: "points accelerator",
+        pointsName: "points",
+        pointsSymbol: "🏅",
+        currencyName: "rice",
+        currencySymbol: "💲",
+        groupPointsPerCurrencyDonation: 10,
+        mentorRoleIds: [],
+        passivePointsReward: 1,
+        passiveCurrencyReward: 1,
+        passiveCooldownSeconds: 60,
+        passiveMinimumCharacters: 4,
+        passiveAllowedChannelIds: [],
+        passiveDeniedChannelIds: [],
+        commandLogChannelId: null,
+        redemptionChannelId: null,
+        listingChannelId: null,
+        announcementsChannelId: null,
+        betWinChance: 10,
+        bettingCooldownSeconds: 0,
+      },
+    });
+
+    // roll = floor(0.5 * 100) = 50 — wins only above the guild default of 10 means we expect a loss.
+    const rand = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    try {
+      const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha"] };
+      const result = await ctx.services.bettingService.placeBet({
+        guildId: GUILD_ID,
+        actor,
+        participantId: participant.id,
+        amount: 1,
+      });
+      expect(result.won).toBe(false);
+    } finally {
+      rand.mockRestore();
     }
   });
 
