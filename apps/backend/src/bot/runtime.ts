@@ -53,9 +53,12 @@ type AssignmentLookupResult =
   | { kind: "resolved"; assignment: ActiveAssignment }
   | { kind: "ambiguous"; matches: ActiveAssignment[] }
   | { kind: "missing" };
-type AwardSubcommand = "points" | "currency" | "currencygroup";
+type AwardSubcommand = "points" | "currency" | "currencygroup" | "currencybulk";
 type DeductSubcommand = "group" | "member" | "mixed";
 type AwardLikeCommandKey = `award:${AwardSubcommand}` | `deduct:${DeductSubcommand}`;
+
+const CURRENCY_BULK_MAX_MEMBERS = 10;
+const USER_MENTION_PATTERN = /^<@!?(\d{17,20})>$/;
 
 const DISCORD_SNOWFLAKE_PATTERN = /^\d{17,20}$/;
 
@@ -145,6 +148,15 @@ function configureAwardLikeSubcommand(
     );
   }
 
+  if (config.includesMembersList) {
+    sub.addStringOption((option) =>
+      option
+        .setName("members")
+        .setDescription(`Up to ${CURRENCY_BULK_MAX_MEMBERS} member mentions or IDs, separated by commas or spaces`)
+        .setRequired(true),
+    );
+  }
+
   if (config.includesGroupPoints && config.groupAmountOptionName) {
     sub.addNumberOption((option) =>
       option
@@ -161,14 +173,19 @@ function configureAwardLikeSubcommand(
     );
   }
 
-  if ((config.includesSingleMemberCurrency || config.includesBulkMemberCurrency) && config.memberAmountOptionName) {
+  if (
+    (config.includesSingleMemberCurrency || config.includesBulkMemberCurrency || config.includesMembersList) &&
+    config.memberAmountOptionName
+  ) {
     sub.addNumberOption((option) =>
       option
         .setName(config.memberAmountOptionName)
         .setDescription(
           config.includesBulkMemberCurrency
             ? "Currency delta for each eligible member in the selected groups"
-            : "Currency delta for the selected member",
+            : config.includesMembersList
+              ? "Currency delta awarded to each listed member"
+              : "Currency delta for the selected member",
         )
         .setRequired(true)
         .setMinValue(0.01),
@@ -194,6 +211,7 @@ function getAwardCommandConfig(commandKey: AwardLikeCommandKey) {
         includesGroupPoints: true,
         includesSingleMemberCurrency: false,
         includesBulkMemberCurrency: false,
+        includesMembersList: false,
         groupAmountOptionName: "amount",
         memberAmountOptionName: null,
       };
@@ -204,6 +222,7 @@ function getAwardCommandConfig(commandKey: AwardLikeCommandKey) {
         includesGroupPoints: false,
         includesSingleMemberCurrency: true,
         includesBulkMemberCurrency: false,
+        includesMembersList: false,
         groupAmountOptionName: null,
         memberAmountOptionName: "amount",
       };
@@ -214,6 +233,18 @@ function getAwardCommandConfig(commandKey: AwardLikeCommandKey) {
         includesGroupPoints: false,
         includesSingleMemberCurrency: false,
         includesBulkMemberCurrency: true,
+        includesMembersList: false,
+        groupAmountOptionName: null,
+        memberAmountOptionName: "amount",
+      };
+    case "award:currencybulk":
+      return {
+        isDeduction: false,
+        includesGroupTargets: false,
+        includesGroupPoints: false,
+        includesSingleMemberCurrency: false,
+        includesBulkMemberCurrency: false,
+        includesMembersList: true,
         groupAmountOptionName: null,
         memberAmountOptionName: "amount",
       };
@@ -224,6 +255,7 @@ function getAwardCommandConfig(commandKey: AwardLikeCommandKey) {
         includesGroupPoints: true,
         includesSingleMemberCurrency: false,
         includesBulkMemberCurrency: false,
+        includesMembersList: false,
         groupAmountOptionName: "points",
         memberAmountOptionName: null,
       };
@@ -234,6 +266,7 @@ function getAwardCommandConfig(commandKey: AwardLikeCommandKey) {
         includesGroupPoints: false,
         includesSingleMemberCurrency: true,
         includesBulkMemberCurrency: false,
+        includesMembersList: false,
         groupAmountOptionName: null,
         memberAmountOptionName: "currency",
       };
@@ -244,10 +277,41 @@ function getAwardCommandConfig(commandKey: AwardLikeCommandKey) {
         includesGroupPoints: true,
         includesSingleMemberCurrency: true,
         includesBulkMemberCurrency: false,
+        includesMembersList: false,
         groupAmountOptionName: "points",
         memberAmountOptionName: "currency",
       };
   }
+}
+
+function parseMembersList(raw: string): string[] {
+  const tokens = raw
+    .split(/[\s,]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const invalid: string[] = [];
+  for (const token of tokens) {
+    const mentionMatch = token.match(USER_MENTION_PATTERN);
+    const id = mentionMatch?.[1] ?? (isDiscordSnowflake(token) ? token : null);
+    if (!id) {
+      invalid.push(token);
+      continue;
+    }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+
+  if (invalid.length > 0) {
+    throw new AppError(
+      `Could not parse these member mentions or IDs: ${invalid.join(", ")}. Use @mentions or 17–20 digit Discord IDs.`,
+      400,
+    );
+  }
+  return ids;
 }
 
 export type DashboardMember = {
@@ -2032,7 +2096,9 @@ export class BotRuntime {
               ? interaction.options.getNumber(commandConfig.groupAmountOptionName, true)
               : 0;
           const currency =
-            (commandConfig.includesSingleMemberCurrency || commandConfig.includesBulkMemberCurrency) &&
+            (commandConfig.includesSingleMemberCurrency ||
+              commandConfig.includesBulkMemberCurrency ||
+              commandConfig.includesMembersList) &&
             commandConfig.memberAmountOptionName
               ? interaction.options.getNumber(commandConfig.memberAmountOptionName, true)
               : 0;
@@ -2059,6 +2125,8 @@ export class BotRuntime {
           let currencyMemberLabel: string | undefined;
           let bulkCurrencyParticipantIds: string[] = [];
           let bulkCurrencyGroupSummary = "";
+          let listedCurrencyParticipantIds: string[] = [];
+          let listedMemberLabels: string[] = [];
           if (currency !== 0) {
             if (commandConfig.includesSingleMemberCurrency && !targetMember) {
               throw new AppError("Choose a member when awarding or deducting currency.", 400);
@@ -2076,6 +2144,63 @@ export class BotRuntime {
                 discordUsername: targetMember.username,
                 roleIds: this.getOrderedRoleIds(memberRecord),
               }));
+            }
+          }
+
+          if (commandConfig.includesMembersList) {
+            if (!interaction.guild) {
+              throw new AppError("This command is only available in a server.", 400);
+            }
+
+            const rawMembers = interaction.options.getString("members", true);
+            const ids = parseMembersList(rawMembers);
+            if (ids.length === 0) {
+              throw new AppError("List at least one member.", 400);
+            }
+            if (ids.length > CURRENCY_BULK_MAX_MEMBERS) {
+              throw new AppError(
+                `List up to ${CURRENCY_BULK_MAX_MEMBERS} members at a time (got ${ids.length}).`,
+                400,
+              );
+            }
+
+            const guild = interaction.guild;
+            const fetched = await Promise.all(
+              ids.map(async (id) => {
+                const member = await guild.members.fetch(id).catch(() => null);
+                return { id, member };
+              }),
+            );
+            const missing = fetched.filter((entry) => !entry.member).map((entry) => entry.id);
+            if (missing.length > 0) {
+              throw new AppError(
+                `These members are not in this server: ${missing.map((id) => `<@${id}>`).join(", ")}`,
+                404,
+              );
+            }
+
+            const resolved = await Promise.all(
+              fetched.map(async ({ member }) => {
+                const guildMember = member!;
+                const label = guildMember.displayName || guildMember.user.globalName || guildMember.user.username;
+                const { participant } = await this.resolveActiveParticipant({
+                  discordUserId: guildMember.user.id,
+                  discordUsername: guildMember.user.username,
+                  roleIds: this.getOrderedRoleIds(guildMember),
+                });
+                return {
+                  participantId: participant.id,
+                  label: this.formatUserReference(guildMember.user.id, label),
+                };
+              }),
+            );
+
+            const seen = new Set<string>();
+            for (const entry of resolved) {
+              if (seen.has(entry.participantId)) continue;
+              seen.add(entry.participantId);
+              listedCurrencyParticipantIds.push(entry.participantId);
+              listedMemberLabels.push(entry.label);
             }
           }
 
@@ -2158,6 +2283,14 @@ export class BotRuntime {
                 currencyDelta: currency * sign,
                 description: reason,
               });
+            } else if (listedCurrencyParticipantIds.length > 0) {
+              await this.services.participantCurrencyService.awardParticipants({
+                guildId: this.env.GUILD_ID,
+                actor,
+                targetParticipantIds: listedCurrencyParticipantIds,
+                currencyDelta: currency * sign,
+                description: reason,
+              });
             }
           }
 
@@ -2177,6 +2310,9 @@ export class BotRuntime {
               ? `${this.formatCurrencyAmount(Math.abs(currency), config)} each ${direction} ${bulkCurrencyParticipantIds.length} member${
                   bulkCurrencyParticipantIds.length === 1 ? "" : "s"
                 } across ${bulkCurrencyGroupSummary}`
+              : null,
+            listedCurrencyParticipantIds.length > 0 && currency !== 0
+              ? `${this.formatCurrencyAmount(Math.abs(currency), config)} each ${direction} ${listedMemberLabels.join(", ")}`
               : null,
           ].filter((value): value is string => value !== null);
 
@@ -2804,6 +2940,14 @@ export class BotRuntime {
             "award:currencygroup",
             "currencygroup",
             "Award participant currency to every eligible member in selected groups.",
+          ),
+        )
+        .addSubcommand((sub) =>
+          configureAwardLikeSubcommand(
+            sub,
+            "award:currencybulk",
+            "currencybulk",
+            `Award participant currency to up to ${CURRENCY_BULK_MAX_MEMBERS} listed members.`,
           ),
         ),
       new SlashCommandBuilder()

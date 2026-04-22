@@ -831,6 +831,195 @@ describe("bot runtime", () => {
     expect(reply).toHaveBeenCalledWith("Awarded 15 bananas 💲 each to 2 members across <@&group-role> (2). Reason: Team effort");
   });
 
+  describe("/award currencybulk", () => {
+    function setupCurrencyBulkFixture() {
+      const fixture = createRuntimeFixture();
+      const { services } = fixture;
+      services.groupService.resolveGroupFromRoleIds.mockImplementation(async (_guildId: string, roleIds: string[]) => {
+        if (roleIds.includes("group-role")) {
+          return { id: "group-1", displayName: "Gryffindor", roleId: "group-role" };
+        }
+        return { id: "group-0", displayName: "Staff", roleId: "staff-role" };
+      });
+      services.participantService.ensureForGroup.mockImplementation(
+        async ({ discordUserId, discordUsername, groupId }: { discordUserId: string; discordUsername: string; groupId: string }) => ({
+          id: `participant-${discordUserId}`,
+          indexId: `IDX-${discordUserId}`,
+          discordUsername,
+          groupId,
+          group: { id: groupId, displayName: "Gryffindor", slug: "gryffindor" },
+        }),
+      );
+      return fixture;
+    }
+
+    it("awards currency to each listed member", async () => {
+      const { runtime, services } = setupCurrencyBulkFixture();
+      const reply = vi.fn().mockResolvedValue(undefined);
+      const fetchMember = vi.fn(async (userId: string) => {
+        if (userId === "staff-1") {
+          return {
+            roles: { cache: new Map([["staff-role", {}]]) },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          };
+        }
+        if (userId === "111111111111111111") {
+          return {
+            displayName: "Alex",
+            user: { id: "111111111111111111", username: "alex", globalName: "Alex Carter" },
+            roles: { cache: new Map([["group-role", {}]]) },
+          };
+        }
+        if (userId === "222222222222222222") {
+          return {
+            displayName: "Bailey",
+            user: { id: "222222222222222222", username: "bailey", globalName: "Bailey Kim" },
+            roles: { cache: new Map([["group-role", {}]]) },
+          };
+        }
+        if (userId === "333333333333333333") {
+          return {
+            displayName: "Casey",
+            user: { id: "333333333333333333", username: "casey", globalName: "Casey Lim" },
+            roles: { cache: new Map([["group-role", {}]]) },
+          };
+        }
+        return null;
+      });
+
+      await (runtime as any).handleCommand({
+        commandName: "award",
+        guild: { members: { fetch: fetchMember } },
+        options: {
+          getSubcommand: () => "currencybulk",
+          getNumber: vi.fn((name: string) => (name === "amount" ? 25 : null)),
+          getString: vi.fn((name: string) => {
+            if (name === "members") return "<@111111111111111111>, 222222222222222222 <@!333333333333333333>";
+            return null;
+          }),
+        },
+        reply,
+        user: { id: "staff-1", username: "Mentor" },
+      });
+
+      expect(services.participantCurrencyService.awardParticipants).toHaveBeenCalledWith({
+        guildId: "guild-test",
+        actor: {
+          userId: "staff-1",
+          username: "Mentor",
+          roleIds: ["staff-role"],
+        },
+        targetParticipantIds: [
+          "participant-111111111111111111",
+          "participant-222222222222222222",
+          "participant-333333333333333333",
+        ],
+        currencyDelta: 25,
+        description: "Manual award via Discord command",
+      });
+      expect(reply).toHaveBeenCalledWith(
+        "Awarded 25 bananas 💲 each to <@111111111111111111>, <@222222222222222222>, <@333333333333333333>. Reason: Manual award via Discord command",
+      );
+    });
+
+    it("rejects when more than 10 members are listed", async () => {
+      const { runtime, services } = setupCurrencyBulkFixture();
+      const ids = Array.from({ length: 11 }, (_, i) => `1${String(i).padStart(17, "0")}`);
+      const fetchMember = vi.fn(async (userId: string) => {
+        if (userId === "staff-1") {
+          return {
+            roles: { cache: new Map([["staff-role", {}]]) },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          };
+        }
+        return null;
+      });
+
+      await expect(
+        (runtime as any).handleCommand({
+          commandName: "award",
+          guild: { members: { fetch: fetchMember } },
+          options: {
+            getSubcommand: () => "currencybulk",
+            getNumber: vi.fn((name: string) => (name === "amount" ? 5 : null)),
+            getString: vi.fn((name: string) => (name === "members" ? ids.join(",") : null)),
+          },
+          reply: vi.fn(),
+          user: { id: "staff-1", username: "Mentor" },
+        }),
+      ).rejects.toThrow(/up to 10 members/i);
+
+      expect(services.participantCurrencyService.awardParticipants).not.toHaveBeenCalled();
+    });
+
+    it("rejects unparseable member tokens", async () => {
+      const { runtime, services } = setupCurrencyBulkFixture();
+      const fetchMember = vi.fn(async (userId: string) => {
+        if (userId === "staff-1") {
+          return {
+            roles: { cache: new Map([["staff-role", {}]]) },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          };
+        }
+        return null;
+      });
+
+      await expect(
+        (runtime as any).handleCommand({
+          commandName: "award",
+          guild: { members: { fetch: fetchMember } },
+          options: {
+            getSubcommand: () => "currencybulk",
+            getNumber: vi.fn((name: string) => (name === "amount" ? 10 : null)),
+            getString: vi.fn((name: string) => (name === "members" ? "notanid alex@example.com" : null)),
+          },
+          reply: vi.fn(),
+          user: { id: "staff-1", username: "Mentor" },
+        }),
+      ).rejects.toThrow(/could not parse/i);
+
+      expect(services.participantCurrencyService.awardParticipants).not.toHaveBeenCalled();
+    });
+
+    it("rejects when a listed member is not in the server", async () => {
+      const { runtime, services } = setupCurrencyBulkFixture();
+      const fetchMember = vi.fn(async (userId: string) => {
+        if (userId === "staff-1") {
+          return {
+            roles: { cache: new Map([["staff-role", {}]]) },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          };
+        }
+        if (userId === "111111111111111111") {
+          return {
+            displayName: "Alex",
+            user: { id: "111111111111111111", username: "alex", globalName: "Alex Carter" },
+            roles: { cache: new Map([["group-role", {}]]) },
+          };
+        }
+        return null;
+      });
+
+      await expect(
+        (runtime as any).handleCommand({
+          commandName: "award",
+          guild: { members: { fetch: fetchMember } },
+          options: {
+            getSubcommand: () => "currencybulk",
+            getNumber: vi.fn((name: string) => (name === "amount" ? 10 : null)),
+            getString: vi.fn((name: string) =>
+              name === "members" ? "<@111111111111111111>, <@999999999999999999>" : null,
+            ),
+          },
+          reply: vi.fn(),
+          user: { id: "staff-1", username: "Mentor" },
+        }),
+      ).rejects.toThrow(/not in this server.*999999999999999999/);
+
+      expect(services.participantCurrencyService.awardParticipants).not.toHaveBeenCalled();
+    });
+  });
+
   it("echoes the reason in /award points replies for group awards", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.groupService.resolveGroupByIdentifier.mockImplementation(async (_guildId: string, identifier: string) => {
