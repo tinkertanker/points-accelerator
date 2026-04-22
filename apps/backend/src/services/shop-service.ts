@@ -89,6 +89,21 @@ const redemptionInclude = {
   },
 } satisfies Prisma.ShopRedemptionInclude;
 
+const inventoryRedemptionSelect = {
+  id: true,
+  status: true,
+  purchaseMode: true,
+  quantity: true,
+  createdAt: true,
+  totalCost: true,
+  shopItem: {
+    select: {
+      name: true,
+      emoji: true,
+    },
+  },
+} satisfies Prisma.ShopRedemptionSelect;
+
 type FullRedemption = Prisma.ShopRedemptionGetPayload<{ include: typeof redemptionInclude }>;
 
 export class ShopService {
@@ -390,10 +405,18 @@ export class ShopService {
     });
   }
 
-  public async listRedemptionsByUser(guildId: string, discordUserId: string) {
+  public async listPersonalRedemptionsByUser(guildId: string, discordUserId: string) {
     return this.prisma.shopRedemption.findMany({
-      where: { guildId, requestedByUserId: discordUserId },
-      include: redemptionInclude,
+      where: { guildId, requestedByUserId: discordUserId, purchaseMode: "INDIVIDUAL" },
+      select: inventoryRedemptionSelect,
+      orderBy: [{ createdAt: "desc" }],
+    });
+  }
+
+  public async listGroupRedemptionsByGroup(guildId: string, groupId: string) {
+    return this.prisma.shopRedemption.findMany({
+      where: { guildId, groupId, purchaseMode: "GROUP" },
+      select: inventoryRedemptionSelect,
       orderBy: [{ createdAt: "desc" }],
     });
   }

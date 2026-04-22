@@ -42,7 +42,9 @@ type GuildConfig = Awaited<ReturnType<AppServices["configService"]["getOrCreate"
 type ActiveAssignment = Awaited<ReturnType<AppServices["assignmentService"]["listActive"]>>[number];
 type CurrencyLeaderboardEntry = Awaited<ReturnType<AppServices["participantService"]["getCurrencyLeaderboard"]>>[number];
 type ShopListItem = Awaited<ReturnType<AppServices["shopService"]["list"]>>[number];
-type UserRedemption = Awaited<ReturnType<AppServices["shopService"]["listRedemptionsByUser"]>>[number];
+type UserRedemption = Awaited<
+  ReturnType<AppServices["shopService"]["listPersonalRedemptionsByUser"]>
+>[number];
 type GuildMemberCollection = Awaited<
   ReturnType<NonNullable<ChatInputCommandInteraction["guild"]>["members"]["fetch"]>
 >;
@@ -797,7 +799,6 @@ export class BotRuntime {
             audience: parsed.subkey === "group" ? "group" : "personal",
             page: parsed.page,
             guild: interaction.guild,
-            fallbackDisplayName: interaction.user.username,
           });
         case "store":
           return this.buildStoreView({
@@ -826,20 +827,14 @@ export class BotRuntime {
     audience: InventoryAudience;
     page: number;
     guild: ChatInputCommandInteraction["guild"] | null;
-    fallbackDisplayName: string;
+    displayName?: string;
   }) {
-    const [config, redemptions] = await Promise.all([
-      this.services.configService.getOrCreate(this.env.GUILD_ID),
-      this.services.shopService.listRedemptionsByUser(this.env.GUILD_ID, params.ownerId),
-    ]);
-    const filtered = redemptions.filter((redemption) =>
-      params.audience === "group" ? redemption.purchaseMode === "GROUP" : redemption.purchaseMode !== "GROUP",
-    );
-    const paged = paginateArray(filtered, params.page);
-    const member = await params.guild?.members.fetch(params.ownerId).catch(() => null);
-    const displayName = member?.displayName ?? params.fallbackDisplayName;
+    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    const redemptions = await this.fetchInventoryRedemptions(params);
+    const paged = paginateArray(redemptions, params.page);
+    const displayName = params.displayName ?? (await this.resolveOwnerDisplayName(params.guild, params.ownerId));
     const embed = this.buildInventoryEmbed({
-      redemptions: filtered,
+      redemptions,
       config,
       displayName,
       audience: params.audience,
@@ -854,6 +849,33 @@ export class BotRuntime {
       paged.hasNext,
     );
     return { embed, row };
+  }
+
+  private async fetchInventoryRedemptions(params: {
+    ownerId: string;
+    audience: InventoryAudience;
+    guild: ChatInputCommandInteraction["guild"] | null;
+  }): Promise<UserRedemption[]> {
+    if (params.audience === "personal") {
+      return this.services.shopService.listPersonalRedemptionsByUser(this.env.GUILD_ID, params.ownerId);
+    }
+    const member = await params.guild?.members.fetch(params.ownerId).catch(() => null);
+    const roleIds = member ? this.getOrderedRoleIds(member) : [];
+    const group = await this.services.groupService
+      .resolveGroupFromRoleIds(this.env.GUILD_ID, roleIds)
+      .catch(() => null);
+    if (!group) {
+      return [];
+    }
+    return this.services.shopService.listGroupRedemptionsByGroup(this.env.GUILD_ID, group.id);
+  }
+
+  private async resolveOwnerDisplayName(
+    guild: ChatInputCommandInteraction["guild"] | null,
+    ownerId: string,
+  ) {
+    const member = await guild?.members.fetch(ownerId).catch(() => null);
+    return member?.displayName ?? member?.user?.globalName ?? member?.user?.username ?? ownerId;
   }
 
   private async buildStoreView(params: {
@@ -2236,7 +2258,7 @@ export class BotRuntime {
           audience,
           page: 1,
           guild: interaction.guild,
-          fallbackDisplayName: member?.displayName ?? interaction.user.username,
+          displayName: member?.displayName ?? interaction.user.username,
         });
         await interaction.reply({
           embeds: [view.embed],

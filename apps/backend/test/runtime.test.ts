@@ -63,6 +63,8 @@ function createRuntimeFixture() {
       setApprovalMessage: vi.fn().mockResolvedValue(undefined),
       approveGroupPurchase: vi.fn().mockResolvedValue({ executed: false, approvalsCount: 1, threshold: 2 }),
       getRedemption: vi.fn().mockResolvedValue(null),
+      listPersonalRedemptionsByUser: vi.fn().mockResolvedValue([]),
+      listGroupRedemptionsByGroup: vi.fn().mockResolvedValue([]),
     },
     participantService: {
       findByDiscordUser: vi.fn(),
@@ -382,7 +384,7 @@ describe("bot runtime", () => {
 
   it("skips the owner check when paginating an ephemeral-source message", async () => {
     const { runtime, services } = createRuntimeFixture();
-    services.shopService.listRedemptionsByUser = vi.fn().mockResolvedValue([]);
+    services.shopService.listPersonalRedemptionsByUser = vi.fn().mockResolvedValue([]);
     const update = vi.fn().mockResolvedValue(undefined);
     const reply = vi.fn().mockResolvedValue(undefined);
 
@@ -441,6 +443,46 @@ describe("bot runtime", () => {
     const embed = update.mock.calls[0][0].embeds[0].data;
     expect(embed.description).toContain("Page 1");
     expect(embed.fields[0].name).toContain("#1");
+  });
+
+  it("queries /inventory group by the invoker's active group, not by requester id", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.shopService.listGroupRedemptionsByGroup = vi.fn().mockResolvedValue([
+      {
+        id: "redemption-from-teammate",
+        status: "FULFILLED",
+        purchaseMode: "GROUP",
+        quantity: 1,
+        createdAt: new Date("2026-04-01T12:00:00.000Z"),
+        totalCost: { toString: () => "500" },
+        shopItem: { name: "Pizza Party", emoji: "🍕" },
+      },
+    ]);
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const fetchMember = vi.fn(async () => ({
+      displayName: "Alice Jones",
+      roles: {
+        cache: new Map([["group-role", { id: "group-role", rawPosition: 1 }]]),
+      },
+    }));
+
+    await (runtime as any).handleCommand({
+      commandName: "inventory",
+      guild: { members: { fetch: fetchMember } },
+      options: { getSubcommand: () => "group" },
+      reply,
+      user: { id: "user-1", username: "Alice" },
+    });
+
+    expect(services.groupService.resolveGroupFromRoleIds).toHaveBeenCalledWith(
+      "guild-test",
+      ["group-role"],
+    );
+    expect(services.shopService.listGroupRedemptionsByGroup).toHaveBeenCalledWith("guild-test", "group-1");
+    expect(services.shopService.listPersonalRedemptionsByUser).not.toHaveBeenCalled();
+    const embed = reply.mock.calls[0][0].embeds[0].data;
+    expect(embed.title).toContain("group purchases");
+    expect(JSON.stringify(embed)).toContain("Pizza Party");
   });
 
   it("keeps ledger entry field values within Discord's 1024 character limit", async () => {
