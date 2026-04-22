@@ -54,19 +54,18 @@ The bot also supports participant-wallet betting: students can place double-or-n
 - Submission review with automatic `SUBMISSION_REWARD` ledger entries
 - Optional Cloudflare R2 image storage with Discord attachment fallback
 
-## Phase 1 command set
+## Command set
 
-- Staff roles such as admins or alumni: `/awardpoints`, `/awardcurrency`, `/awardcurrencybulk`, `/deductgroup`, `/deductmember`, `/deductmixed`
-- Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`
-- Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`, `/bet`, `/betstats`
+- Staff roles such as admins or alumni: `/award points`, `/award currency`, `/award currencygroup`, `/award currencybulk`, `/deduct group`, `/deduct member`, `/deduct mixed`
+- Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buy personal`, `/buy group`, `/approve_purchase`, `/bet`, `/betstats`
 
-The award and deduct flows use separate commands so Discord enforces the required fields:
+The award and deduct flows are split into subcommands so Discord enforces the required fields:
 
-- `/awardpoints` or `/deductgroup` for group points
-- `/awardcurrency`, `/awardcurrencybulk`, or `/deductmember` for participant wallet currency
-- `/awardmixed` is disabled for now; use `/awardpoints` and `/awardcurrency` separately when both should change
-- `/deductmixed` when both group points and participant currency should change together
-- `reason` is optional on each command; the target and amount fields are required
+- `/award points` or `/deduct group` for group points
+- `/award currency`, `/award currencygroup`, `/award currencybulk`, or `/deduct member` for participant wallet currency
+- `/deduct mixed` when both group points and participant currency should change together
+- `/award currencybulk` takes a `members` string with up to 10 mentions or IDs; `/award currencygroup` awards every eligible member in the selected groups
+- `reason` is optional on each subcommand; the target and amount fields are required
 
 ## Submission command set
 

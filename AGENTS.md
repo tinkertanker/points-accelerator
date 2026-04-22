@@ -20,8 +20,8 @@ It is a monorepo with:
 
 - Groups are the primary accounts for points and leaderboard state.
 - The ledger is append-only in practice: corrections should be new entries, not mutation of past balances.
-- `points` are group-based, leaderboard-visible, and spendable for `/buyforgroup`.
-- Spendable `currency` is participant-based for `/transfer`, `/buyforme`, and donation conversion.
+- `points` are group-based, leaderboard-visible, and spendable for `/buy group`.
+- Spendable `currency` is participant-based for `/transfer`, `/buy personal`, and donation conversion.
 - `/donate` converts participant currency into group points using the configured guild rate.
 - Group purchases are approval-driven: a request waits for at least 50% of the current group role membership to approve, then charges the shared group points balance.
 - Betting affects participant wallet currency, not group points.
@@ -58,7 +58,7 @@ Useful backend commands:
 - If you change dashboard flows, add or update frontend tests and Playwright coverage where practical.
 - Backend Vitest currently uses one ephemeral Postgres per test file; do not enable file-level parallelism unless the harness is isolated per worker.
 - If `BootstrapPayload` changes, keep `apps/frontend/src/designPreview.ts` and Playwright bootstrap mocks in sync.
-- Prefer validating the split economy end-to-end: passive rewards, awards/deductions, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, `/approve_purchase`, and `/sell`.
+- Prefer validating the split economy end-to-end: passive rewards, awards/deductions, `/transfer`, `/donate`, `/store`, `/buy personal`, `/buy group`, `/approve_purchase`, and `/sell`.
 - Prefer validating submission flows end-to-end as well: auto-provisioned participants, `/submit`, `/submissions`, `/missing`, `/review_submission`, and dashboard review.
 - Include `/bet` and `/betstats` when touching betting or participant currency flow behaviour.
 

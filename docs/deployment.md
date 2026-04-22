@@ -51,4 +51,4 @@ Set these in your `.env` file before deploying:
 3. Create group mappings for the Discord roles that represent teams.
 4. Set listing, redemption, log, and announcements channels if you want channel output. The announcements channel receives one embed per backend version bump, read from the matching `## [x.y.z]` entry in `CHANGELOG.md`.
 5. Create shop items.
-6. Test `/awardpoints`, `/awardcurrency`, `/awardcurrencybulk`, `/deductgroup`, `/deductmember`, `/deductmixed`, `/transfer`, `/donate`, `/store`, `/buyforme`, `/buyforgroup`, and `/sell` in the class server.
+6. Test `/award points`, `/award currency`, `/award currencygroup`, `/award currencybulk`, `/deduct group`, `/deduct member`, `/deduct mixed`, `/transfer`, `/donate`, `/store`, `/buy personal`, `/buy group`, and `/sell` in the class server.

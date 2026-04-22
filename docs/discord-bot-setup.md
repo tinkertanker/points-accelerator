@@ -57,11 +57,11 @@ If your deployment uses a dedicated OAuth callback override, set and register `D
 After deployment:
 
 1. Sign in at `https://points-accelerator.tk.sg` with Discord.
-2. Follow the **Phase 1 walkthrough** shown in the control room.
+2. Follow the dashboard walkthrough shown in the control room.
 3. Create role capability rules for admin and alumni roles, and mark trusted staff roles with `canManageDashboard`.
 4. Map each student group role to a group entry.
 5. Set listing, redemption, and log channels.
-6. Add shop items if you want the shop enabled during phase 1.
+6. Add shop items if you want the shop available on day one.
 7. Use the **Fulfilment** tab after test purchases so staff can mark handovers complete.
 8. Review `Bet win chance (%)` in the dashboard to set the desired win probability for test users. The default is `50`.
 
@@ -69,12 +69,13 @@ After deployment:
 
 Run these in the test server before production rollout:
 
-- `/awardpoints`
-- `/awardcurrency`
-- `/awardcurrencybulk`
-- `/deductgroup`
-- `/deductmember`
-- `/deductmixed`
+- `/award points`
+- `/award currency`
+- `/award currencygroup`
+- `/award currencybulk`
+- `/deduct group`
+- `/deduct member`
+- `/deduct mixed`
 - `/leaderboard`
 - `/forbes`
 - `/balance`
@@ -84,7 +85,7 @@ Run these in the test server before production rollout:
 - `/bet`
 - `/betstats`
 - `/store`
-- `/buyforme`
-- `/buyforgroup`
+- `/buy personal`
+- `/buy group`
 - `/approve_purchase`
 - `/sell`

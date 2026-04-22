@@ -85,18 +85,18 @@ export default function GuidePanel() {
                 </li>
               </ol>
               <p className="walkthrough-commands">
-                <code>/awardgroup targets:@gryffindor points:5 reason:&quot;helped another group&quot;</code>
-                <code>/awardmember member:@harry currency:3</code>
-                <code>/deductgroup targets:@gryffindor points:2 reason:&quot;late submission&quot;</code>
+                <code>/award points targets:@gryffindor amount:5 reason:&quot;helped another group&quot;</code>
+                <code>/award currency member:@harry amount:3</code>
+                <code>/award currencybulk members:@harry,@ron,@hermione amount:3</code>
+                <code>/deduct group targets:@gryffindor points:2 reason:&quot;late submission&quot;</code>
                 <code>/balance</code>
                 <code>/transfer member:@harry amount:3</code>
                 <code>/donate amount:2</code>
-                <code>/buyforme item_id:bubble-tea</code>
-                <code>/buyforgroup item_id:pizza quantity:2</code>
+                <code>/buy personal item_id:bubble-tea</code>
+                <code>/buy group item_id:pizza quantity:2</code>
                 <code>/leaderboard</code>
                 <code>/forbes</code>
                 <code>/ledger</code>
-                <code>/ledger page:2</code>
               </p>
             </div>
           </details>
@@ -123,9 +123,11 @@ export default function GuidePanel() {
 
               <h3>Earning actively</h3>
               <p>
-                Staff use <code>/awardgroup</code> and <code>/deductgroup</code> to adjust group points,
-                {" "}<code>/awardmember</code> and <code>/deductmember</code> for personal wallets, and{" "}
-                <code>/awardmixed</code> or <code>/deductmixed</code> when both balances should change together.
+                Staff use <code>/award points</code> and <code>/deduct group</code> to adjust group points,
+                {" "}<code>/award currency</code> and <code>/deduct member</code> for a single wallet,
+                {" "}<code>/award currencygroup</code> to hit every eligible member in a group,
+                {" "}<code>/award currencybulk</code> to list up to 10 members explicitly, and{" "}
+                <code>/deduct mixed</code> when both balances should change together.
                 Approved assignment submissions also award both points and currency automatically.
               </p>
 
@@ -138,9 +140,9 @@ export default function GuidePanel() {
 
               <h3>How balances flow</h3>
               <dl className="guide-flow">
-                <dt><code>/awardgroup targets:@team points:5</code></dt>
+                <dt><code>/award points targets:@team amount:5</code></dt>
                 <dd>Adds 5 to the team&rsquo;s group points</dd>
-                <dt><code>/awardmember member:@alice currency:3</code></dt>
+                <dt><code>/award currency member:@alice amount:3</code></dt>
                 <dd>Adds 3 to Alice&rsquo;s personal wallet</dd>
                 <dt><code>/transfer member:@bob amount:2</code></dt>
                 <dd>Moves 2 currency from your wallet to Bob&rsquo;s</dd>
@@ -169,16 +171,34 @@ export default function GuidePanel() {
                       <td colSpan={4} className="guide-group-heading">Staff commands</td>
                     </tr>
                     <tr>
-                      <td><code>/awardgroup</code>, <code>/awardmember</code>, <code>/awardmixed</code></td>
+                      <td><code>/award points</code></td>
                       <td>Staff</td>
-                      <td><code>targets</code> + <code>points</code>, or <code>member</code> + <code>currency</code>, with optional <code>reason</code></td>
-                      <td>Award group points, personal currency, or both with command-specific required options</td>
+                      <td><code>targets</code> + <code>amount</code>, optional <code>reason</code></td>
+                      <td>Award group points to the target groups</td>
                     </tr>
                     <tr>
-                      <td><code>/deductgroup</code>, <code>/deductmember</code>, <code>/deductmixed</code></td>
+                      <td><code>/award currency</code></td>
+                      <td>Staff</td>
+                      <td><code>member</code> + <code>amount</code>, optional <code>reason</code></td>
+                      <td>Award wallet currency to one member</td>
+                    </tr>
+                    <tr>
+                      <td><code>/award currencygroup</code></td>
+                      <td>Staff</td>
+                      <td><code>targets</code> + <code>amount</code>, optional <code>reason</code></td>
+                      <td>Award wallet currency to every eligible member in the selected groups</td>
+                    </tr>
+                    <tr>
+                      <td><code>/award currencybulk</code></td>
+                      <td>Staff</td>
+                      <td><code>members</code> (up to 10 mentions or IDs) + <code>amount</code>, optional <code>reason</code></td>
+                      <td>Award wallet currency to a specific list of members</td>
+                    </tr>
+                    <tr>
+                      <td><code>/deduct group</code>, <code>/deduct member</code>, <code>/deduct mixed</code></td>
                       <td>Staff</td>
                       <td><code>targets</code> + <code>points</code>, or <code>member</code> + <code>currency</code>, with optional <code>reason</code></td>
-                      <td>Deduct group points, personal currency, or both with command-specific required options</td>
+                      <td>Deduct group points, wallet currency, or both in a single action</td>
                     </tr>
                     <tr>
                       <td><code>/sell</code></td>
@@ -251,8 +271,8 @@ export default function GuidePanel() {
                     <tr>
                       <td><code>/ledger</code></td>
                       <td>Everyone</td>
-                      <td><code>page</code></td>
-                      <td>Browse recent ledger entries (10 per page)</td>
+                      <td>&mdash;</td>
+                      <td>Browse recent ledger entries with Prev/Next buttons</td>
                     </tr>
                     <tr>
                       <td><code>/store</code></td>
@@ -261,13 +281,13 @@ export default function GuidePanel() {
                       <td>Browse all enabled shop items</td>
                     </tr>
                     <tr>
-                      <td><code>/buyforme</code></td>
+                      <td><code>/buy personal</code></td>
                       <td>Everyone</td>
                       <td><code>item_id</code> <code>quantity</code></td>
                       <td>Buy an item for yourself using personal currency</td>
                     </tr>
                     <tr>
-                      <td><code>/buyforgroup</code></td>
+                      <td><code>/buy group</code></td>
                       <td>Everyone</td>
                       <td><code>item_id</code> <code>quantity</code></td>
                       <td>Request a group purchase using group points (needs approval)</td>
@@ -346,7 +366,7 @@ export default function GuidePanel() {
               <h3>Individual items</h3>
               <p>
                 Items with the <strong>Individual</strong> audience cost personal wallet currency. Students buy them
-                with <code>/buyforme</code> and the purchase is fulfilled immediately. Add fulfilment instructions
+                with <code>/buy personal</code> and the purchase is fulfilled immediately. Add fulfilment instructions
                 (e.g. &ldquo;show this receipt to a mentor&rdquo;) to tell students what happens next. Staff can then
                 clear the row from the <strong>Fulfilment</strong> tab once the handover is done.
               </p>
@@ -354,7 +374,7 @@ export default function GuidePanel() {
               <h3>Group items</h3>
               <p>
                 Items with the <strong>Group</strong> audience cost group points. A student initiates the purchase
-                with <code>/buyforgroup</code>, then other group members approve it with{" "}
+                with <code>/buy group</code>, then other group members approve it with{" "}
                 <code>/approve_purchase</code>. The number of approvals required scales with group size. Once the
                 threshold is met, the points are deducted and the request moves into the dashboard&rsquo;s{" "}
                 <strong>Fulfilment</strong> queue until staff mark it fulfilled.
@@ -429,7 +449,7 @@ export default function GuidePanel() {
               <h3>What are aliases for?</h3>
               <p>
                 Groups can have comma-separated aliases so staff can use shorthand in commands — for
-                example, <code>/awardgroup targets:alpha points:5 reason:&quot;well done&quot;</code> instead of mentioning
+                example, <code>/award points targets:alpha amount:5 reason:&quot;well done&quot;</code> instead of mentioning
                 the full Discord role.
               </p>
 

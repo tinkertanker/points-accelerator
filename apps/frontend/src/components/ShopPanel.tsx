@@ -465,8 +465,8 @@ export default function ShopPanel({
               <dd>Short copy explaining what the student or group is buying.</dd>
               <dt>Audience</dt>
               <dd>
-                <strong>👤 Personal</strong> items are bought with <code>/buyforme</code> using participant currency.
-                <strong> 👥 Group</strong> items are bought with <code>/buyforgroup</code> using shared group points and
+                <strong>👤 Personal</strong> items are bought with <code>/buy personal</code> using participant currency.
+                <strong> 👥 Group</strong> items are bought with <code>/buy group</code> using shared group points and
                 approvals.
               </dd>
               <dt>Cost</dt>
