@@ -60,6 +60,7 @@ const roleCapabilitySchema = z.object({
   canSell: z.boolean(),
   canReceiveAwards: z.boolean(),
   isGroupRole: z.boolean(),
+  riggedBetWinChance: z.number().int().min(0).max(100).nullable().optional(),
 });
 
 const groupSchema = z.object({

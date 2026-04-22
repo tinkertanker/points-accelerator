@@ -4,6 +4,7 @@ import { AppError } from "../utils/app-error.js";
 import { decimal, decimalToNumber } from "../utils/decimal.js";
 import type { ParticipantCurrencyService } from "./participant-currency-service.js";
 import type { ConfigService } from "./config-service.js";
+import type { RoleCapabilityService } from "./role-capability-service.js";
 
 type Actor = {
   userId: string;
@@ -31,6 +32,7 @@ export class BettingService {
     private readonly prisma: PrismaClient,
     private readonly configService: ConfigService,
     private readonly participantCurrencyService: ParticipantCurrencyService,
+    private readonly roleCapabilityService: RoleCapabilityService,
   ) {}
 
   /**
@@ -51,7 +53,7 @@ export class BettingService {
     }
 
     const config = await this.configService.getOrCreate(params.guildId);
-    const winChance = config.betWinChance;
+    const winChance = await this.resolveWinChance(params.guildId, params.actor.roleIds, config.betWinChance);
     const roll = Math.floor(Math.random() * 100);
     const won = roll < winChance;
     const currencyDelta = won ? params.amount : -params.amount;
@@ -125,6 +127,23 @@ export class BettingService {
       amount: params.amount,
       newCurrencyBalance: result.newBalance,
     };
+  }
+
+  private async resolveWinChance(guildId: string, roleIds: string[], defaultChance: number): Promise<number> {
+    if (roleIds.length === 0) {
+      return defaultChance;
+    }
+
+    const capabilities = await this.roleCapabilityService.listForRoleIds(guildId, roleIds);
+    const rigged = capabilities
+      .map((capability) => capability.riggedBetWinChance)
+      .filter((value): value is number => value !== null && value !== undefined);
+
+    if (rigged.length === 0) {
+      return defaultChance;
+    }
+
+    return Math.max(...rigged);
   }
 
   /**

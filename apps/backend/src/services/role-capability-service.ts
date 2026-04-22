@@ -16,6 +16,7 @@ export type RoleCapabilityInput = {
   canSell: boolean;
   canReceiveAwards: boolean;
   isGroupRole: boolean;
+  riggedBetWinChance?: number | null;
 };
 
 export class RoleCapabilityService {
@@ -77,6 +78,7 @@ export class RoleCapabilityService {
             canSell: capability.canSell,
             canReceiveAwards: capability.canReceiveAwards,
             isGroupRole: capability.isGroupRole,
+            riggedBetWinChance: capability.riggedBetWinChance ?? null,
           },
           update: {
             roleName: capability.roleName,
@@ -89,6 +91,7 @@ export class RoleCapabilityService {
             canSell: capability.canSell,
             canReceiveAwards: capability.canReceiveAwards,
             isGroupRole: capability.isGroupRole,
+            riggedBetWinChance: capability.riggedBetWinChance ?? null,
           },
         });
       }

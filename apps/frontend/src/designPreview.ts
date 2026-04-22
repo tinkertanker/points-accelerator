@@ -150,6 +150,7 @@ function createInitialBootstrap(): BootstrapPayload {
         canSell: true,
         canReceiveAwards: false,
         isGroupRole: false,
+        riggedBetWinChance: 80,
       },
       {
         id: "cap-2",
@@ -164,6 +165,7 @@ function createInitialBootstrap(): BootstrapPayload {
         canSell: false,
         canReceiveAwards: true,
         isGroupRole: true,
+        riggedBetWinChance: null,
       },
       {
         id: "cap-3",
@@ -178,6 +180,7 @@ function createInitialBootstrap(): BootstrapPayload {
         canSell: false,
         canReceiveAwards: true,
         isGroupRole: true,
+        riggedBetWinChance: null,
       },
     ],
     groups: [

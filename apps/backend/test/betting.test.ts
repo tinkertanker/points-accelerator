@@ -260,6 +260,68 @@ describe("betting system", () => {
     });
   });
 
+  it("uses the highest rigged role percentage when an actor has the rigged role", async () => {
+    const { participant } = await seedSettingsAndGroup();
+
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-admin",
+          roleName: "Admin",
+          canManageDashboard: true,
+          canAward: true,
+          maxAward: 1000,
+          canDeduct: true,
+          canMultiAward: true,
+          canSell: true,
+          canReceiveAwards: true,
+          isGroupRole: false,
+          riggedBetWinChance: null,
+        },
+        {
+          roleId: "role-rigged",
+          roleName: "Rigged",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: false,
+          riggedBetWinChance: 100,
+        },
+        {
+          roleId: "role-alpha",
+          roleName: "Team Alpha",
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          canReceiveAwards: true,
+          isGroupRole: true,
+          riggedBetWinChance: null,
+        },
+      ],
+    });
+
+    const actor = { userId: "user-1", username: "alice", roleIds: ["role-alpha", "role-rigged"] };
+    for (let i = 0; i < 10; i++) {
+      const result = await ctx.services.bettingService.placeBet({
+        guildId: GUILD_ID,
+        actor,
+        participantId: participant.id,
+        amount: 1,
+      });
+      expect(result.won).toBe(true);
+    }
+  });
+
   it("settings API includes betWinChance", async () => {
     await seedSettingsAndGroup();
 
