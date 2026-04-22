@@ -1396,7 +1396,7 @@ export class BotRuntime {
         `${leaderboard.length} group${leaderboard.length === 1 ? "" : "s"} ranked by shared ${config.pointsName}.`,
       )
       .addFields(fields)
-      .setFooter({ text: `Shared ${config.pointsName} drive the public board and /buyforgroup.` });
+      .setFooter({ text: `Shared ${config.pointsName} drive the public board and /buy group.` });
     return embed;
   }
 
@@ -1586,8 +1586,8 @@ export class BotRuntime {
 
     const footer =
       audience === "group"
-        ? `/buyforgroup spends shared ${config.pointsName} · /donate converts currency into points.`
-        : `/buyforme spends your ${config.currencyName} · /donate converts currency into points.`;
+        ? `/buy group spends shared ${config.pointsName} · /donate converts currency into points.`
+        : `/buy personal spends your ${config.currencyName} · /donate converts currency into points.`;
 
     return new EmbedBuilder()
       .setColor(STORE_EMBED_COLOUR)
@@ -1926,8 +1926,11 @@ export class BotRuntime {
   }
 
   private async handleAutocomplete(interaction: AutocompleteInteraction) {
-    const { commandName } = interaction;
-    if (commandName !== "buyforme" && commandName !== "buyforgroup") {
+    if (interaction.commandName !== "buy") {
+      return;
+    }
+    const subcommand = interaction.options.getSubcommand();
+    if (subcommand !== "personal" && subcommand !== "group") {
       return;
     }
     const focused = interaction.options.getFocused(true);
@@ -1935,7 +1938,7 @@ export class BotRuntime {
       await interaction.respond([]);
       return;
     }
-    const audience = commandName === "buyforgroup" ? "GROUP" : "INDIVIDUAL";
+    const audience = subcommand === "group" ? "GROUP" : "INDIVIDUAL";
     const [config, items] = await Promise.all([
       this.services.configService.getOrCreate(this.env.GUILD_ID),
       this.services.shopService.list(this.env.GUILD_ID),
@@ -2006,7 +2009,7 @@ export class BotRuntime {
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const walletBalance = await this.services.participantCurrencyService.getParticipantBalance(participant.id);
         await interaction.reply({
-          content: `${group.displayName}: ${this.formatPointsAmount(balance.pointsBalance, config)} available for the leaderboard and /buyforgroup. Your wallet: ${this.formatCurrencyAmount(walletBalance, config)}.`,
+          content: `${group.displayName}: ${this.formatPointsAmount(balance.pointsBalance, config)} available for the leaderboard and /buy group. Your wallet: ${this.formatCurrencyAmount(walletBalance, config)}.`,
           ephemeral: true,
         });
         return;
@@ -2388,12 +2391,15 @@ export class BotRuntime {
         });
         return;
       }
-      case "buyforme":
-      case "buyforgroup": {
+      case "buy": {
+        const subcommand = interaction.options.getSubcommand();
+        if (subcommand !== "personal" && subcommand !== "group") {
+          throw new AppError("Unknown /buy subcommand.", 400);
+        }
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
         const itemId = interaction.options.getString("item_id", true);
         const quantity = interaction.options.getInteger("quantity") ?? 1;
-        const purchaseMode = interaction.commandName === "buyforgroup" ? "GROUP" : "INDIVIDUAL";
+        const purchaseMode = subcommand === "group" ? "GROUP" : "INDIVIDUAL";
         const { group, participant } = await this.resolveActiveParticipant({
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
@@ -2982,32 +2988,39 @@ export class BotRuntime {
           sub.setName("group").setDescription("Group purchases you're part of."),
         ),
       new SlashCommandBuilder()
-        .setName("buyforme")
-        .setDescription("Buy a shop item for yourself.")
-        .addStringOption((option) =>
-          option
-            .setName("item_id")
-            .setDescription("Item to buy — start typing to search by name")
-            .setRequired(true)
-            .setAutocomplete(true),
+        .setName("buy")
+        .setDescription("Buy a shop item.")
+        .addSubcommand((sub) =>
+          sub
+            .setName("personal")
+            .setDescription("Buy a shop item for yourself with your wallet currency.")
+            .addStringOption((option) =>
+              option
+                .setName("item_id")
+                .setDescription("Item to buy — start typing to search by name")
+                .setRequired(true)
+                .setAutocomplete(true),
+            )
+            .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
         )
-        .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
-      new SlashCommandBuilder()
-        .setName("buyforgroup")
-        .setDescription("Start a group purchase request for a shop item.")
-        .addStringOption((option) =>
-          option
-            .setName("item_id")
-            .setDescription("Item to buy — start typing to search by name")
-            .setRequired(true)
-            .setAutocomplete(true),
-        )
-        .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
+        .addSubcommand((sub) =>
+          sub
+            .setName("group")
+            .setDescription("Start a group purchase request paid from shared group points.")
+            .addStringOption((option) =>
+              option
+                .setName("item_id")
+                .setDescription("Item to buy — start typing to search by name")
+                .setRequired(true)
+                .setAutocomplete(true),
+            )
+            .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
+        ),
       new SlashCommandBuilder()
         .setName("approve_purchase")
         .setDescription("Approve a pending group shop purchase.")
         .addStringOption((option) =>
-          option.setName("purchase_id").setDescription("Full purchase ID shared in /buyforgroup").setRequired(true),
+          option.setName("purchase_id").setDescription("Full purchase ID shared by /buy group").setRequired(true),
         ),
       new SlashCommandBuilder()
         .setName("sell")

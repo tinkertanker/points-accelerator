@@ -1568,7 +1568,7 @@ describe("bot runtime", () => {
       groupId: "group-1",
     });
     expect(reply).toHaveBeenCalledWith({
-      content: "Gryffindor: 12 blorgshj 🏅 available for the leaderboard and /buyforgroup. Your wallet: 7 bananas 💲.",
+      content: "Gryffindor: 12 blorgshj 🏅 available for the leaderboard and /buy group. Your wallet: 7 bananas 💲.",
       ephemeral: true,
     });
   });
@@ -1808,7 +1808,7 @@ describe("bot runtime", () => {
     expect(fetchMember).not.toHaveBeenCalledWith("student-12");
   });
 
-  it("creates a group purchase from /buyforgroup", async () => {
+  it("creates a group purchase from /buy group", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.groupService.resolveGroupFromRoleIds.mockImplementation(async (_guildId: string, roleIds: string[]) => {
       if (roleIds.includes("other-group-role")) {
@@ -1831,7 +1831,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
-      commandName: "buyforgroup",
+      commandName: "buy",
       channelId: "channel-current",
       guild: {
         members: {
@@ -1871,6 +1871,7 @@ describe("bot runtime", () => {
         },
       },
       options: {
+        getSubcommand: () => "group",
         getString: vi.fn((name: string) => (name === "item_id" ? "item-1" : null)),
         getInteger: vi.fn((name: string) => (name === "quantity" ? 2 : null)),
       },

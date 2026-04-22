@@ -631,7 +631,7 @@ export class ShopService {
       }
 
       if (item.audience !== "INDIVIDUAL") {
-        throw new AppError("This item can only be purchased with /buyforme.", 409);
+        throw new AppError("This item can only be purchased with /buy personal.", 409);
       }
 
       const totalCostDecimal = item.cost.mul(quantity);
@@ -775,7 +775,7 @@ export class ShopService {
 
       const approvalThreshold = this.getApprovalThreshold(groupMemberCount);
       if (item.audience !== "GROUP") {
-        throw new AppError("This item can only be purchased with /buyforgroup.", 409);
+        throw new AppError("This item can only be purchased with /buy group.", 409);
       }
 
       const totalCostDecimal = item.cost.mul(quantity);
