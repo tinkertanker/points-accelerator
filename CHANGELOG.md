@@ -8,6 +8,26 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.4.0] - 2026-04-23
+
+### Added
+- `/award currencybulk` — award wallet currency to an explicit list of up to 10 members by mention or ID in one shot.
+
+### Changed
+- Award, deduct, and buy commands are grouped under parent commands with subcommands. Old flat names no longer appear in the Discord picker:
+  - `/awardpoints` → `/award points`
+  - `/awardcurrency` → `/award currency`
+  - `/awardcurrencybulk` → `/award currencygroup`
+  - `/deductgroup` → `/deduct group`
+  - `/deductmember` → `/deduct member`
+  - `/deductmixed` → `/deduct mixed`
+  - `/buyforme` → `/buy personal`
+  - `/buyforgroup` → `/buy group`
+- `/award currencygroup` keeps the "award currency to every eligible member in the selected groups" behaviour that used to live on `/awardcurrencybulk`.
+
+### Removed
+- The placeholder `/awardmixed` command (it only ever returned a "disabled" error). Use `/award points` and `/award currency` together when both balances should change.
+
 ## [0.3.0] - 2026-04-22
 
 ### Added
