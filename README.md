@@ -68,7 +68,7 @@ The award and deduct flows are split into subcommands so Discord enforces the re
 - `/award currencybulk` takes a `members` string with up to 10 mentions or IDs; `/award currencygroup` awards every eligible member in the selected groups
 - `reason` is optional on each subcommand; the target and amount fields are required
 
-For lucky draws, run `/luckydraw duration:<e.g. 5m> prize:<int> [winners:<n>] [description:<text>]`. Members click the 🎲 Enter button on the announcement to take part; the bot picks the configured number of winners at random when the timer ends and pays each one the prize.
+For lucky draws, run `/luckydraw duration:<e.g. 5m> prize:<int> [winners:<n>] [description:<text>]`. Members click the 🎲 Enter button on the announcement to take part; the bot picks the configured number of winners at random when the timer ends and pays each one the prize. Winnings land in the participant wallet — check `/balance` or `/forbes`.
 
 ## Submission command set
 

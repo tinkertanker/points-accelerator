@@ -74,24 +74,28 @@ export class LuckyDrawService {
   }
 
   public async recordEntry(params: { drawId: string; userId: string; username?: string | null }) {
-    const draw = await this.prisma.luckyDraw.findUnique({ where: { id: params.drawId } });
-    if (!draw) {
-      throw new AppError("Lucky draw not found.", 404);
-    }
-    if (draw.status !== LuckyDrawStatus.ACTIVE) {
-      throw new AppError("This lucky draw has already ended.", 409);
-    }
-    if (draw.endsAt.getTime() <= Date.now()) {
-      throw new AppError("This lucky draw has already ended.", 409);
-    }
-
     try {
-      return await this.prisma.luckyDrawEntry.create({
-        data: {
-          luckyDrawId: params.drawId,
-          userId: params.userId,
-          username: params.username ?? null,
-        },
+      return await this.prisma.$transaction(async (tx) => {
+        const locked = await tx.$queryRaw<Array<{ id: string; status: LuckyDrawStatus; endsAt: Date }>>(
+          Prisma.sql`SELECT "id", "status", "endsAt" FROM "LuckyDraw" WHERE "id" = ${params.drawId} FOR UPDATE`,
+        );
+        const draw = locked[0];
+        if (!draw) {
+          throw new AppError("Lucky draw not found.", 404);
+        }
+        if (draw.status !== LuckyDrawStatus.ACTIVE) {
+          throw new AppError("This lucky draw has already ended.", 409);
+        }
+        if (draw.endsAt.getTime() <= Date.now()) {
+          throw new AppError("This lucky draw has already ended.", 409);
+        }
+        return tx.luckyDrawEntry.create({
+          data: {
+            luckyDrawId: params.drawId,
+            userId: params.userId,
+            username: params.username ?? null,
+          },
+        });
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -103,8 +107,28 @@ export class LuckyDrawService {
 
   public async listResumable(guildId: string) {
     return this.prisma.luckyDraw.findMany({
-      where: { guildId, status: LuckyDrawStatus.ACTIVE },
+      where: {
+        guildId,
+        OR: [
+          { status: LuckyDrawStatus.ACTIVE },
+          { status: LuckyDrawStatus.COMPLETED, paidOutAt: null },
+        ],
+      },
       orderBy: { endsAt: "asc" },
+    });
+  }
+
+  public async markPaidOut(drawId: string) {
+    return this.prisma.luckyDraw.update({
+      where: { id: drawId },
+      data: { paidOutAt: new Date() },
+    });
+  }
+
+  public async markCompleted(drawId: string) {
+    return this.prisma.luckyDraw.update({
+      where: { id: drawId },
+      data: { status: LuckyDrawStatus.COMPLETED, settledAt: new Date() },
     });
   }
 
@@ -118,12 +142,14 @@ export class LuckyDrawService {
       }
       const lockedRow = locked[0]!;
 
-      if (lockedRow.status !== LuckyDrawStatus.ACTIVE) {
-        const draw = await tx.luckyDraw.findUnique({
-          where: { id: drawId },
-          include: { entries: { where: { wonAt: { not: null } }, orderBy: { wonAt: "asc" } } },
-        });
-        return { draw: draw!, winners: draw!.entries, alreadySettled: true };
+      const existingWinners = await tx.luckyDrawEntry.findMany({
+        where: { luckyDrawId: drawId, wonAt: { not: null } },
+        orderBy: { wonAt: "asc" },
+      });
+
+      if (existingWinners.length > 0) {
+        const draw = await tx.luckyDraw.findUnique({ where: { id: drawId } });
+        return { draw: draw!, winners: existingWinners, freshlyPicked: false };
       }
 
       const entries = await tx.luckyDrawEntry.findMany({
@@ -140,17 +166,13 @@ export class LuckyDrawService {
         });
       }
 
-      const draw = await tx.luckyDraw.update({
-        where: { id: drawId },
-        data: { status: LuckyDrawStatus.COMPLETED, settledAt: new Date() },
-      });
-
+      const draw = await tx.luckyDraw.findUnique({ where: { id: drawId } });
       const winnerEntries = await tx.luckyDrawEntry.findMany({
         where: { luckyDrawId: drawId, wonAt: { not: null } },
         orderBy: { wonAt: "asc" },
       });
 
-      return { draw, winners: winnerEntries, alreadySettled: false };
+      return { draw: draw!, winners: winnerEntries, freshlyPicked: true };
     });
   }
 

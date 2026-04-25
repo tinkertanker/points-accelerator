@@ -2002,6 +2002,18 @@ export class BotRuntime {
       throw new AppError("Lucky draws can only be started in a server text channel.", 400);
     }
 
+    const isAdmin = await this.canBypassActionCooldown(params.member, params.roleIds);
+    if (!isAdmin) {
+      const capabilities = await this.services.roleCapabilityService.listForRoleIds(
+        this.env.GUILD_ID,
+        params.roleIds,
+      );
+      const resolved = resolveCapabilities(capabilities);
+      if (!resolved.canAward) {
+        throw new AppError("Only roles with the award capability can start a lucky draw.", 403);
+      }
+    }
+
     const rollbackCooldown = await this.enforceAwardCommandCooldown({
       member: params.member,
       roleIds: params.roleIds,
@@ -2058,6 +2070,8 @@ export class BotRuntime {
     }
     const [, kind, drawId] = parts as [string, string, string];
 
+    await interaction.deferReply({ ephemeral: true });
+
     if (kind === "enter") {
       await this.handleLuckyDrawEnter(interaction, drawId);
       return;
@@ -2091,26 +2105,21 @@ export class BotRuntime {
       await this.refreshLuckyDrawAnnouncement(draw, entrantCount, config, "active");
     }
 
-    await interaction.reply({
+    await interaction.editReply({
       content: `🎲 You're in! ${entrantCount} ${entrantCount === 1 ? "entrant" : "entrants"} so far.`,
-      ephemeral: true,
     });
   }
 
   private async handleLuckyDrawListEntrants(interaction: ButtonInteraction, drawId: string) {
     const entrants = await this.services.luckyDrawService.listEntrants(drawId);
     if (entrants.length === 0) {
-      await interaction.reply({
-        content: "No one has entered this draw yet.",
-        ephemeral: true,
-      });
+      await interaction.editReply({ content: "No one has entered this draw yet." });
       return;
     }
     const lines = entrants.map((entry, index) => `${index + 1}. <@${entry.userId}>`);
     const body = this.truncateText(lines.join("\n"), 1900);
-    await interaction.reply({
+    await interaction.editReply({
       content: `Entrants (${entrants.length}):\n${body}`,
-      ephemeral: true,
       allowedMentions: { parse: [] },
     });
   }
@@ -2218,71 +2227,97 @@ export class BotRuntime {
 
   private async runLuckyDrawSettlement(drawId: string) {
     const result = await this.services.luckyDrawService.settle(drawId);
-    if (result.alreadySettled) {
-      return;
-    }
+    const draw = result.draw;
     const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    const totalEntrants = await this.services.luckyDrawService.countEntries(drawId);
 
     if (result.winners.length === 0) {
-      await this.refreshLuckyDrawAnnouncement(
-        { ...result.draw, messageId: result.draw.messageId },
-        0,
-        config,
-        "completed-empty",
-      );
+      if (!draw.paidOutAt) {
+        await this.services.luckyDrawService.markPaidOut(drawId);
+      }
+      await this.refreshLuckyDrawAnnouncement(draw, totalEntrants, config, "completed-empty");
+      if (draw.status !== "COMPLETED") {
+        await this.services.luckyDrawService.markCompleted(drawId);
+      }
       return;
     }
 
     const guild = this.client ? await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null) : null;
-    const participantIds: string[] = [];
+    const resolvedParticipantIds: string[] = [];
+    const resolvedWinnerUserIds: string[] = [];
+    const skippedWinnerUserIds: string[] = [];
     for (const winner of result.winners) {
-      const guildMember = guild ? await guild.members.fetch(winner.userId).catch(() => null) : null;
-      const { participant } = await this.resolveActiveParticipant({
-        discordUserId: winner.userId,
-        discordUsername: winner.username ?? guildMember?.user?.username,
-        roleIds: this.getOrderedRoleIds(guildMember ?? null),
-      });
-      participantIds.push(participant.id);
+      try {
+        const guildMember = guild ? await guild.members.fetch(winner.userId).catch(() => null) : null;
+        const { participant } = await this.resolveActiveParticipant({
+          discordUserId: winner.userId,
+          discordUsername: winner.username ?? guildMember?.user?.username,
+          roleIds: this.getOrderedRoleIds(guildMember ?? null),
+        });
+        resolvedParticipantIds.push(participant.id);
+        resolvedWinnerUserIds.push(winner.userId);
+      } catch (error) {
+        skippedWinnerUserIds.push(winner.userId);
+        console.warn(`Lucky draw ${drawId}: skipping unresolvable winner ${winner.userId}`, error);
+      }
     }
 
-    const prizeNumber = decimalToNumber(result.draw.prizeAmount as never);
-    await this.services.participantCurrencyService.awardParticipants({
-      guildId: this.env.GUILD_ID,
-      actor: {
-        userId: result.draw.createdByUserId,
-        username: result.draw.createdByUsername ?? undefined,
-        roleIds: [],
-      },
-      targetParticipantIds: participantIds,
-      currencyDelta: prizeNumber,
-      description: `Lucky draw win — ${this.formatCurrencyAmount(prizeNumber, config)} each`,
-      type: "LUCKYDRAW_WIN",
-      systemAction: true,
-    });
+    const prizeNumber = decimalToNumber(draw.prizeAmount as never);
 
-    const winnerUserIds = result.winners.map((entry) => entry.userId);
-    const totalEntrants = await this.services.luckyDrawService.countEntries(drawId);
-    await this.refreshLuckyDrawAnnouncement(
-      { ...result.draw, messageId: result.draw.messageId },
-      totalEntrants,
-      config,
-      "completed",
-      winnerUserIds,
-    );
-
-    if (this.client) {
-      const channel = await this.client.channels.fetch(result.draw.channelId).catch(() => null);
-      if (channel && channel.isTextBased()) {
-        const mentions = winnerUserIds.map((id) => `<@${id}>`).join(" ");
-        await (channel as GuildTextBasedChannel)
-          .send({
-            content: `🎉 Lucky draw winners! ${mentions} — each won ${this.formatCurrencyAmount(prizeNumber, config)}!`,
-            allowedMentions: { users: winnerUserIds },
-          })
-          .catch((error) => {
-            console.error("Failed to post lucky draw winner announcement", error);
+    if (!draw.paidOutAt) {
+      if (resolvedParticipantIds.length === 0) {
+        await this.services.luckyDrawService.markPaidOut(drawId);
+      } else {
+        await this.services.prisma.$transaction(async (tx) => {
+          await this.services.participantCurrencyService.awardParticipants({
+            guildId: this.env.GUILD_ID,
+            actor: {
+              userId: draw.createdByUserId,
+              username: draw.createdByUsername ?? undefined,
+              roleIds: [],
+            },
+            targetParticipantIds: resolvedParticipantIds,
+            currencyDelta: prizeNumber,
+            description: `Lucky draw win — ${this.formatCurrencyAmount(prizeNumber, config)} each`,
+            type: "LUCKYDRAW_WIN",
+            systemAction: true,
+            executor: tx,
           });
+          await tx.luckyDraw.update({
+            where: { id: drawId },
+            data: { paidOutAt: new Date() },
+          });
+        });
+
+        if (this.client) {
+          const channel = await this.client.channels.fetch(draw.channelId).catch(() => null);
+          if (channel && channel.isTextBased()) {
+            const mentions = resolvedWinnerUserIds.map((id) => `<@${id}>`).join(" ");
+            await (channel as GuildTextBasedChannel)
+              .send({
+                content: `🎉 Lucky draw winners! ${mentions} — each won ${this.formatCurrencyAmount(prizeNumber, config)}!`,
+                allowedMentions: { users: resolvedWinnerUserIds },
+              })
+              .catch((error) => {
+                console.error("Failed to post lucky draw winner announcement", error);
+              });
+          }
+        }
       }
+    }
+
+    const allWinnerUserIds = result.winners.map((entry) => entry.userId);
+    await this.refreshLuckyDrawAnnouncement(draw, totalEntrants, config, "completed", allWinnerUserIds);
+
+    if (draw.status !== "COMPLETED") {
+      await this.services.luckyDrawService.markCompleted(drawId);
+    }
+
+    if (skippedWinnerUserIds.length > 0) {
+      console.warn(
+        `Lucky draw ${drawId} settled with ${skippedWinnerUserIds.length} unresolvable winner(s) skipped:`,
+        skippedWinnerUserIds,
+      );
     }
   }
 

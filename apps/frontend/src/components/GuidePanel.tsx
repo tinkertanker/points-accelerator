@@ -138,7 +138,8 @@ export default function GuidePanel() {
                 Members click <strong>🎲 Enter</strong> to take part, and <strong>👀 Who&rsquo;s in?</strong> to
                 see the entrant list. When the timer ends the bot picks winners at random, edits the announcement,
                 and tags the winners. Pass <code>winners:3</code> to pick more than one; each winner gets the full
-                prize amount. Lucky-draw payouts show as a <code>LUCKYDRAW_WIN</code> entry in <code>/ledger</code>.
+                prize amount, added to their personal wallet (visible via <code>/balance</code> and{" "}
+                <code>/forbes</code>).
               </p>
 
               <h3>The donation bridge</h3>

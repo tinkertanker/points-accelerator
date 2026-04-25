@@ -68,7 +68,7 @@ describe("LuckyDrawService entries + settlement", () => {
     ).rejects.toThrow(/already in this draw/i);
   });
 
-  it("rejects entries on a draw that has ended", async () => {
+  it("rejects entries on a draw whose status is no longer ACTIVE", async () => {
     const draw = await ctx.services.luckyDrawService.create({
       guildId: GUILD_ID,
       channelId: "channel-1",
@@ -77,13 +77,13 @@ describe("LuckyDrawService entries + settlement", () => {
       winnerCount: 1,
       durationMs: 60_000,
     });
-    await ctx.services.luckyDrawService.settle(draw.id);
+    await ctx.services.luckyDrawService.markCompleted(draw.id);
     await expect(
       ctx.services.luckyDrawService.recordEntry({ drawId: draw.id, userId: "user-late" }),
     ).rejects.toThrow(/already ended/i);
   });
 
-  it("settle marks winners and is idempotent", async () => {
+  it("settle picks winners on first call and is idempotent on retry", async () => {
     const draw = await ctx.services.luckyDrawService.create({
       guildId: GUILD_ID,
       channelId: "channel-1",
@@ -97,19 +97,20 @@ describe("LuckyDrawService entries + settlement", () => {
     }
 
     const first = await ctx.services.luckyDrawService.settle(draw.id);
-    expect(first.alreadySettled).toBe(false);
+    expect(first.freshlyPicked).toBe(true);
     expect(first.winners).toHaveLength(2);
-    expect(first.draw.status).toBe("COMPLETED");
+    expect(first.draw.status).toBe("ACTIVE");
+    expect(first.draw.paidOutAt).toBeNull();
 
     const winnerIds = new Set(first.winners.map((w) => w.userId));
     expect(winnerIds.size).toBe(2);
 
     const second = await ctx.services.luckyDrawService.settle(draw.id);
-    expect(second.alreadySettled).toBe(true);
+    expect(second.freshlyPicked).toBe(false);
     expect(second.winners.map((w) => w.userId).sort()).toEqual([...winnerIds].sort());
   });
 
-  it("settle on an empty draw still completes with no winners", async () => {
+  it("settle on an empty draw selects no winners and stays ACTIVE pending payout", async () => {
     const draw = await ctx.services.luckyDrawService.create({
       guildId: GUILD_ID,
       channelId: "channel-1",
@@ -119,12 +120,29 @@ describe("LuckyDrawService entries + settlement", () => {
       durationMs: 60_000,
     });
     const result = await ctx.services.luckyDrawService.settle(draw.id);
-    expect(result.alreadySettled).toBe(false);
+    expect(result.freshlyPicked).toBe(true);
     expect(result.winners).toEqual([]);
-    expect(result.draw.status).toBe("COMPLETED");
+    expect(result.draw.status).toBe("ACTIVE");
   });
 
-  it("listResumable only returns ACTIVE draws", async () => {
+  it("rejects new entries against a draw that has already been settled", async () => {
+    const draw = await ctx.services.luckyDrawService.create({
+      guildId: GUILD_ID,
+      channelId: "channel-1",
+      createdByUserId: "staff-1",
+      prizeAmount: 10,
+      winnerCount: 1,
+      durationMs: 60_000,
+    });
+    await ctx.services.luckyDrawService.recordEntry({ drawId: draw.id, userId: "early" });
+    await ctx.services.luckyDrawService.settle(draw.id);
+    await ctx.services.luckyDrawService.markCompleted(draw.id);
+    await expect(
+      ctx.services.luckyDrawService.recordEntry({ drawId: draw.id, userId: "late" }),
+    ).rejects.toThrow(/already ended/i);
+  });
+
+  it("listResumable returns ACTIVE draws and COMPLETED-but-unpaid draws (not fully paid ones)", async () => {
     const active = await ctx.services.luckyDrawService.create({
       guildId: GUILD_ID,
       channelId: "channel-1",
@@ -133,7 +151,7 @@ describe("LuckyDrawService entries + settlement", () => {
       winnerCount: 1,
       durationMs: 60_000,
     });
-    const settled = await ctx.services.luckyDrawService.create({
+    const crashed = await ctx.services.luckyDrawService.create({
       guildId: GUILD_ID,
       channelId: "channel-1",
       createdByUserId: "staff-1",
@@ -141,9 +159,21 @@ describe("LuckyDrawService entries + settlement", () => {
       winnerCount: 1,
       durationMs: 60_000,
     });
-    await ctx.services.luckyDrawService.settle(settled.id);
+    // crashed draw: completed but never marked paid
+    await ctx.services.luckyDrawService.markCompleted(crashed.id);
+
+    const fullyDone = await ctx.services.luckyDrawService.create({
+      guildId: GUILD_ID,
+      channelId: "channel-1",
+      createdByUserId: "staff-1",
+      prizeAmount: 10,
+      winnerCount: 1,
+      durationMs: 60_000,
+    });
+    await ctx.services.luckyDrawService.markPaidOut(fullyDone.id);
+    await ctx.services.luckyDrawService.markCompleted(fullyDone.id);
 
     const resumable = await ctx.services.luckyDrawService.listResumable(GUILD_ID);
-    expect(resumable.map((d) => d.id)).toEqual([active.id]);
+    expect(resumable.map((d) => d.id).sort()).toEqual([active.id, crashed.id].sort());
   });
 });

@@ -118,6 +118,7 @@ model LuckyDraw {
   winnerCount       Int              @default(1)
   endsAt            DateTime
   status            LuckyDrawStatus  @default(ACTIVE)
+  paidOutAt         DateTime?
   settledAt         DateTime?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
