@@ -84,6 +84,7 @@ Run these in the test server before production rollout:
 - `/donate`
 - `/bet`
 - `/betstats`
+- `/luckydraw`
 - `/store`
 - `/buy personal`
 - `/buy group`
