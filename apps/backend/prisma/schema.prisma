@@ -19,6 +19,7 @@ enum LedgerEntryType {
   SUBMISSION_REWARD
   BET_WIN
   BET_LOSS
+  LUCKYDRAW_WIN
 }
 
 enum SubmissionStatus {
@@ -56,6 +57,13 @@ enum ParticipantCurrencyEntryType {
   SUBMISSION_REWARD
   BET_WIN
   BET_LOSS
+  LUCKYDRAW_WIN
+}
+
+enum LuckyDrawStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
 }
 
 model GuildConfig {
@@ -95,6 +103,41 @@ model GuildConfig {
   participants                 Participant[]
   assignments                  Assignment[]
   submissions                  Submission[]
+  luckyDraws                   LuckyDraw[]
+}
+
+model LuckyDraw {
+  id                String           @id @default(cuid())
+  guildId           String
+  channelId         String
+  messageId         String?
+  createdByUserId   String
+  createdByUsername String?
+  description       String?
+  prizeAmount       Decimal          @db.Decimal(18, 6)
+  winnerCount       Int              @default(1)
+  endsAt            DateTime
+  status            LuckyDrawStatus  @default(ACTIVE)
+  settledAt         DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  guild             GuildConfig      @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  entries           LuckyDrawEntry[]
+
+  @@index([guildId, status, endsAt])
+}
+
+model LuckyDrawEntry {
+  id          String    @id @default(cuid())
+  luckyDrawId String
+  userId      String
+  username    String?
+  enteredAt   DateTime  @default(now())
+  wonAt       DateTime?
+  draw        LuckyDraw @relation(fields: [luckyDrawId], references: [id], onDelete: Cascade)
+
+  @@unique([luckyDrawId, userId])
+  @@index([luckyDrawId, enteredAt])
 }
 
 model Group {

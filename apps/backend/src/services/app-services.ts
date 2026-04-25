@@ -7,6 +7,7 @@ import { ConfigService } from "./config-service.js";
 import { EconomyService } from "./economy-service.js";
 import { GroupService } from "./group-service.js";
 import { ListingService } from "./listing-service.js";
+import { LuckyDrawService } from "./lucky-draw-service.js";
 import { ParticipantService } from "./participant-service.js";
 import { ParticipantCurrencyService } from "./participant-currency-service.js";
 import { RoleCapabilityService } from "./role-capability-service.js";
@@ -35,6 +36,7 @@ export function createServices(prisma: PrismaClient) {
   const participantService = new ParticipantService(prisma);
   const assignmentService = new AssignmentService(prisma);
   const submissionService = new SubmissionService(prisma, economyService, participantCurrencyService, auditService);
+  const luckyDrawService = new LuckyDrawService(prisma);
 
   return {
     prisma,
@@ -50,5 +52,6 @@ export function createServices(prisma: PrismaClient) {
     participantService,
     assignmentService,
     submissionService,
+    luckyDrawService,
   };
 }
