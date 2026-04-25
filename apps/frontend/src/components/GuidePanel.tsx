@@ -94,6 +94,7 @@ export default function GuidePanel() {
                 <code>/donate amount:2</code>
                 <code>/buy personal item_id:bubble-tea</code>
                 <code>/buy group item_id:pizza quantity:2</code>
+                <code>/luckydraw duration:5m prize:50</code>
                 <code>/leaderboard</code>
                 <code>/forbes</code>
                 <code>/ledger</code>
@@ -129,6 +130,16 @@ export default function GuidePanel() {
                 {" "}<code>/award currencybulk</code> to list up to 10 members explicitly, and{" "}
                 <code>/deduct mixed</code> when both balances should change together.
                 Approved assignment submissions also award both points and currency automatically.
+              </p>
+
+              <h3>Lucky-draw giveaways</h3>
+              <p>
+                <code>/luckydraw duration:&lt;e.g. 5m&gt; prize:&lt;int&gt;</code> posts a giveaway in the channel.
+                Members click <strong>🎲 Enter</strong> to take part, and <strong>👀 Who&rsquo;s in?</strong> to
+                see the entrant list. When the timer ends the bot picks winners at random, edits the announcement,
+                and tags the winners. Pass <code>winners:3</code> to pick more than one; each winner gets the full
+                prize amount, added to their personal wallet (visible via <code>/balance</code> and{" "}
+                <code>/forbes</code>).
               </p>
 
               <h3>The donation bridge</h3>
@@ -205,6 +216,12 @@ export default function GuidePanel() {
                       <td>Staff</td>
                       <td><code>title</code> <code>description</code> <code>quantity</code></td>
                       <td>Create a marketplace listing for peer-to-peer trading</td>
+                    </tr>
+                    <tr>
+                      <td><code>/luckydraw</code></td>
+                      <td>Staff</td>
+                      <td><code>duration</code> <code>prize</code>, optional <code>winners</code> + <code>description</code></td>
+                      <td>Run a giveaway: members click a button to enter; the bot picks winners at random and pays the prize</td>
                     </tr>
                     <tr>
                       <td><code>/submissions</code></td>

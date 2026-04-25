@@ -107,6 +107,16 @@ function createRuntimeFixture() {
     assignmentService: {
       listActive: vi.fn().mockResolvedValue([]),
     },
+    luckyDrawService: {
+      create: vi.fn(),
+      attachMessage: vi.fn().mockResolvedValue(undefined),
+      findById: vi.fn().mockResolvedValue(null),
+      countEntries: vi.fn().mockResolvedValue(0),
+      listEntrants: vi.fn().mockResolvedValue([]),
+      recordEntry: vi.fn().mockResolvedValue({ id: "entry-1" }),
+      listResumable: vi.fn().mockResolvedValue([]),
+      settle: vi.fn(),
+    },
   };
   const storageService = {
     isConfigured: false,
@@ -2041,6 +2051,189 @@ describe("bot runtime", () => {
       approvedByUsername: "Alice",
       currentGroupMemberCount: 2,
       currentGroupMemberDiscordUserIds: ["user-1", "user-2"],
+    });
+  });
+
+  describe("/luckydraw", () => {
+    it("creates a draw, posts an announcement with two buttons, and replies ephemerally", async () => {
+      const { runtime, services } = createRuntimeFixture();
+      const drawRow = {
+        id: "draw-1",
+        guildId: "guild-test",
+        channelId: "channel-1",
+        messageId: null,
+        createdByUserId: "staff-1",
+        createdByUsername: "Mentor",
+        description: null,
+        prizeAmount: { toString: () => "25" } as never,
+        winnerCount: 1,
+        endsAt: new Date(Date.now() + 60_000),
+        status: "ACTIVE" as const,
+      };
+      services.luckyDrawService.create.mockResolvedValue(drawRow);
+      services.roleCapabilityService.listForRoleIds.mockResolvedValue([
+        { canAward: true, canDeduct: true, canManageDashboard: false, canMultiAward: true, canSell: false, maxAward: null, actionCooldownSeconds: 0 },
+      ]);
+
+      const send = vi.fn().mockResolvedValue({ id: "msg-1", channelId: "channel-1" });
+      const reply = vi.fn().mockResolvedValue(undefined);
+      const fetchMember = vi.fn().mockResolvedValue({
+        roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 5 }]]) },
+        permissions: { has: vi.fn().mockReturnValue(false) },
+      });
+
+      await (runtime as any).handleCommand({
+        commandName: "luckydraw",
+        guild: { members: { fetch: fetchMember } },
+        channel: { isTextBased: () => true, send },
+        channelId: "channel-1",
+        options: {
+          getString: vi.fn((name: string) => (name === "duration" ? "5m" : null)),
+          getInteger: vi.fn((name: string) => (name === "prize" ? 25 : null)),
+        },
+        reply,
+        user: { id: "staff-1", username: "Mentor" },
+      });
+
+      expect(services.luckyDrawService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          guildId: "guild-test",
+          channelId: "channel-1",
+          createdByUserId: "staff-1",
+          prizeAmount: 25,
+          winnerCount: 1,
+          durationMs: 5 * 60_000,
+        }),
+      );
+      expect(send).toHaveBeenCalledTimes(1);
+      const sendArgs = send.mock.calls[0][0];
+      expect(sendArgs.embeds).toHaveLength(1);
+      expect(sendArgs.components).toHaveLength(1);
+      const buttons = sendArgs.components[0].components;
+      expect(buttons[0].data.custom_id).toBe("luckydraw:enter:draw-1");
+      expect(buttons[1].data.custom_id).toBe("luckydraw:entrants:draw-1");
+      expect(services.luckyDrawService.attachMessage).toHaveBeenCalledWith("draw-1", "msg-1");
+      expect(reply).toHaveBeenCalledWith(
+        expect.objectContaining({ ephemeral: true, content: expect.stringContaining("Lucky draw started") }),
+      );
+    });
+
+    it("rejects an unparseable duration without creating a draw", async () => {
+      const { runtime, services } = createRuntimeFixture();
+      services.roleCapabilityService.listForRoleIds.mockResolvedValue([
+        { canAward: true, canDeduct: true, canManageDashboard: false, canMultiAward: true, canSell: false, maxAward: null, actionCooldownSeconds: 0 },
+      ]);
+      const fetchMember = vi.fn().mockResolvedValue({
+        roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 5 }]]) },
+        permissions: { has: vi.fn().mockReturnValue(false) },
+      });
+
+      await expect(
+        (runtime as any).handleCommand({
+          commandName: "luckydraw",
+          guild: { members: { fetch: fetchMember } },
+          channel: { isTextBased: () => true, send: vi.fn() },
+          channelId: "channel-1",
+          options: {
+            getString: vi.fn((name: string) => (name === "duration" ? "forever" : null)),
+            getInteger: vi.fn((name: string) => (name === "prize" ? 5 : null)),
+          },
+          reply: vi.fn(),
+          user: { id: "staff-1", username: "Mentor" },
+        }),
+      ).rejects.toThrow(/duration/i);
+
+      expect(services.luckyDrawService.create).not.toHaveBeenCalled();
+    });
+
+    it("rejects callers without canAward unless they're a guild admin", async () => {
+      const { runtime, services } = createRuntimeFixture();
+      services.roleCapabilityService.listForRoleIds.mockResolvedValue([
+        { canAward: false, canDeduct: false, canManageDashboard: false, canMultiAward: false, canSell: false, maxAward: null, actionCooldownSeconds: 0 },
+      ]);
+      const fetchMember = vi.fn().mockResolvedValue({
+        roles: { cache: new Map([["student-role", { id: "student-role", rawPosition: 1 }]]) },
+        permissions: { has: vi.fn().mockReturnValue(false) },
+      });
+
+      await expect(
+        (runtime as any).handleCommand({
+          commandName: "luckydraw",
+          guild: { members: { fetch: fetchMember } },
+          channel: { isTextBased: () => true, send: vi.fn() },
+          channelId: "channel-1",
+          options: {
+            getString: vi.fn((name: string) => (name === "duration" ? "5m" : null)),
+            getInteger: vi.fn((name: string) => (name === "prize" ? 5 : null)),
+          },
+          reply: vi.fn(),
+          user: { id: "student-1", username: "Student" },
+        }),
+      ).rejects.toThrow(/award capability/i);
+
+      expect(services.luckyDrawService.create).not.toHaveBeenCalled();
+    });
+
+    it("Enter button records the entry, refreshes the count, and replies ephemerally", async () => {
+      const { runtime, services } = createRuntimeFixture();
+      services.luckyDrawService.findById.mockResolvedValue({
+        id: "draw-1",
+        channelId: "channel-1",
+        messageId: "msg-1",
+        description: null,
+        prizeAmount: { toString: () => "25" } as never,
+        winnerCount: 1,
+        endsAt: new Date(Date.now() + 60_000),
+        createdByUserId: "staff-1",
+      });
+      services.luckyDrawService.countEntries.mockResolvedValue(2);
+
+      const deferReply = vi.fn().mockResolvedValue(undefined);
+      const editReply = vi.fn().mockResolvedValue(undefined);
+      await (runtime as any).handleLuckyDrawButton({
+        customId: "luckydraw:enter:draw-1",
+        member: { displayName: "Alice" },
+        user: { id: "user-1", username: "alice" },
+        deferReply,
+        editReply,
+      });
+
+      expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+      expect(services.luckyDrawService.recordEntry).toHaveBeenCalledWith({
+        drawId: "draw-1",
+        userId: "user-1",
+        username: "Alice",
+      });
+      expect(editReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.stringContaining("2 entrants"),
+        }),
+      );
+    });
+
+    it("Who's-in button lists entrants ephemerally without pinging them", async () => {
+      const { runtime, services } = createRuntimeFixture();
+      services.luckyDrawService.listEntrants.mockResolvedValue([
+        { id: "e1", userId: "user-1", username: "Alice" },
+        { id: "e2", userId: "user-2", username: "Bob" },
+      ]);
+
+      const deferReply = vi.fn().mockResolvedValue(undefined);
+      const editReply = vi.fn().mockResolvedValue(undefined);
+      await (runtime as any).handleLuckyDrawButton({
+        customId: "luckydraw:entrants:draw-1",
+        user: { id: "staff-1" },
+        deferReply,
+        editReply,
+      });
+
+      expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+      expect(editReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          allowedMentions: { parse: [] },
+          content: expect.stringMatching(/Entrants \(2\):.*<@user-1>.*<@user-2>/s),
+        }),
+      );
     });
   });
 });

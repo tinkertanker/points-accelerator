@@ -46,6 +46,7 @@ The bot also supports participant-wallet betting: students can place double-or-n
 - Custom shop with personal purchases and majority-approved group purchases
 - Staff fulfilment queue for recorded and approved store redemptions
 - Participant wallet betting with configurable win chance
+- Lucky-draw giveaways: button-entry, random winner picking, automatic currency payout
 - Marketplace listings with optional Discord channel posting
 - Role capability matrix
 - Discord OAuth dashboard for staff configuration and review
@@ -56,7 +57,7 @@ The bot also supports participant-wallet betting: students can place double-or-n
 
 ## Command set
 
-- Staff roles such as admins or alumni: `/award points`, `/award currency`, `/award currencygroup`, `/award currencybulk`, `/deduct group`, `/deduct member`, `/deduct mixed`
+- Staff roles such as admins or alumni: `/award points`, `/award currency`, `/award currencygroup`, `/award currencybulk`, `/deduct group`, `/deduct member`, `/deduct mixed`, `/luckydraw`
 - Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buy personal`, `/buy group`, `/approve_purchase`, `/bet`, `/betstats`
 
 The award and deduct flows are split into subcommands so Discord enforces the required fields:
@@ -66,6 +67,8 @@ The award and deduct flows are split into subcommands so Discord enforces the re
 - `/deduct mixed` when both group points and participant currency should change together
 - `/award currencybulk` takes a `members` string with up to 10 mentions or IDs; `/award currencygroup` awards every eligible member in the selected groups
 - `reason` is optional on each subcommand; the target and amount fields are required
+
+For lucky draws, run `/luckydraw duration:<e.g. 5m> prize:<int> [winners:<n>] [description:<text>]`. Members click the 🎲 Enter button on the announcement to take part; the bot picks the configured number of winners at random when the timer ends and pays each one the prize. Winnings land in the participant wallet — check `/balance` or `/forbes`.
 
 ## Submission command set
 

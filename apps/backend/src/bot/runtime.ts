@@ -26,6 +26,8 @@ import { resolveCapabilities } from "../domain/permissions.js";
 import type { AppServices } from "../services/app-services.js";
 import type { StorageService } from "../services/storage-service.js";
 import { AppError } from "../utils/app-error.js";
+import { decimalToNumber } from "../utils/decimal.js";
+import { parseDuration } from "../utils/duration.js";
 import { readBackendVersion, readChangelogEntry } from "./announcements.js";
 
 type CooldownEntry = {
@@ -351,6 +353,7 @@ export class BotRuntime {
   private readonly passiveCooldowns = new Map<string, CooldownEntry>();
   private readonly actionCooldowns = new Map<string, CooldownEntry>();
   private readonly bettingCooldowns = new Map<string, BettingCooldownEntry>();
+  private readonly luckyDrawTimers = new Map<string, NodeJS.Timeout>();
   private client: Client | null = null;
   private membersCache: { fetchedAt: number; value: Array<{ id: string; name: string }> } | null = null;
 
@@ -379,6 +382,9 @@ export class BotRuntime {
       await this.registerCommands();
       await this.announceDeploymentIfNew().catch((error) => {
         console.error("Failed to post deploy announcement", error);
+      });
+      await this.resumeLuckyDraws().catch((error) => {
+        console.error("Failed to resume in-flight lucky draws", error);
       });
     });
 
@@ -426,6 +432,25 @@ export class BotRuntime {
           await this.handleRedemptionButton(interaction);
         } catch (error) {
           console.error("Redemption button handling failed", error);
+          const message = error instanceof AppError ? error.message : "Unexpected button error.";
+          try {
+            if (interaction.replied || interaction.deferred) {
+              await interaction.editReply({ content: message });
+            } else {
+              await interaction.reply({ content: message, ephemeral: true });
+            }
+          } catch (replyError) {
+            console.error("Failed to send button error response", replyError);
+          }
+        }
+        return;
+      }
+
+      if (interaction.isButton() && interaction.customId.startsWith("luckydraw:")) {
+        try {
+          await this.handleLuckyDrawButton(interaction);
+        } catch (error) {
+          console.error("Lucky draw button handling failed", error);
           const message = error instanceof AppError ? error.message : "Unexpected button error.";
           try {
             if (interaction.replied || interaction.deferred) {
@@ -498,6 +523,10 @@ export class BotRuntime {
   }
 
   public async stop() {
+    for (const timer of this.luckyDrawTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.luckyDrawTimers.clear();
     this.client?.destroy();
     this.client = null;
   }
@@ -1963,6 +1992,342 @@ export class BotRuntime {
     await interaction.respond(matches);
   }
 
+  private async handleLuckyDrawStart(params: {
+    interaction: ChatInputCommandInteraction;
+    member: GuildMember | null;
+    roleIds: string[];
+  }) {
+    const { interaction } = params;
+    if (!interaction.guild || !interaction.channel || !interaction.channel.isTextBased()) {
+      throw new AppError("Lucky draws can only be started in a server text channel.", 400);
+    }
+
+    const isAdmin = await this.canBypassActionCooldown(params.member, params.roleIds);
+    if (!isAdmin) {
+      const capabilities = await this.services.roleCapabilityService.listForRoleIds(
+        this.env.GUILD_ID,
+        params.roleIds,
+      );
+      const resolved = resolveCapabilities(capabilities);
+      if (!resolved.canAward) {
+        throw new AppError("Only roles with the award capability can start a lucky draw.", 403);
+      }
+    }
+
+    const rollbackCooldown = await this.enforceAwardCommandCooldown({
+      member: params.member,
+      roleIds: params.roleIds,
+      userId: interaction.user.id,
+      isDeduction: false,
+    });
+
+    try {
+      const durationInput = interaction.options.getString("duration", true);
+      const prize = interaction.options.getInteger("prize", true);
+      const winnerCount = interaction.options.getInteger("winners") ?? 1;
+      const description = interaction.options.getString("description") ?? null;
+      const durationMs = parseDuration(durationInput);
+
+      const draw = await this.services.luckyDrawService.create({
+        guildId: this.env.GUILD_ID,
+        channelId: interaction.channelId!,
+        createdByUserId: interaction.user.id,
+        createdByUsername: interaction.user.username,
+        description,
+        prizeAmount: prize,
+        winnerCount,
+        durationMs,
+      });
+
+      const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+      const embed = this.buildLuckyDrawEmbed({
+        draw,
+        config,
+        entrantCount: 0,
+        status: "active",
+      });
+      const components = [this.buildLuckyDrawActionRow(draw.id)];
+
+      const channel = interaction.channel as GuildTextBasedChannel;
+      const sent = await channel.send({ embeds: [embed], components });
+      await this.services.luckyDrawService.attachMessage(draw.id, sent.id);
+      this.scheduleLuckyDraw({ ...draw, messageId: sent.id });
+
+      await interaction.reply({
+        content: `🎲 Lucky draw started — ends ${this.formatRelativeTimestamp(draw.endsAt)}.`,
+        ephemeral: true,
+      });
+    } catch (error) {
+      rollbackCooldown?.();
+      throw error;
+    }
+  }
+
+  private async handleLuckyDrawButton(interaction: ButtonInteraction) {
+    const parts = interaction.customId.split(":");
+    if (parts.length < 3 || parts[0] !== "luckydraw") {
+      return;
+    }
+    const [, kind, drawId] = parts as [string, string, string];
+
+    await interaction.deferReply({ ephemeral: true });
+
+    if (kind === "enter") {
+      await this.handleLuckyDrawEnter(interaction, drawId);
+      return;
+    }
+    if (kind === "entrants") {
+      await this.handleLuckyDrawListEntrants(interaction, drawId);
+      return;
+    }
+  }
+
+  private async handleLuckyDrawEnter(interaction: ButtonInteraction, drawId: string) {
+    const member = interaction.member;
+    const displayName =
+      member && "displayName" in member && typeof member.displayName === "string"
+        ? member.displayName
+        : interaction.user.username;
+
+    await this.services.luckyDrawService.recordEntry({
+      drawId,
+      userId: interaction.user.id,
+      username: displayName,
+    });
+
+    const [draw, entrantCount] = await Promise.all([
+      this.services.luckyDrawService.findById(drawId),
+      this.services.luckyDrawService.countEntries(drawId),
+    ]);
+
+    if (draw) {
+      const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+      await this.refreshLuckyDrawAnnouncement(draw, entrantCount, config, "active");
+    }
+
+    await interaction.editReply({
+      content: `🎲 You're in! ${entrantCount} ${entrantCount === 1 ? "entrant" : "entrants"} so far.`,
+    });
+  }
+
+  private async handleLuckyDrawListEntrants(interaction: ButtonInteraction, drawId: string) {
+    const entrants = await this.services.luckyDrawService.listEntrants(drawId);
+    if (entrants.length === 0) {
+      await interaction.editReply({ content: "No one has entered this draw yet." });
+      return;
+    }
+    const lines = entrants.map((entry, index) => `${index + 1}. <@${entry.userId}>`);
+    const body = this.truncateText(lines.join("\n"), 1900);
+    await interaction.editReply({
+      content: `Entrants (${entrants.length}):\n${body}`,
+      allowedMentions: { parse: [] },
+    });
+  }
+
+  private buildLuckyDrawActionRow(drawId: string) {
+    return new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`luckydraw:enter:${drawId}`)
+        .setLabel("Enter")
+        .setEmoji("🎲")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`luckydraw:entrants:${drawId}`)
+        .setLabel("Who's in?")
+        .setEmoji("👀")
+        .setStyle(ButtonStyle.Secondary),
+    );
+  }
+
+  private buildLuckyDrawEmbed(params: {
+    draw: { id: string; description: string | null; prizeAmount: { toString(): string } | unknown; winnerCount: number; endsAt: Date; createdByUserId: string };
+    config: GuildConfig;
+    entrantCount: number;
+    status: "active" | "completed-empty" | "completed";
+    winnerUserIds?: string[];
+  }) {
+    const { draw, config, entrantCount, status, winnerUserIds } = params;
+    const prizeNumber = decimalToNumber(draw.prizeAmount as never);
+    const prizeText = this.formatCurrencyAmount(prizeNumber, config);
+    const winnerLine = draw.winnerCount === 1 ? "1 winner" : `${draw.winnerCount} winners`;
+    const fields = [
+      { name: "Prize", value: `${prizeText} each`, inline: true },
+      { name: "Winners", value: winnerLine, inline: true },
+      { name: "Entrants", value: String(entrantCount), inline: true },
+    ];
+
+    let descriptionLines: string[];
+    if (status === "active") {
+      descriptionLines = [
+        draw.description ?? "Click 🎲 Enter to take part!",
+        `Ends ${this.formatRelativeTimestamp(draw.endsAt)}.`,
+      ];
+    } else if (status === "completed-empty") {
+      descriptionLines = [
+        draw.description ?? "Lucky draw — no entrants this time.",
+        "No one entered, so no winner was picked.",
+      ];
+    } else {
+      const mentions = (winnerUserIds ?? []).map((id) => `<@${id}>`).join(" ");
+      descriptionLines = [
+        draw.description ?? "🎉 Lucky draw complete!",
+        mentions.length > 0 ? `Winners: ${mentions}` : "No winners.",
+      ];
+    }
+
+    const colour = status === "active" ? 0xfbbf24 : status === "completed-empty" ? 0x6b7280 : 0x10b981;
+    const title = status === "active" ? "🎲 Lucky draw is live!" : "🎲 Lucky draw ended";
+
+    return new EmbedBuilder()
+      .setColor(colour)
+      .setTitle(title)
+      .setDescription(descriptionLines.join("\n\n"))
+      .addFields(fields)
+      .setFooter({ text: `Started by ${this.formatUserReference(draw.createdByUserId, "staff")}` });
+  }
+
+  private formatRelativeTimestamp(when: Date) {
+    const seconds = Math.floor(when.getTime() / 1000);
+    return `<t:${seconds}:R>`;
+  }
+
+  private async refreshLuckyDrawAnnouncement(
+    draw: { id: string; channelId: string; messageId: string | null; description: string | null; prizeAmount: unknown; winnerCount: number; endsAt: Date; createdByUserId: string },
+    entrantCount: number,
+    config: GuildConfig,
+    status: "active" | "completed-empty" | "completed",
+    winnerUserIds?: string[],
+  ) {
+    if (!this.client || !draw.messageId) return;
+    const channel = await this.client.channels.fetch(draw.channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) return;
+    const message = await (channel as GuildTextBasedChannel).messages.fetch(draw.messageId).catch(() => null);
+    if (!message) return;
+    const embed = this.buildLuckyDrawEmbed({ draw, config, entrantCount, status, winnerUserIds });
+    const components = status === "active" ? [this.buildLuckyDrawActionRow(draw.id)] : [];
+    await message.edit({ embeds: [embed], components, allowedMentions: { parse: [] } }).catch((error) => {
+      console.error("Failed to refresh lucky draw announcement", error);
+    });
+  }
+
+  private scheduleLuckyDraw(draw: { id: string; endsAt: Date; messageId?: string | null }) {
+    const existing = this.luckyDrawTimers.get(draw.id);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const delay = Math.max(0, draw.endsAt.getTime() - Date.now());
+    const timer = setTimeout(() => {
+      this.luckyDrawTimers.delete(draw.id);
+      this.runLuckyDrawSettlement(draw.id).catch((error) => {
+        console.error("Failed to settle lucky draw", error);
+      });
+    }, delay);
+    this.luckyDrawTimers.set(draw.id, timer);
+  }
+
+  private async runLuckyDrawSettlement(drawId: string) {
+    const result = await this.services.luckyDrawService.settle(drawId);
+    const draw = result.draw;
+    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    const totalEntrants = await this.services.luckyDrawService.countEntries(drawId);
+
+    if (result.winners.length === 0) {
+      if (!draw.paidOutAt) {
+        await this.services.luckyDrawService.markPaidOut(drawId);
+      }
+      await this.refreshLuckyDrawAnnouncement(draw, totalEntrants, config, "completed-empty");
+      if (draw.status !== "COMPLETED") {
+        await this.services.luckyDrawService.markCompleted(drawId);
+      }
+      return;
+    }
+
+    const guild = this.client ? await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null) : null;
+    const resolvedParticipantIds: string[] = [];
+    const resolvedWinnerUserIds: string[] = [];
+    const skippedWinnerUserIds: string[] = [];
+    for (const winner of result.winners) {
+      try {
+        const guildMember = guild ? await guild.members.fetch(winner.userId).catch(() => null) : null;
+        const { participant } = await this.resolveActiveParticipant({
+          discordUserId: winner.userId,
+          discordUsername: winner.username ?? guildMember?.user?.username,
+          roleIds: this.getOrderedRoleIds(guildMember ?? null),
+        });
+        resolvedParticipantIds.push(participant.id);
+        resolvedWinnerUserIds.push(winner.userId);
+      } catch (error) {
+        skippedWinnerUserIds.push(winner.userId);
+        console.warn(`Lucky draw ${drawId}: skipping unresolvable winner ${winner.userId}`, error);
+      }
+    }
+
+    const prizeNumber = decimalToNumber(draw.prizeAmount as never);
+
+    if (!draw.paidOutAt) {
+      if (resolvedParticipantIds.length === 0) {
+        await this.services.luckyDrawService.markPaidOut(drawId);
+      } else {
+        await this.services.prisma.$transaction(async (tx) => {
+          await this.services.participantCurrencyService.awardParticipants({
+            guildId: this.env.GUILD_ID,
+            actor: {
+              userId: draw.createdByUserId,
+              username: draw.createdByUsername ?? undefined,
+              roleIds: [],
+            },
+            targetParticipantIds: resolvedParticipantIds,
+            currencyDelta: prizeNumber,
+            description: `Lucky draw win — ${this.formatCurrencyAmount(prizeNumber, config)} each`,
+            type: "LUCKYDRAW_WIN",
+            systemAction: true,
+            executor: tx,
+          });
+          await tx.luckyDraw.update({
+            where: { id: drawId },
+            data: { paidOutAt: new Date() },
+          });
+        });
+
+        if (this.client) {
+          const channel = await this.client.channels.fetch(draw.channelId).catch(() => null);
+          if (channel && channel.isTextBased()) {
+            const mentions = resolvedWinnerUserIds.map((id) => `<@${id}>`).join(" ");
+            await (channel as GuildTextBasedChannel)
+              .send({
+                content: `🎉 Lucky draw winners! ${mentions} — each won ${this.formatCurrencyAmount(prizeNumber, config)}!`,
+                allowedMentions: { users: resolvedWinnerUserIds },
+              })
+              .catch((error) => {
+                console.error("Failed to post lucky draw winner announcement", error);
+              });
+          }
+        }
+      }
+    }
+
+    const allWinnerUserIds = result.winners.map((entry) => entry.userId);
+    await this.refreshLuckyDrawAnnouncement(draw, totalEntrants, config, "completed", allWinnerUserIds);
+
+    if (draw.status !== "COMPLETED") {
+      await this.services.luckyDrawService.markCompleted(drawId);
+    }
+
+    if (skippedWinnerUserIds.length > 0) {
+      console.warn(
+        `Lucky draw ${drawId} settled with ${skippedWinnerUserIds.length} unresolvable winner(s) skipped:`,
+        skippedWinnerUserIds,
+      );
+    }
+  }
+
+  private async resumeLuckyDraws() {
+    const draws = await this.services.luckyDrawService.listResumable(this.env.GUILD_ID);
+    for (const draw of draws) {
+      this.scheduleLuckyDraw(draw);
+    }
+  }
+
   private async handleCommand(interaction: ChatInputCommandInteraction) {
     if (interaction.commandName === "leaderboard") {
       await interaction.deferReply();
@@ -2798,6 +3163,10 @@ export class BotRuntime {
         await interaction.reply(lines.join("\n"));
         return;
       }
+      case "luckydraw": {
+        await this.handleLuckyDrawStart({ interaction, member: member ?? null, roleIds });
+        return;
+      }
       default:
         throw new AppError("Unknown command.", 404);
     }
@@ -2815,6 +3184,7 @@ export class BotRuntime {
     SUBMISSION_REWARD: { emoji: "📝", label: "Submission reward" },
     BET_WIN: { emoji: "💰", label: "Bet win" },
     BET_LOSS: { emoji: "💸", label: "Bet loss" },
+    LUCKYDRAW_WIN: { emoji: "🎰", label: "Lucky draw win" },
   };
 
   private formatLedgerEntryType(type: string) {
@@ -3070,6 +3440,36 @@ export class BotRuntime {
         .setDescription("View betting statistics.")
         .addUserOption((option) =>
           option.setName("user").setDescription("User to check stats for (defaults to yourself)").setRequired(false),
+        ),
+      new SlashCommandBuilder()
+        .setName("luckydraw")
+        .setDescription("Start a lucky-draw giveaway. Members click a button to enter; winners are picked randomly.")
+        .addStringOption((option) =>
+          option
+            .setName("duration")
+            .setDescription("How long entries stay open (e.g. 30s, 5m, 1 hour, 1d).")
+            .setRequired(true),
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName("prize")
+            .setDescription("Wallet currency awarded to each winner.")
+            .setRequired(true)
+            .setMinValue(1),
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName("winners")
+            .setDescription("How many winners to pick (default 1, max 25).")
+            .setRequired(false)
+            .setMinValue(1)
+            .setMaxValue(25),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("description")
+            .setDescription("Optional flavour text shown on the announcement.")
+            .setRequired(false),
         ),
     ].map((command) => command.toJSON());
 
