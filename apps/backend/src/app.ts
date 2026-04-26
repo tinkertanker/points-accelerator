@@ -620,7 +620,9 @@ export function createApp(params: {
         canManageMentorPages ? services.shopService.list(params.env.GUILD_ID) : Promise.resolve([]),
         canManageAdminPages ? services.listingService.list(params.env.GUILD_ID) : Promise.resolve([]),
         canManageAdminPages ? services.economyService.getLedger(params.env.GUILD_ID, 25) : Promise.resolve([]),
-        canManageAdminPages ? params.botRuntime?.getRoles() ?? [] : Promise.resolve([]),
+        canManageAdminPages || canManageMentorPages
+          ? params.botRuntime?.getRoles() ?? []
+          : Promise.resolve([]),
         canManageAdminPages ? params.botRuntime?.getTextChannels() ?? [] : Promise.resolve([]),
         canManageMentorPages ? params.botRuntime?.getMembers() ?? [] : Promise.resolve([]),
         canManageMentorPages ? services.assignmentService.list(params.env.GUILD_ID) : Promise.resolve([]),

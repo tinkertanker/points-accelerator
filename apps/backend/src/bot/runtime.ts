@@ -1072,12 +1072,13 @@ export class BotRuntime {
     memberPermissions: ChatInputCommandInteraction["memberPermissions"];
     roleIds: string[];
   }): Promise<{ isOwner: boolean; isStaff: boolean; isFulfiller: boolean }> {
-    // Authorize against the owner snapshot taken when the notice was posted,
-    // so that re-assigning the item later doesn't yank fulfil/cancel rights
-    // away from the person actually @mentioned in the channel. The
-    // fulfilmentMessageId presence indicates a snapshot was taken (even when
-    // its value is null = explicitly no owner at purchase time); only fall
-    // back to the current item owner for legacy rows that never recorded one.
+    // Authorize against the owner snapshot recorded when a notice was posted,
+    // so re-assigning the item later doesn't yank fulfil/cancel rights from
+    // the person actually @mentioned in the channel. fulfilmentMessageId is
+    // the proxy for "snapshot recorded": once non-null, ownerUserIdAtPurchase
+    // is the source of truth — it may itself be null, meaning the item had no
+    // owner at purchase time. Only fall back to the live item owner for
+    // legacy rows that never had a notice posted.
     const snapshotTaken = params.redemption.fulfilmentMessageId !== null;
     const ownerForRedemption = snapshotTaken
       ? params.redemption.ownerUserIdAtPurchase
@@ -3238,12 +3239,27 @@ export class BotRuntime {
     guildMember: GuildMember | null;
     roleIds: string[];
   }) {
-    const { interaction, action, guildMember, roleIds } = params;
+    const { interaction, action } = params;
     const redemptionId = interaction.options.getString("redemption_id", true).trim();
     const redemption = await this.services.shopService.getRedemption(this.env.GUILD_ID, redemptionId);
     if (!redemption) {
       await interaction.reply({ content: "Redemption not found.", ephemeral: true });
       return;
+    }
+
+    // Slash invocations from a DM don't carry guild context, so fall back to a
+    // direct guild lookup so role-based and capability-based perms still apply.
+    let guildMember = params.guildMember;
+    let roleIds = params.roleIds;
+    if (!guildMember && this.client) {
+      const guild = await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null);
+      const fetched = guild
+        ? await guild.members.fetch(interaction.user.id).catch(() => null)
+        : null;
+      if (fetched) {
+        guildMember = fetched;
+        roleIds = this.getOrderedRoleIds(fetched);
+      }
     }
 
     const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
