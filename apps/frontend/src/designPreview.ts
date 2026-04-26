@@ -218,6 +218,7 @@ function createInitialBootstrap(): BootstrapPayload {
         emoji: "🎟️",
         ownerUserId: null,
         ownerUsername: null,
+        fulfillerRoleId: null,
       },
       {
         id: "shop-2",
@@ -231,6 +232,7 @@ function createInitialBootstrap(): BootstrapPayload {
         emoji: "🍕",
         ownerUserId: null,
         ownerUsername: null,
+        fulfillerRoleId: null,
       },
     ],
     redemptions: [
@@ -256,6 +258,7 @@ function createInitialBootstrap(): BootstrapPayload {
           emoji: "🎟️",
           ownerUserId: null,
           ownerUsername: null,
+          fulfillerRoleId: null,
         },
         group: {
           id: "group-1",
@@ -291,6 +294,7 @@ function createInitialBootstrap(): BootstrapPayload {
           emoji: "🍕",
           ownerUserId: null,
           ownerUsername: null,
+          fulfillerRoleId: null,
         },
         group: {
           id: "group-2",
@@ -335,6 +339,7 @@ function createInitialBootstrap(): BootstrapPayload {
           emoji: "🍕",
           ownerUserId: null,
           ownerUsername: null,
+          fulfillerRoleId: null,
         },
         group: {
           id: "group-1",
@@ -598,6 +603,7 @@ export function designPreviewSaveShopItem(draft: ShopItemDraft): ShopItem {
     emoji: draft.emoji?.trim() ? draft.emoji.trim() : "💸",
     ownerUserId: draft.ownerUserId ?? null,
     ownerUsername: draft.ownerUsername ?? null,
+    fulfillerRoleId: draft.fulfillerRoleId ?? null,
   };
 
   const existingIndex = mockBootstrap.shopItems.findIndex((candidate) => candidate.id === item.id);

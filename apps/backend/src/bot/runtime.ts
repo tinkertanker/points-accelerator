@@ -777,6 +777,7 @@ export class BotRuntime {
   private async postRedemptionFulfilmentNotice(params: {
     channelId: string;
     ownerUserId: string | null;
+    fulfillerRoleId: string | null;
     buyerUserId: string;
     buyerMention: string;
     shopItemName: string;
@@ -798,6 +799,10 @@ export class BotRuntime {
 
     const validOwnerId = isDiscordSnowflake(params.ownerUserId) ? params.ownerUserId : null;
     const ownerMention = validOwnerId ? `<@${validOwnerId}>` : null;
+    const validFulfillerRoleId = isDiscordSnowflake(params.fulfillerRoleId)
+      ? params.fulfillerRoleId
+      : null;
+    const fulfillerRoleMention = validFulfillerRoleId ? `<@&${validFulfillerRoleId}>` : null;
     const subject =
       params.audience === "GROUP"
         ? `${params.buyerMention} (on behalf of **${params.groupName}**)`
@@ -805,7 +810,10 @@ export class BotRuntime {
     const fulfilmentLine = params.fulfillmentInstructions
       ? `\nFulfilment notes: ${params.fulfillmentInstructions}`
       : "";
-    const header = ownerMention ? `${ownerMention} heads up — ` : "";
+    const headerMentions = [ownerMention, fulfillerRoleMention].filter(
+      (value): value is string => value !== null,
+    );
+    const header = headerMentions.length > 0 ? `${headerMentions.join(" ")} heads up — ` : "";
     const content = `${header}${subject} purchased ${params.shopItemEmoji} **${params.shopItemName}**${
       params.quantity > 1 ? ` x${params.quantity}` : ""
     }.\nRedemption ID: \`${params.redemptionId}\`${fulfilmentLine}`;
@@ -813,12 +821,13 @@ export class BotRuntime {
     const mentionUsers = [params.buyerUserId, ...(validOwnerId ? [validOwnerId] : [])].filter(
       isDiscordSnowflake,
     );
+    const mentionRoles = validFulfillerRoleId ? [validFulfillerRoleId] : [];
 
     const sent = await (channel as GuildTextBasedChannel)
       .send({
         content,
         components: [this.buildRedemptionActionRow(params.redemptionId)],
-        allowedMentions: { users: mentionUsers },
+        allowedMentions: { users: mentionUsers, roles: mentionRoles },
       })
       .catch((error: unknown) => {
         console.error("Failed to post redemption fulfilment notice", error);
@@ -1062,7 +1071,7 @@ export class BotRuntime {
     actorUserId: string;
     memberPermissions: ChatInputCommandInteraction["memberPermissions"];
     roleIds: string[];
-  }): Promise<{ isOwner: boolean; isStaff: boolean }> {
+  }): Promise<{ isOwner: boolean; isStaff: boolean; isFulfiller: boolean }> {
     // Authorize against the owner snapshot taken when the notice was posted,
     // so that re-assigning the item later doesn't yank fulfil/cancel rights
     // away from the person actually @mentioned in the channel. The
@@ -1090,7 +1099,11 @@ export class BotRuntime {
       isStaff = resolved.canManageDashboard || resolved.canAward || resolved.canDeduct;
     }
 
-    return { isOwner, isStaff };
+    const fulfillerRoleId = params.redemption.shopItem.fulfillerRoleId;
+    const isFulfiller =
+      fulfillerRoleId !== null && params.roleIds.includes(fulfillerRoleId);
+
+    return { isOwner, isStaff, isFulfiller };
   }
 
   private async handleRedemptionButton(interaction: ButtonInteraction) {
@@ -1120,16 +1133,16 @@ export class BotRuntime {
         : [];
     const roleIds = guildMember ? this.getOrderedRoleIds(guildMember) : apiRoleIds;
     const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
-    const { isOwner, isStaff } = await this.checkRedemptionActorPermissions({
+    const { isOwner, isStaff, isFulfiller } = await this.checkRedemptionActorPermissions({
       redemption,
       actorUserId: interaction.user.id,
       memberPermissions,
       roleIds,
     });
 
-    if (!isOwner && !isStaff) {
+    if (!isOwner && !isStaff && !isFulfiller) {
       await interaction.reply({
-        content: "Only the item owner or staff can act on this purchase.",
+        content: "Only the item owner, fulfiller role, or staff can act on this purchase.",
         ephemeral: true,
       });
       return;
@@ -2837,6 +2850,7 @@ export class BotRuntime {
             const posted = await this.postRedemptionFulfilmentNotice({
               channelId: fulfilmentChannelId,
               ownerUserId: redemption.shopItem.ownerUserId,
+              fulfillerRoleId: redemption.shopItem.fulfillerRoleId,
               buyerUserId: interaction.user.id,
               buyerMention: `<@${interaction.user.id}>`,
               shopItemName: redemption.shopItem.name,
@@ -2909,6 +2923,7 @@ export class BotRuntime {
             const posted = await this.postRedemptionFulfilmentNotice({
               channelId: fulfilmentChannelId,
               ownerUserId: fullRedemption.shopItem.ownerUserId,
+              fulfillerRoleId: fullRedemption.shopItem.fulfillerRoleId,
               buyerUserId,
               buyerMention: `<@${buyerUserId}>`,
               shopItemName: fullRedemption.shopItem.name,
@@ -3217,16 +3232,16 @@ export class BotRuntime {
     }
 
     const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
-    const { isOwner, isStaff } = await this.checkRedemptionActorPermissions({
+    const { isOwner, isStaff, isFulfiller } = await this.checkRedemptionActorPermissions({
       redemption,
       actorUserId: interaction.user.id,
       memberPermissions,
       roleIds,
     });
 
-    if (!isOwner && !isStaff) {
+    if (!isOwner && !isStaff && !isFulfiller) {
       await interaction.reply({
-        content: "Only the item owner or staff can act on this purchase.",
+        content: "Only the item owner, fulfiller role, or staff can act on this purchase.",
         ephemeral: true,
       });
       return;

@@ -20,6 +20,7 @@ export type ShopItemInput = {
   emoji?: string | null;
   ownerUserId?: string | null;
   ownerUsername?: string | null;
+  fulfillerRoleId?: string | null;
 };
 
 type PurchaseMode = "INDIVIDUAL" | "GROUP";
@@ -48,6 +49,7 @@ type GroupPurchaseRedemption = ShopRedemption & {
     emoji: string;
     ownerUserId: string | null;
     ownerUsername: string | null;
+    fulfillerRoleId: string | null;
   };
   group: {
     id: string;
@@ -125,6 +127,7 @@ export class ShopService {
     const ownerUserId = input.ownerUserId?.trim() ? input.ownerUserId.trim() : null;
     const ownerUsername = input.ownerUsername?.trim() ? input.ownerUsername.trim() : null;
     const emoji = input.emoji?.trim() ? input.emoji.trim() : DEFAULT_SHOP_ITEM_EMOJI;
+    const fulfillerRoleId = input.fulfillerRoleId?.trim() ? input.fulfillerRoleId.trim() : null;
 
     const item = input.id
       ? await this.prisma.shopItem.update({
@@ -140,6 +143,7 @@ export class ShopService {
             emoji,
             ownerUserId,
             ownerUsername,
+            fulfillerRoleId,
           },
         })
       : await this.prisma.shopItem.create({
@@ -155,6 +159,7 @@ export class ShopService {
             emoji,
             ownerUserId,
             ownerUsername,
+            fulfillerRoleId,
           },
         });
 

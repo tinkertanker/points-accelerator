@@ -91,6 +91,13 @@ const shopItemSchema = z.object({
       message: "Owner must be a Discord user ID (17–20 digits)",
     }),
   ownerUsername: z.string().nullable().optional(),
+  fulfillerRoleId: z
+    .string()
+    .nullable()
+    .optional()
+    .refine((value) => !value || /^\d{17,20}$/.test(value), {
+      message: "Fulfiller role must be a Discord role ID (17–20 digits)",
+    }),
 });
 
 const listingSchema = z.object({
@@ -447,6 +454,7 @@ export function createApp(params: {
         emoji: redemption.shopItem.emoji,
         ownerUserId: redemption.shopItem.ownerUserId,
         ownerUsername: redemption.shopItem.ownerUsername,
+        fulfillerRoleId: redemption.shopItem.fulfillerRoleId,
       },
       group: {
         id: redemption.group.id,

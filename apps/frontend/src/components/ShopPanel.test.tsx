@@ -17,6 +17,7 @@ const shopDrafts: ShopItemDraft[] = [
     emoji: "🦓",
     ownerUserId: null,
     ownerUsername: null,
+    fulfillerRoleId: null,
   },
   {
     id: "group-apple",
@@ -30,6 +31,7 @@ const shopDrafts: ShopItemDraft[] = [
     emoji: "🍎",
     ownerUserId: null,
     ownerUsername: null,
+    fulfillerRoleId: null,
   },
   {
     id: "personal-apple",
@@ -43,6 +45,7 @@ const shopDrafts: ShopItemDraft[] = [
     emoji: "💸",
     ownerUserId: null,
     ownerUsername: null,
+    fulfillerRoleId: null,
   },
 ];
 
@@ -67,6 +70,7 @@ describe("ShopPanel", () => {
           emoji: "💸",
           ownerUserId: null,
           ownerUsername: null,
+          fulfillerRoleId: null,
         })}
         onShopDraftsChange={vi.fn()}
         onSaveShop={vi.fn(async () => undefined)}
@@ -83,6 +87,7 @@ describe("ShopPanel", () => {
       "Stock",
       "Fulfilment",
       "Owner",
+      "Fulfiller role",
       "Enabled",
     ]);
 
@@ -108,6 +113,7 @@ describe("ShopPanel", () => {
           emoji: "💸",
           ownerUserId: null,
           ownerUsername: null,
+          fulfillerRoleId: null,
         })}
         onShopDraftsChange={vi.fn()}
         onSaveShop={vi.fn(async () => undefined)}
