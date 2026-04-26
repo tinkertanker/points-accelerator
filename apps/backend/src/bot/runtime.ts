@@ -1057,6 +1057,42 @@ export class BotRuntime {
     return { embed, row, totalEntries: leaderboard.length };
   }
 
+  private async checkRedemptionActorPermissions(params: {
+    redemption: NonNullable<Awaited<ReturnType<AppServices["shopService"]["getRedemption"]>>>;
+    actorUserId: string;
+    memberPermissions: ChatInputCommandInteraction["memberPermissions"];
+    roleIds: string[];
+  }): Promise<{ isOwner: boolean; isStaff: boolean }> {
+    // Authorize against the owner snapshot taken when the notice was posted,
+    // so that re-assigning the item later doesn't yank fulfil/cancel rights
+    // away from the person actually @mentioned in the channel. The
+    // fulfilmentMessageId presence indicates a snapshot was taken (even when
+    // its value is null = explicitly no owner at purchase time); only fall
+    // back to the current item owner for legacy rows that never recorded one.
+    const snapshotTaken = params.redemption.fulfilmentMessageId !== null;
+    const ownerForRedemption = snapshotTaken
+      ? params.redemption.ownerUserIdAtPurchase
+      : params.redemption.shopItem.ownerUserId;
+    const isOwner =
+      ownerForRedemption !== null && ownerForRedemption === params.actorUserId;
+    const hasStaffPerms = params.memberPermissions
+      ? params.memberPermissions.has(PermissionFlagsBits.Administrator) ||
+        params.memberPermissions.has(PermissionFlagsBits.ManageGuild)
+      : false;
+
+    let isStaff = hasStaffPerms;
+    if (!isStaff) {
+      const capabilities = await this.services.roleCapabilityService.listForRoleIds(
+        this.env.GUILD_ID,
+        params.roleIds,
+      );
+      const resolved = resolveCapabilities(capabilities);
+      isStaff = resolved.canManageDashboard || resolved.canAward || resolved.canDeduct;
+    }
+
+    return { isOwner, isStaff };
+  }
+
   private async handleRedemptionButton(interaction: ButtonInteraction) {
     const parts = interaction.customId.split(":");
     if (parts.length !== 3 || parts[0] !== "redemption") {
@@ -1083,29 +1119,13 @@ export class BotRuntime {
         ? ((rawMember as { roles: string[] }).roles)
         : [];
     const roleIds = guildMember ? this.getOrderedRoleIds(guildMember) : apiRoleIds;
-    // Authorize against the owner snapshot taken when the notice was posted,
-    // so that re-assigning the item later doesn't yank fulfil/cancel rights
-    // away from the person actually @mentioned in the channel. The
-    // fulfilmentMessageId presence indicates a snapshot was taken (even when
-    // its value is null = explicitly no owner at purchase time); only fall
-    // back to the current item owner for legacy rows that never recorded one.
-    const snapshotTaken = redemption.fulfilmentMessageId !== null;
-    const ownerForRedemption = snapshotTaken
-      ? redemption.ownerUserIdAtPurchase
-      : redemption.shopItem.ownerUserId;
-    const isOwner = ownerForRedemption !== null && ownerForRedemption === interaction.user.id;
     const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
-    const hasStaffPerms = memberPermissions
-      ? memberPermissions.has(PermissionFlagsBits.Administrator) ||
-        memberPermissions.has(PermissionFlagsBits.ManageGuild)
-      : false;
-
-    let isStaff = hasStaffPerms;
-    if (!isStaff) {
-      const capabilities = await this.services.roleCapabilityService.listForRoleIds(this.env.GUILD_ID, roleIds);
-      const resolved = resolveCapabilities(capabilities);
-      isStaff = resolved.canManageDashboard || resolved.canAward || resolved.canDeduct;
-    }
+    const { isOwner, isStaff } = await this.checkRedemptionActorPermissions({
+      redemption,
+      actorUserId: interaction.user.id,
+      memberPermissions,
+      roleIds,
+    });
 
     if (!isOwner && !isStaff) {
       await interaction.reply({
@@ -3167,8 +3187,91 @@ export class BotRuntime {
         await this.handleLuckyDrawStart({ interaction, member: member ?? null, roleIds });
         return;
       }
+      case "fulfil":
+      case "cancel_redemption": {
+        await this.handleRedemptionSlashAction({
+          interaction,
+          action: interaction.commandName === "fulfil" ? "fulfil" : "cancel",
+          guildMember: member ?? null,
+          roleIds,
+        });
+        return;
+      }
       default:
         throw new AppError("Unknown command.", 404);
+    }
+  }
+
+  private async handleRedemptionSlashAction(params: {
+    interaction: ChatInputCommandInteraction;
+    action: "fulfil" | "cancel";
+    guildMember: GuildMember | null;
+    roleIds: string[];
+  }) {
+    const { interaction, action, guildMember, roleIds } = params;
+    const redemptionId = interaction.options.getString("redemption_id", true).trim();
+    const redemption = await this.services.shopService.getRedemption(this.env.GUILD_ID, redemptionId);
+    if (!redemption) {
+      await interaction.reply({ content: "Redemption not found.", ephemeral: true });
+      return;
+    }
+
+    const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
+    const { isOwner, isStaff } = await this.checkRedemptionActorPermissions({
+      redemption,
+      actorUserId: interaction.user.id,
+      memberPermissions,
+      roleIds,
+    });
+
+    if (!isOwner && !isStaff) {
+      await interaction.reply({
+        content: "Only the item owner or staff can act on this purchase.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const nextStatus = action === "fulfil" ? "FULFILLED" : "CANCELED";
+
+    try {
+      const { redemption: updated, changed } = await this.services.shopService.updateRedemptionStatus({
+        guildId: this.env.GUILD_ID,
+        redemptionId,
+        status: nextStatus,
+        actorUserId: interaction.user.id,
+        actorUsername: interaction.user.username,
+      });
+
+      if (!changed) {
+        await interaction.reply({
+          content: `Redemption \`${redemptionId}\` is already **${updated.status}**.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const verb = nextStatus === "FULFILLED" ? "Fulfilled" : "Cancelled";
+      const refundSuffix = nextStatus === "CANCELED" ? " and refunded" : "";
+      const statusLine = `**Status:** ${updated.status} — ${verb}${refundSuffix} by <@${interaction.user.id}> via /${interaction.commandName}.`;
+
+      // Mirror the dashboard flow: dim the buttons on the original notice so
+      // it stays in sync with whatever the slash command did.
+      if (updated.fulfilmentMessageChannelId && updated.fulfilmentMessageId) {
+        await this.clearRedemptionButtons(
+          updated.fulfilmentMessageChannelId,
+          updated.fulfilmentMessageId,
+          statusLine,
+        );
+      }
+
+      await interaction.reply({
+        content: `Redemption \`${redemptionId}\` ${verb.toLowerCase()}${refundSuffix}.`,
+        ephemeral: true,
+      });
+    } catch (error) {
+      const message = error instanceof AppError ? error.message : "Failed to update redemption.";
+      await interaction.reply({ content: message, ephemeral: true });
     }
   }
 
@@ -3391,6 +3494,24 @@ export class BotRuntime {
         .setDescription("Approve a pending group shop purchase.")
         .addStringOption((option) =>
           option.setName("purchase_id").setDescription("Full purchase ID shared by /buy group").setRequired(true),
+        ),
+      new SlashCommandBuilder()
+        .setName("fulfil")
+        .setDescription("Mark a shop redemption as fulfilled.")
+        .addStringOption((option) =>
+          option
+            .setName("redemption_id")
+            .setDescription("Redemption ID from the fulfilment notice or /inventory")
+            .setRequired(true),
+        ),
+      new SlashCommandBuilder()
+        .setName("cancel_redemption")
+        .setDescription("Cancel a pending shop redemption and refund the buyer.")
+        .addStringOption((option) =>
+          option
+            .setName("redemption_id")
+            .setDescription("Redemption ID from the fulfilment notice or /inventory")
+            .setRequired(true),
         ),
       new SlashCommandBuilder()
         .setName("sell")
