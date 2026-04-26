@@ -2873,11 +2873,19 @@ export class BotRuntime {
           }
         }
 
+        const autoFulfilledIndividual =
+          purchaseMode === "INDIVIDUAL" && redemption.status === "FULFILLED";
+        const autoFulfilNotes = autoFulfilledIndividual
+          ? redemption.shopItem.fulfillmentInstructions
+          : null;
+        const personalSuffix = autoFulfilledIndividual
+          ? ` Fulfilled instantly.${autoFulfilNotes ? ` ${autoFulfilNotes}` : ""}`
+          : "";
         await interaction.reply({
           content:
             purchaseMode === "GROUP"
               ? `Group purchase request created for ${this.formatGroupReference(group)} for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase and spend shared ${config.pointsName} if it passes.${sharedMessageSuffix}`
-              : `Purchase recorded for ${quantity} item(s). Request ID: ${redemption.id}. Cost uses your ${config.currencyName}.`,
+              : `Purchase recorded for ${quantity} item(s). Request ID: ${redemption.id}. Cost uses your ${config.currencyName}.${personalSuffix}`,
           ephemeral: true,
         });
         return;
@@ -2912,13 +2920,13 @@ export class BotRuntime {
             ? ` ${this.formatGroupReference(group)} does not currently have enough ${config.pointsName}, so the request stays open until more are earned or donated.`
             : "";
 
-        if (result.justExecuted) {
+        const fullRedemption = result.justExecuted
+          ? await this.services.shopService.getRedemption(this.env.GUILD_ID, result.redemption.id)
+          : null;
+
+        if (fullRedemption && fullRedemption.status === "PENDING") {
           const fulfilmentChannelId = config.redemptionChannelId ?? interaction.channelId;
-          const fullRedemption = await this.services.shopService.getRedemption(
-            this.env.GUILD_ID,
-            result.redemption.id,
-          );
-          if (fulfilmentChannelId && fullRedemption) {
+          if (fulfilmentChannelId) {
             const buyerUserId = fullRedemption.requestedByUserId;
             const posted = await this.postRedemptionFulfilmentNotice({
               channelId: fulfilmentChannelId,
@@ -2946,9 +2954,16 @@ export class BotRuntime {
           }
         }
 
+        const autoFulfilled = fullRedemption?.status === "FULFILLED";
+        const fulfilmentNotes = autoFulfilled
+          ? fullRedemption?.shopItem.fulfillmentInstructions ?? null
+          : null;
+        const fulfilmentSuffix = autoFulfilled
+          ? ` Fulfilled instantly.${fulfilmentNotes ? ` ${fulfilmentNotes}` : ""}`
+          : " The group purchase is now funded and pending fulfilment.";
         await interaction.reply({
           content: result.executed
-            ? `Approval recorded for ${this.formatGroupReference(group)}. ${progress}. The group purchase is now funded and pending fulfilment.${blockingSuffix}`
+            ? `Approval recorded for ${this.formatGroupReference(group)}. ${progress}.${fulfilmentSuffix}${blockingSuffix}`
             : `Approval recorded for ${this.formatGroupReference(group)}. ${progress}.${blockingSuffix}`,
           ephemeral: true,
         });

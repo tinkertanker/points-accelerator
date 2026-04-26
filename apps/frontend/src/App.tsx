@@ -91,6 +91,7 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
       ownerUserId: null,
       ownerUsername: null,
       fulfillerRoleId: null,
+      autoFulfil: false,
     };
   }
 
@@ -107,6 +108,7 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
     ownerUserId: item.ownerUserId,
     ownerUsername: item.ownerUsername,
     fulfillerRoleId: item.fulfillerRoleId,
+    autoFulfil: item.autoFulfil,
   };
 }
 

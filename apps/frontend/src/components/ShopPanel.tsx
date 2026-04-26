@@ -231,6 +231,7 @@ export default function ShopPanel({
                     <th scope="col" className="col-fulfiller">
                       Fulfiller role
                     </th>
+                    <th scope="col" className="matrix-table__th--center col-auto-fulfil">Auto-fulfil</th>
                     <th scope="col" className="matrix-table__th--center col-enabled">Enabled</th>
                   </tr>
                 </thead>
@@ -340,6 +341,16 @@ export default function ShopPanel({
                             </option>
                           ))}
                         </select>
+                      </td>
+                      <td className="col-auto-fulfil">
+                        <input
+                          type="checkbox"
+                          checked={item.autoFulfil}
+                          aria-label="Auto-fulfil"
+                          onChange={(event) =>
+                            updateShopDraft(index, { ...item, autoFulfil: event.target.checked })
+                          }
+                        />
                       </td>
                       <td className="col-enabled">
                         <input
@@ -476,6 +487,17 @@ export default function ShopPanel({
                         </option>
                       ))}
                     </select>
+                  </label>
+                  <label className="shop-field shop-field--checkbox shop-field--full">
+                    <span className="shop-field__label">Auto-fulfil</span>
+                    <input
+                      type="checkbox"
+                      checked={item.autoFulfil}
+                      aria-label="Auto-fulfil"
+                      onChange={(event) =>
+                        updateShopDraft(index, { ...item, autoFulfil: event.target.checked })
+                      }
+                    />
                   </label>
                   <label className="shop-field shop-field--checkbox shop-field--full">
                     <span className="shop-field__label">Enabled</span>

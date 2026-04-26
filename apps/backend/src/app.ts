@@ -98,6 +98,7 @@ const shopItemSchema = z.object({
     .refine((value) => !value || /^\d{17,20}$/.test(value), {
       message: "Fulfiller role must be a Discord role ID (17–20 digits)",
     }),
+  autoFulfil: z.boolean().optional(),
 });
 
 const listingSchema = z.object({
@@ -455,6 +456,7 @@ export function createApp(params: {
         ownerUserId: redemption.shopItem.ownerUserId,
         ownerUsername: redemption.shopItem.ownerUsername,
         fulfillerRoleId: redemption.shopItem.fulfillerRoleId,
+        autoFulfil: redemption.shopItem.autoFulfil,
       },
       group: {
         id: redemption.group.id,

@@ -21,6 +21,7 @@ export type ShopItemInput = {
   ownerUserId?: string | null;
   ownerUsername?: string | null;
   fulfillerRoleId?: string | null;
+  autoFulfil?: boolean;
 };
 
 type PurchaseMode = "INDIVIDUAL" | "GROUP";
@@ -50,6 +51,7 @@ type GroupPurchaseRedemption = ShopRedemption & {
     ownerUserId: string | null;
     ownerUsername: string | null;
     fulfillerRoleId: string | null;
+    autoFulfil: boolean;
   };
   group: {
     id: string;
@@ -128,6 +130,7 @@ export class ShopService {
     const ownerUsername = input.ownerUsername?.trim() ? input.ownerUsername.trim() : null;
     const emoji = input.emoji?.trim() ? input.emoji.trim() : DEFAULT_SHOP_ITEM_EMOJI;
     const fulfillerRoleId = input.fulfillerRoleId?.trim() ? input.fulfillerRoleId.trim() : null;
+    const autoFulfil = input.autoFulfil ?? false;
 
     const item = input.id
       ? await this.prisma.shopItem.update({
@@ -144,6 +147,7 @@ export class ShopService {
             ownerUserId,
             ownerUsername,
             fulfillerRoleId,
+            autoFulfil,
           },
         })
       : await this.prisma.shopItem.create({
@@ -160,6 +164,7 @@ export class ShopService {
             ownerUserId,
             ownerUsername,
             fulfillerRoleId,
+            autoFulfil,
           },
         });
 
@@ -657,7 +662,7 @@ export class ShopService {
           purchaseMode: "INDIVIDUAL",
           quantity,
           totalCost: totalCostDecimal,
-          status: "PENDING",
+          status: item.autoFulfil ? "FULFILLED" : "PENDING",
         },
       });
 
@@ -950,7 +955,7 @@ export class ShopService {
     const updatedRedemption = await params.tx.shopRedemption.update({
       where: { id: params.redemption.id },
       data: {
-        status: "PENDING",
+        status: item.autoFulfil ? "FULFILLED" : "PENDING",
         ledgerEntryId: ledgerEntry.id,
         stockHeld,
       },

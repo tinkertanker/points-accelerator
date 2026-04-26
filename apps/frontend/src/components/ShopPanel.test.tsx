@@ -18,6 +18,7 @@ const shopDrafts: ShopItemDraft[] = [
     ownerUserId: null,
     ownerUsername: null,
     fulfillerRoleId: null,
+    autoFulfil: false,
   },
   {
     id: "group-apple",
@@ -32,6 +33,7 @@ const shopDrafts: ShopItemDraft[] = [
     ownerUserId: null,
     ownerUsername: null,
     fulfillerRoleId: null,
+    autoFulfil: false,
   },
   {
     id: "personal-apple",
@@ -46,6 +48,7 @@ const shopDrafts: ShopItemDraft[] = [
     ownerUserId: null,
     ownerUsername: null,
     fulfillerRoleId: null,
+    autoFulfil: false,
   },
 ];
 
@@ -71,6 +74,7 @@ describe("ShopPanel", () => {
           ownerUserId: null,
           ownerUsername: null,
           fulfillerRoleId: null,
+          autoFulfil: false,
         })}
         onShopDraftsChange={vi.fn()}
         onSaveShop={vi.fn(async () => undefined)}
@@ -88,6 +92,7 @@ describe("ShopPanel", () => {
       "Fulfilment",
       "Owner",
       "Fulfiller role",
+      "Auto-fulfil",
       "Enabled",
     ]);
 
@@ -114,6 +119,7 @@ describe("ShopPanel", () => {
           ownerUserId: null,
           ownerUsername: null,
           fulfillerRoleId: null,
+          autoFulfil: false,
         })}
         onShopDraftsChange={vi.fn()}
         onSaveShop={vi.fn(async () => undefined)}
