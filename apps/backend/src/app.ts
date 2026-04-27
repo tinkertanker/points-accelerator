@@ -91,6 +91,14 @@ const shopItemSchema = z.object({
       message: "Owner must be a Discord user ID (17–20 digits)",
     }),
   ownerUsername: z.string().nullable().optional(),
+  fulfillerRoleId: z
+    .string()
+    .nullable()
+    .optional()
+    .refine((value) => !value || /^\d{17,20}$/.test(value), {
+      message: "Fulfiller role must be a Discord role ID (17–20 digits)",
+    }),
+  autoFulfil: z.boolean().optional(),
 });
 
 const listingSchema = z.object({
@@ -447,6 +455,8 @@ export function createApp(params: {
         emoji: redemption.shopItem.emoji,
         ownerUserId: redemption.shopItem.ownerUserId,
         ownerUsername: redemption.shopItem.ownerUsername,
+        fulfillerRoleId: redemption.shopItem.fulfillerRoleId,
+        autoFulfil: redemption.shopItem.autoFulfil,
       },
       group: {
         id: redemption.group.id,
@@ -610,7 +620,9 @@ export function createApp(params: {
         canManageMentorPages ? services.shopService.list(params.env.GUILD_ID) : Promise.resolve([]),
         canManageAdminPages ? services.listingService.list(params.env.GUILD_ID) : Promise.resolve([]),
         canManageAdminPages ? services.economyService.getLedger(params.env.GUILD_ID, 25) : Promise.resolve([]),
-        canManageAdminPages ? params.botRuntime?.getRoles() ?? [] : Promise.resolve([]),
+        canManageAdminPages || canManageMentorPages
+          ? params.botRuntime?.getRoles() ?? []
+          : Promise.resolve([]),
         canManageAdminPages ? params.botRuntime?.getTextChannels() ?? [] : Promise.resolve([]),
         canManageMentorPages ? params.botRuntime?.getMembers() ?? [] : Promise.resolve([]),
         canManageMentorPages ? services.assignmentService.list(params.env.GUILD_ID) : Promise.resolve([]),

@@ -1,0 +1,2 @@
+ALTER TABLE "ShopItem"
+ADD COLUMN "autoFulfil" BOOLEAN NOT NULL DEFAULT false;

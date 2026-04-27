@@ -90,6 +90,8 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
       emoji: DEFAULT_SHOP_ITEM_EMOJI,
       ownerUserId: null,
       ownerUsername: null,
+      fulfillerRoleId: null,
+      autoFulfil: false,
     };
   }
 
@@ -105,6 +107,8 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
     emoji: item.emoji || DEFAULT_SHOP_ITEM_EMOJI,
     ownerUserId: item.ownerUserId,
     ownerUsername: item.ownerUsername,
+    fulfillerRoleId: item.fulfillerRoleId,
+    autoFulfil: item.autoFulfil,
   };
 }
 
@@ -474,6 +478,7 @@ export default function App() {
             isBusy={isMutating}
             participants={bootstrap.participants}
             members={bootstrap.discord.members}
+            roles={discordRoles}
             createShopDraft={() => toShopItemDraft()}
             onShopDraftsChange={setShopDrafts}
             onSaveShop={handleSaveShop}

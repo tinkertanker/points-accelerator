@@ -238,6 +238,8 @@ model ShopItem {
   emoji                  String            @default("💸")
   ownerUserId            String?
   ownerUsername          String?
+  fulfillerRoleId        String?
+  autoFulfil             Boolean           @default(false)
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
   guild                  GuildConfig       @relation(fields: [guildId], references: [guildId], onDelete: Cascade)

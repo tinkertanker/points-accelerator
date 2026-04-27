@@ -64,6 +64,7 @@ type ShopPanelProps = {
   isBusy: boolean;
   participants?: Participant[];
   members?: DiscordOption[];
+  roles?: DiscordOption[];
   createShopDraft: () => ShopItemDraft;
   onShopDraftsChange: (next: ShopItemDraft[]) => void;
   onSaveShop: () => Promise<void>;
@@ -74,6 +75,7 @@ export default function ShopPanel({
   isBusy,
   participants = [],
   members = [],
+  roles = [],
   createShopDraft,
   onShopDraftsChange,
   onSaveShop,
@@ -226,6 +228,10 @@ export default function ShopPanel({
                     <th scope="col" className="col-owner">
                       Owner
                     </th>
+                    <th scope="col" className="col-fulfiller">
+                      Fulfiller role
+                    </th>
+                    <th scope="col" className="matrix-table__th--center col-auto-fulfil">Auto-fulfil</th>
                     <th scope="col" className="matrix-table__th--center col-enabled">Enabled</th>
                   </tr>
                 </thead>
@@ -316,6 +322,35 @@ export default function ShopPanel({
                         {item.ownerUsername && !item.ownerUserId ? (
                           <small className="shop-owner-hint">No match — pick a suggestion or paste a Discord user ID.</small>
                         ) : null}
+                      </td>
+                      <td className="col-fulfiller">
+                        <select
+                          value={item.fulfillerRoleId ?? ""}
+                          aria-label="Fulfiller role"
+                          onChange={(event) =>
+                            updateShopDraft(index, {
+                              ...item,
+                              fulfillerRoleId: event.target.value ? event.target.value : null,
+                            })
+                          }
+                        >
+                          <option value="">— none —</option>
+                          {roles.map((role) => (
+                            <option key={role.id} value={role.id}>
+                              {role.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="col-auto-fulfil">
+                        <input
+                          type="checkbox"
+                          checked={item.autoFulfil}
+                          aria-label="Auto-fulfil"
+                          onChange={(event) =>
+                            updateShopDraft(index, { ...item, autoFulfil: event.target.checked })
+                          }
+                        />
                       </td>
                       <td className="col-enabled">
                         <input
@@ -432,6 +467,37 @@ export default function ShopPanel({
                     {item.ownerUsername && !item.ownerUserId ? (
                       <small className="shop-owner-hint">No match — pick a suggestion or paste a Discord user ID.</small>
                     ) : null}
+                  </label>
+                  <label className="shop-field shop-field--full">
+                    <span className="shop-field__label">Fulfiller role</span>
+                    <select
+                      value={item.fulfillerRoleId ?? ""}
+                      aria-label="Fulfiller role"
+                      onChange={(event) =>
+                        updateShopDraft(index, {
+                          ...item,
+                          fulfillerRoleId: event.target.value ? event.target.value : null,
+                        })
+                      }
+                    >
+                      <option value="">— none —</option>
+                      {roles.map((role) => (
+                        <option key={role.id} value={role.id}>
+                          {role.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="shop-field shop-field--checkbox shop-field--full">
+                    <span className="shop-field__label">Auto-fulfil</span>
+                    <input
+                      type="checkbox"
+                      checked={item.autoFulfil}
+                      aria-label="Auto-fulfil"
+                      onChange={(event) =>
+                        updateShopDraft(index, { ...item, autoFulfil: event.target.checked })
+                      }
+                    />
                   </label>
                   <label className="shop-field shop-field--checkbox shop-field--full">
                     <span className="shop-field__label">Enabled</span>

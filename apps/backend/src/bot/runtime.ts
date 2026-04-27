@@ -777,6 +777,7 @@ export class BotRuntime {
   private async postRedemptionFulfilmentNotice(params: {
     channelId: string;
     ownerUserId: string | null;
+    fulfillerRoleId: string | null;
     buyerUserId: string;
     buyerMention: string;
     shopItemName: string;
@@ -798,6 +799,10 @@ export class BotRuntime {
 
     const validOwnerId = isDiscordSnowflake(params.ownerUserId) ? params.ownerUserId : null;
     const ownerMention = validOwnerId ? `<@${validOwnerId}>` : null;
+    const validFulfillerRoleId = isDiscordSnowflake(params.fulfillerRoleId)
+      ? params.fulfillerRoleId
+      : null;
+    const fulfillerRoleMention = validFulfillerRoleId ? `<@&${validFulfillerRoleId}>` : null;
     const subject =
       params.audience === "GROUP"
         ? `${params.buyerMention} (on behalf of **${params.groupName}**)`
@@ -805,7 +810,10 @@ export class BotRuntime {
     const fulfilmentLine = params.fulfillmentInstructions
       ? `\nFulfilment notes: ${params.fulfillmentInstructions}`
       : "";
-    const header = ownerMention ? `${ownerMention} heads up — ` : "";
+    const headerMentions = [ownerMention, fulfillerRoleMention].filter(
+      (value): value is string => value !== null,
+    );
+    const header = headerMentions.length > 0 ? `${headerMentions.join(" ")} heads up — ` : "";
     const content = `${header}${subject} purchased ${params.shopItemEmoji} **${params.shopItemName}**${
       params.quantity > 1 ? ` x${params.quantity}` : ""
     }.\nRedemption ID: \`${params.redemptionId}\`${fulfilmentLine}`;
@@ -813,12 +821,13 @@ export class BotRuntime {
     const mentionUsers = [params.buyerUserId, ...(validOwnerId ? [validOwnerId] : [])].filter(
       isDiscordSnowflake,
     );
+    const mentionRoles = validFulfillerRoleId ? [validFulfillerRoleId] : [];
 
     const sent = await (channel as GuildTextBasedChannel)
       .send({
         content,
         components: [this.buildRedemptionActionRow(params.redemptionId)],
-        allowedMentions: { users: mentionUsers },
+        allowedMentions: { users: mentionUsers, roles: mentionRoles },
       })
       .catch((error: unknown) => {
         console.error("Failed to post redemption fulfilment notice", error);
@@ -1057,6 +1066,47 @@ export class BotRuntime {
     return { embed, row, totalEntries: leaderboard.length };
   }
 
+  private async checkRedemptionActorPermissions(params: {
+    redemption: NonNullable<Awaited<ReturnType<AppServices["shopService"]["getRedemption"]>>>;
+    actorUserId: string;
+    memberPermissions: ChatInputCommandInteraction["memberPermissions"];
+    roleIds: string[];
+  }): Promise<{ isOwner: boolean; isStaff: boolean; isFulfiller: boolean }> {
+    // Authorize against the owner snapshot recorded when a notice was posted,
+    // so re-assigning the item later doesn't yank fulfil/cancel rights from
+    // the person actually @mentioned in the channel. fulfilmentMessageId is
+    // the proxy for "snapshot recorded": once non-null, ownerUserIdAtPurchase
+    // is the source of truth — it may itself be null, meaning the item had no
+    // owner at purchase time. Only fall back to the live item owner for
+    // legacy rows that never had a notice posted.
+    const snapshotTaken = params.redemption.fulfilmentMessageId !== null;
+    const ownerForRedemption = snapshotTaken
+      ? params.redemption.ownerUserIdAtPurchase
+      : params.redemption.shopItem.ownerUserId;
+    const isOwner =
+      ownerForRedemption !== null && ownerForRedemption === params.actorUserId;
+    const hasStaffPerms = params.memberPermissions
+      ? params.memberPermissions.has(PermissionFlagsBits.Administrator) ||
+        params.memberPermissions.has(PermissionFlagsBits.ManageGuild)
+      : false;
+
+    let isStaff = hasStaffPerms;
+    if (!isStaff) {
+      const capabilities = await this.services.roleCapabilityService.listForRoleIds(
+        this.env.GUILD_ID,
+        params.roleIds,
+      );
+      const resolved = resolveCapabilities(capabilities);
+      isStaff = resolved.canManageDashboard || resolved.canAward || resolved.canDeduct;
+    }
+
+    const fulfillerRoleId = params.redemption.shopItem.fulfillerRoleId;
+    const isFulfiller =
+      fulfillerRoleId !== null && params.roleIds.includes(fulfillerRoleId);
+
+    return { isOwner, isStaff, isFulfiller };
+  }
+
   private async handleRedemptionButton(interaction: ButtonInteraction) {
     const parts = interaction.customId.split(":");
     if (parts.length !== 3 || parts[0] !== "redemption") {
@@ -1083,33 +1133,17 @@ export class BotRuntime {
         ? ((rawMember as { roles: string[] }).roles)
         : [];
     const roleIds = guildMember ? this.getOrderedRoleIds(guildMember) : apiRoleIds;
-    // Authorize against the owner snapshot taken when the notice was posted,
-    // so that re-assigning the item later doesn't yank fulfil/cancel rights
-    // away from the person actually @mentioned in the channel. The
-    // fulfilmentMessageId presence indicates a snapshot was taken (even when
-    // its value is null = explicitly no owner at purchase time); only fall
-    // back to the current item owner for legacy rows that never recorded one.
-    const snapshotTaken = redemption.fulfilmentMessageId !== null;
-    const ownerForRedemption = snapshotTaken
-      ? redemption.ownerUserIdAtPurchase
-      : redemption.shopItem.ownerUserId;
-    const isOwner = ownerForRedemption !== null && ownerForRedemption === interaction.user.id;
     const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
-    const hasStaffPerms = memberPermissions
-      ? memberPermissions.has(PermissionFlagsBits.Administrator) ||
-        memberPermissions.has(PermissionFlagsBits.ManageGuild)
-      : false;
+    const { isOwner, isStaff, isFulfiller } = await this.checkRedemptionActorPermissions({
+      redemption,
+      actorUserId: interaction.user.id,
+      memberPermissions,
+      roleIds,
+    });
 
-    let isStaff = hasStaffPerms;
-    if (!isStaff) {
-      const capabilities = await this.services.roleCapabilityService.listForRoleIds(this.env.GUILD_ID, roleIds);
-      const resolved = resolveCapabilities(capabilities);
-      isStaff = resolved.canManageDashboard || resolved.canAward || resolved.canDeduct;
-    }
-
-    if (!isOwner && !isStaff) {
+    if (!isOwner && !isStaff && !isFulfiller) {
       await interaction.reply({
-        content: "Only the item owner or staff can act on this purchase.",
+        content: "Only the item owner, fulfiller role, or staff can act on this purchase.",
         ephemeral: true,
       });
       return;
@@ -2817,6 +2851,7 @@ export class BotRuntime {
             const posted = await this.postRedemptionFulfilmentNotice({
               channelId: fulfilmentChannelId,
               ownerUserId: redemption.shopItem.ownerUserId,
+              fulfillerRoleId: redemption.shopItem.fulfillerRoleId,
               buyerUserId: interaction.user.id,
               buyerMention: `<@${interaction.user.id}>`,
               shopItemName: redemption.shopItem.name,
@@ -2839,11 +2874,19 @@ export class BotRuntime {
           }
         }
 
+        const autoFulfilledIndividual =
+          purchaseMode === "INDIVIDUAL" && redemption.status === "FULFILLED";
+        const autoFulfilNotes = autoFulfilledIndividual
+          ? redemption.shopItem.fulfillmentInstructions
+          : null;
+        const personalSuffix = autoFulfilledIndividual
+          ? ` Fulfilled instantly.${autoFulfilNotes ? ` ${autoFulfilNotes}` : ""}`
+          : "";
         await interaction.reply({
           content:
             purchaseMode === "GROUP"
               ? `Group purchase request created for ${this.formatGroupReference(group)} for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase and spend shared ${config.pointsName} if it passes.${sharedMessageSuffix}`
-              : `Purchase recorded for ${quantity} item(s). Request ID: ${redemption.id}. Cost uses your ${config.currencyName}.`,
+              : `Purchase recorded for ${quantity} item(s). Request ID: ${redemption.id}. Cost uses your ${config.currencyName}.${personalSuffix}`,
           ephemeral: true,
         });
         return;
@@ -2878,17 +2921,18 @@ export class BotRuntime {
             ? ` ${this.formatGroupReference(group)} does not currently have enough ${config.pointsName}, so the request stays open until more are earned or donated.`
             : "";
 
-        if (result.justExecuted) {
+        const fullRedemption = result.justExecuted
+          ? await this.services.shopService.getRedemption(this.env.GUILD_ID, result.redemption.id)
+          : null;
+
+        if (fullRedemption && fullRedemption.status === "PENDING") {
           const fulfilmentChannelId = config.redemptionChannelId ?? interaction.channelId;
-          const fullRedemption = await this.services.shopService.getRedemption(
-            this.env.GUILD_ID,
-            result.redemption.id,
-          );
-          if (fulfilmentChannelId && fullRedemption) {
+          if (fulfilmentChannelId) {
             const buyerUserId = fullRedemption.requestedByUserId;
             const posted = await this.postRedemptionFulfilmentNotice({
               channelId: fulfilmentChannelId,
               ownerUserId: fullRedemption.shopItem.ownerUserId,
+              fulfillerRoleId: fullRedemption.shopItem.fulfillerRoleId,
               buyerUserId,
               buyerMention: `<@${buyerUserId}>`,
               shopItemName: fullRedemption.shopItem.name,
@@ -2911,9 +2955,16 @@ export class BotRuntime {
           }
         }
 
+        const autoFulfilled = fullRedemption?.status === "FULFILLED";
+        const fulfilmentNotes = autoFulfilled
+          ? fullRedemption?.shopItem.fulfillmentInstructions ?? null
+          : null;
+        const fulfilmentSuffix = autoFulfilled
+          ? ` Fulfilled instantly.${fulfilmentNotes ? ` ${fulfilmentNotes}` : ""}`
+          : " The group purchase is now funded and pending fulfilment.";
         await interaction.reply({
           content: result.executed
-            ? `Approval recorded for ${this.formatGroupReference(group)}. ${progress}. The group purchase is now funded and pending fulfilment.${blockingSuffix}`
+            ? `Approval recorded for ${this.formatGroupReference(group)}. ${progress}.${fulfilmentSuffix}${blockingSuffix}`
             : `Approval recorded for ${this.formatGroupReference(group)}. ${progress}.${blockingSuffix}`,
           ephemeral: true,
         });
@@ -3167,8 +3218,106 @@ export class BotRuntime {
         await this.handleLuckyDrawStart({ interaction, member: member ?? null, roleIds });
         return;
       }
+      case "fulfil":
+      case "cancel_redemption": {
+        await this.handleRedemptionSlashAction({
+          interaction,
+          action: interaction.commandName === "fulfil" ? "fulfil" : "cancel",
+          guildMember: member ?? null,
+          roleIds,
+        });
+        return;
+      }
       default:
         throw new AppError("Unknown command.", 404);
+    }
+  }
+
+  private async handleRedemptionSlashAction(params: {
+    interaction: ChatInputCommandInteraction;
+    action: "fulfil" | "cancel";
+    guildMember: GuildMember | null;
+    roleIds: string[];
+  }) {
+    const { interaction, action } = params;
+    const redemptionId = interaction.options.getString("redemption_id", true).trim();
+    const redemption = await this.services.shopService.getRedemption(this.env.GUILD_ID, redemptionId);
+    if (!redemption) {
+      await interaction.reply({ content: "Redemption not found.", ephemeral: true });
+      return;
+    }
+
+    // Slash invocations from a DM don't carry guild context, so fall back to a
+    // direct guild lookup so role-based and capability-based perms still apply.
+    let guildMember = params.guildMember;
+    let roleIds = params.roleIds;
+    if (!guildMember && this.client) {
+      const guild = await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null);
+      const fetched = guild
+        ? await guild.members.fetch(interaction.user.id).catch(() => null)
+        : null;
+      if (fetched) {
+        guildMember = fetched;
+        roleIds = this.getOrderedRoleIds(fetched);
+      }
+    }
+
+    const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
+    const { isOwner, isStaff, isFulfiller } = await this.checkRedemptionActorPermissions({
+      redemption,
+      actorUserId: interaction.user.id,
+      memberPermissions,
+      roleIds,
+    });
+
+    if (!isOwner && !isStaff && !isFulfiller) {
+      await interaction.reply({
+        content: "Only the item owner, fulfiller role, or staff can act on this purchase.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const nextStatus = action === "fulfil" ? "FULFILLED" : "CANCELED";
+
+    try {
+      const { redemption: updated, changed } = await this.services.shopService.updateRedemptionStatus({
+        guildId: this.env.GUILD_ID,
+        redemptionId,
+        status: nextStatus,
+        actorUserId: interaction.user.id,
+        actorUsername: interaction.user.username,
+      });
+
+      if (!changed) {
+        await interaction.reply({
+          content: `Redemption \`${redemptionId}\` is already **${updated.status}**.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const verb = nextStatus === "FULFILLED" ? "Fulfilled" : "Cancelled";
+      const refundSuffix = nextStatus === "CANCELED" ? " and refunded" : "";
+      const statusLine = `**Status:** ${updated.status} — ${verb}${refundSuffix} by <@${interaction.user.id}> via /${interaction.commandName}.`;
+
+      // Mirror the dashboard flow: dim the buttons on the original notice so
+      // it stays in sync with whatever the slash command did.
+      if (updated.fulfilmentMessageChannelId && updated.fulfilmentMessageId) {
+        await this.clearRedemptionButtons(
+          updated.fulfilmentMessageChannelId,
+          updated.fulfilmentMessageId,
+          statusLine,
+        );
+      }
+
+      await interaction.reply({
+        content: `Redemption \`${redemptionId}\` ${verb.toLowerCase()}${refundSuffix}.`,
+        ephemeral: true,
+      });
+    } catch (error) {
+      const message = error instanceof AppError ? error.message : "Failed to update redemption.";
+      await interaction.reply({ content: message, ephemeral: true });
     }
   }
 
@@ -3391,6 +3540,24 @@ export class BotRuntime {
         .setDescription("Approve a pending group shop purchase.")
         .addStringOption((option) =>
           option.setName("purchase_id").setDescription("Full purchase ID shared by /buy group").setRequired(true),
+        ),
+      new SlashCommandBuilder()
+        .setName("fulfil")
+        .setDescription("Mark a shop redemption as fulfilled.")
+        .addStringOption((option) =>
+          option
+            .setName("redemption_id")
+            .setDescription("Redemption ID from the fulfilment notice or /inventory")
+            .setRequired(true),
+        ),
+      new SlashCommandBuilder()
+        .setName("cancel_redemption")
+        .setDescription("Cancel a pending shop redemption and refund the buyer.")
+        .addStringOption((option) =>
+          option
+            .setName("redemption_id")
+            .setDescription("Redemption ID from the fulfilment notice or /inventory")
+            .setRequired(true),
         ),
       new SlashCommandBuilder()
         .setName("sell")

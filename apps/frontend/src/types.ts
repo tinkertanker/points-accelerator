@@ -69,6 +69,8 @@ export type ShopItem = {
   emoji: string;
   ownerUserId: string | null;
   ownerUsername: string | null;
+  fulfillerRoleId: string | null;
+  autoFulfil: boolean;
 };
 
 export type ShopItemDraft = Omit<ShopItem, "id"> & { id?: string };
@@ -97,6 +99,8 @@ export type ShopRedemption = {
     emoji: string;
     ownerUserId: string | null;
     ownerUsername: string | null;
+    fulfillerRoleId: string | null;
+    autoFulfil: boolean;
   };
   group: {
     id: string;
