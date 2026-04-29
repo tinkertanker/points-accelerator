@@ -8,6 +8,13 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.5.0] - 2026-04-29
+
+### Added
+- React-to-reward rules: admins can configure a channel + bot user + emoji to credit or debit the message author's wallet currency when that bot reacts. Each reaction credits at most once. Both unicode (✅) and custom emoji (paste either the raw `<:name:id>` form or the bare ID) are accepted.
+- `/luckydraw` — random-winner currency giveaways with a configurable prize, winner count, and entry window.
+- Shop fulfilment can now be handled directly from chat: fulfilment messages carry buttons so handlers don't need to switch to the dashboard for routine cases.
+
 ## [0.4.0] - 2026-04-23
 
 ### Added
