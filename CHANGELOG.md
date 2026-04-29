@@ -8,6 +8,12 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.5.1] - 2026-04-29
+
+### Fixed
+- React-to-reward editor: layout now fits on a single row, channel and bot user ID persist across consecutive adds (so chaining ✅ then ❌ on the same bot is two clicks), the emoji column is tightened, the "Note" field is renamed to "Label" with a dashboard-only tooltip, and the misleading green-tick placeholder is gone.
+- React-to-reward editor: the currency delta field now accepts negative numbers. The previous `type="number"` input was silently rejecting `-` mid-edit and snapping back to a positive value, which blocked any deduction rule from being created.
+
 ## [0.5.0] - 2026-04-29
 
 ### Added
