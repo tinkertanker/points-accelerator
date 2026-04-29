@@ -8,6 +8,11 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.5.2] - 2026-04-29
+
+### Changed
+- `/balance` now replies with an embed styled to match `/forbes`: your group's shared points and your personal wallet sit side-by-side, each with your current rank on the matching leaderboard, and your display name and avatar are shown at the top.
+
 ## [0.5.1] - 2026-04-29
 
 ### Fixed
