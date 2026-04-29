@@ -12,6 +12,8 @@ type ReactionRulesEditorProps = {
   onDelete: (id: string) => Promise<boolean>;
 };
 
+const NEW_ROW_KEY = "__new__";
+
 const EMPTY_DRAFT: ReactionRewardRuleDraft = {
   channelId: "",
   botUserId: "",
@@ -20,6 +22,23 @@ const EMPTY_DRAFT: ReactionRewardRuleDraft = {
   description: "",
   enabled: true,
 };
+
+const ROW_STYLE: React.CSSProperties = {
+  display: "flex",
+  gap: "0.5rem",
+  alignItems: "flex-end",
+  flexWrap: "wrap",
+};
+
+const FIELD_STYLES = {
+  channel: { flex: "1 1 180px", minWidth: 160 },
+  botId: { flex: "1 1 200px", minWidth: 180 },
+  emoji: { flex: "0 0 110px" },
+  delta: { flex: "0 0 110px" },
+  note: { flex: "1 1 160px", minWidth: 140 },
+  enabled: { flex: "0 0 70px" },
+  actions: { flex: "0 0 auto" },
+} as const;
 
 function ruleToDraft(rule: ReactionRewardRule): ReactionRewardRuleDraft {
   return {
@@ -44,6 +63,14 @@ function isDirty(rule: ReactionRewardRule, draft: ReactionRewardRuleDraft) {
   );
 }
 
+function parseDelta(text: string): number | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed === 0) return null;
+  return parsed;
+}
+
 export default function ReactionRulesEditor({
   rules,
   channels,
@@ -60,11 +87,18 @@ export default function ReactionRulesEditor({
 
   const [drafts, setDrafts] = useState<Record<string, ReactionRewardRuleDraft>>({});
   const [newDraft, setNewDraft] = useState<ReactionRewardRuleDraft>(EMPTY_DRAFT);
+  const [deltaTexts, setDeltaTexts] = useState<Record<string, string>>({ [NEW_ROW_KEY]: "1" });
 
   const draftFor = (rule: ReactionRewardRule) => drafts[rule.id] ?? ruleToDraft(rule);
+  const deltaTextFor = (key: string, fallback: number) =>
+    deltaTexts[key] ?? String(fallback);
 
   const updateDraft = (id: string, next: ReactionRewardRuleDraft) => {
     setDrafts((prev) => ({ ...prev, [id]: next }));
+  };
+
+  const setDeltaText = (key: string, value: string) => {
+    setDeltaTexts((prev) => ({ ...prev, [key]: value }));
   };
 
   const resetDraft = (id: string) => {
@@ -73,11 +107,19 @@ export default function ReactionRulesEditor({
       delete copy[id];
       return copy;
     });
+    setDeltaTexts((prev) => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
   };
 
   const handleSave = async (rule: ReactionRewardRule) => {
     const draft = draftFor(rule);
-    const success = await onUpdate(rule.id, draft);
+    const text = deltaTextFor(rule.id, draft.currencyDelta);
+    const parsed = parseDelta(text);
+    if (parsed === null) return;
+    const success = await onUpdate(rule.id, { ...draft, currencyDelta: parsed });
     if (success) {
       resetDraft(rule.id);
     }
@@ -95,9 +137,21 @@ export default function ReactionRulesEditor({
   };
 
   const handleCreate = async () => {
-    const success = await onCreate(newDraft);
+    const text = deltaTextFor(NEW_ROW_KEY, newDraft.currencyDelta);
+    const parsed = parseDelta(text);
+    if (parsed === null) return;
+    const success = await onCreate({ ...newDraft, currencyDelta: parsed });
     if (success) {
-      setNewDraft(EMPTY_DRAFT);
+      // Keep channel + bot ID — admins typically add several rules per bot.
+      setNewDraft({
+        channelId: newDraft.channelId,
+        botUserId: newDraft.botUserId,
+        emoji: "",
+        currencyDelta: 1,
+        description: "",
+        enabled: true,
+      });
+      setDeltaText(NEW_ROW_KEY, "1");
     }
   };
 
@@ -108,131 +162,134 @@ export default function ReactionRulesEditor({
       </option>
     ));
 
+  const newDeltaText = deltaTextFor(NEW_ROW_KEY, newDraft.currencyDelta);
+  const newDeltaValid = parseDelta(newDeltaText) !== null;
+  const canSubmitNew =
+    !isBusy &&
+    Boolean(newDraft.channelId) &&
+    newDraft.botUserId.trim().length > 0 &&
+    newDraft.emoji.trim().length > 0 &&
+    newDeltaValid;
+
   return (
     <fieldset className="settings-section span-full">
       <legend>Bot reaction rewards</legend>
       <p className="role-checklist__help">
         Award or deduct {currencyName} when a configured bot reacts to a message in a chosen channel. The
-        message author receives the delta. Find a bot's user ID by enabling Discord Developer Mode and
-        right-clicking the bot user. For unicode emoji paste it directly (e.g. ✅); for a custom emoji
-        paste either the raw form (<code>{"<:name:id>"}</code>) or just the ID — both are accepted.
+        message author receives the delta. Use a negative number to deduct (e.g. <code>-1</code>). Find a
+        bot's user ID by enabling Discord Developer Mode and right-clicking the bot user. Emoji accepts
+        either a unicode character (e.g. the green tick) or a custom emoji as <code>{"<:name:id>"}</code>
+        or just the ID.
       </p>
 
-      {rules.length === 0 ? (
-        <p className="channel-picker__empty">No reaction rules yet. Add one below.</p>
-      ) : (
-        <div className="capability-matrix">
-          <div className="matrix-scroll">
-            <table className="matrix-table capability-table">
-              <thead>
-                <tr>
-                  <th scope="col">Channel</th>
-                  <th scope="col">Bot user ID</th>
-                  <th scope="col">Emoji</th>
-                  <th scope="col">{currencyName} delta</th>
-                  <th scope="col">Note</th>
-                  <th scope="col">Enabled</th>
-                  <th scope="col" />
-                </tr>
-              </thead>
-              <tbody>
-                {rules.map((rule) => {
-                  const draft = draftFor(rule);
-                  const dirty = isDirty(rule, draft);
-                  return (
-                    <tr key={rule.id}>
-                      <td>
-                        <select
-                          aria-label="Channel"
-                          value={draft.channelId}
-                          onChange={(event) =>
-                            updateDraft(rule.id, { ...draft, channelId: event.target.value })
-                          }
-                        >
-                          <option value="">Select channel</option>
-                          {renderChannelOptions()}
-                        </select>
-                      </td>
-                      <td>
-                        <input
-                          aria-label="Bot user ID"
-                          value={draft.botUserId}
-                          onChange={(event) =>
-                            updateDraft(rule.id, { ...draft, botUserId: event.target.value })
-                          }
-                          placeholder="e.g. 510016054391734273"
-                        />
-                      </td>
-                      <td>
-                        <input
-                          aria-label="Emoji"
-                          value={draft.emoji}
-                          onChange={(event) =>
-                            updateDraft(rule.id, { ...draft, emoji: event.target.value })
-                          }
-                          placeholder="✅"
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          aria-label="Currency delta"
-                          value={draft.currencyDelta}
-                          onChange={(event) =>
-                            updateDraft(rule.id, {
-                              ...draft,
-                              currencyDelta: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          aria-label="Note"
-                          value={draft.description ?? ""}
-                          onChange={(event) =>
-                            updateDraft(rule.id, { ...draft, description: event.target.value })
-                          }
-                          placeholder="optional"
-                        />
-                      </td>
-                      <td className="capability-table__cap">
-                        <input
-                          type="checkbox"
-                          aria-label="Enabled"
-                          checked={draft.enabled}
-                          onChange={(event) =>
-                            updateDraft(rule.id, { ...draft, enabled: event.target.checked })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          onClick={() => void handleSave(rule)}
-                          disabled={isBusy || !dirty}
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleDelete(rule)}
-                          disabled={isBusy}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+      {rules.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "0.75rem" }}>
+          {rules.map((rule) => {
+            const draft = draftFor(rule);
+            const text = deltaTextFor(rule.id, draft.currencyDelta);
+            const parsed = parseDelta(text);
+            const dirty =
+              isDirty(rule, draft) || (parsed !== null && parsed !== draft.currencyDelta);
+            return (
+              <div key={rule.id} style={ROW_STYLE}>
+                <label className="settings-field" style={FIELD_STYLES.channel}>
+                  Channel
+                  <select
+                    aria-label="Channel"
+                    value={draft.channelId}
+                    onChange={(event) =>
+                      updateDraft(rule.id, { ...draft, channelId: event.target.value })
+                    }
+                  >
+                    <option value="">Select channel</option>
+                    {renderChannelOptions()}
+                  </select>
+                </label>
+                <label className="settings-field" style={FIELD_STYLES.botId}>
+                  Bot user ID
+                  <input
+                    aria-label="Bot user ID"
+                    value={draft.botUserId}
+                    onChange={(event) =>
+                      updateDraft(rule.id, { ...draft, botUserId: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="settings-field" style={FIELD_STYLES.emoji}>
+                  Emoji
+                  <input
+                    aria-label="Emoji"
+                    value={draft.emoji}
+                    onChange={(event) =>
+                      updateDraft(rule.id, { ...draft, emoji: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="settings-field" style={FIELD_STYLES.delta}>
+                  {currencyName} delta
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    aria-label="Currency delta"
+                    value={text}
+                    onChange={(event) => setDeltaText(rule.id, event.target.value)}
+                    onBlur={() => {
+                      if (parsed !== null) {
+                        updateDraft(rule.id, { ...draft, currencyDelta: parsed });
+                      }
+                    }}
+                  />
+                </label>
+                <label className="settings-field" style={FIELD_STYLES.note}>
+                  Label
+                  <input
+                    aria-label="Label"
+                    title="Internal label — shown only on the dashboard"
+                    value={draft.description ?? ""}
+                    onChange={(event) =>
+                      updateDraft(rule.id, { ...draft, description: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="settings-field" style={FIELD_STYLES.enabled}>
+                  Enabled
+                  <input
+                    type="checkbox"
+                    aria-label="Enabled"
+                    checked={draft.enabled}
+                    onChange={(event) =>
+                      updateDraft(rule.id, { ...draft, enabled: event.target.checked })
+                    }
+                  />
+                </label>
+                <div style={{ ...FIELD_STYLES.actions, display: "flex", gap: "0.25rem" }}>
+                  <button
+                    type="button"
+                    onClick={() => void handleSave(rule)}
+                    disabled={isBusy || !dirty || parsed === null}
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(rule)}
+                    disabled={isBusy}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
+      ) : (
+        <p className="channel-picker__empty" style={{ marginBottom: "0.5rem" }}>
+          No reaction rules yet. Add one below.
+        </p>
       )}
 
-      <div className="settings-section__grid settings-section__grid--reward">
-        <label className="settings-field">
+      <div style={ROW_STYLE}>
+        <label className="settings-field" style={FIELD_STYLES.channel}>
           Channel
           <select
             value={newDraft.channelId}
@@ -242,7 +299,7 @@ export default function ReactionRulesEditor({
             {renderChannelOptions()}
           </select>
         </label>
-        <label className="settings-field">
+        <label className="settings-field" style={FIELD_STYLES.botId}>
           Bot user ID
           <input
             value={newDraft.botUserId}
@@ -250,33 +307,34 @@ export default function ReactionRulesEditor({
             placeholder="e.g. 510016054391734273"
           />
         </label>
-        <label className="settings-field">
+        <label className="settings-field" style={FIELD_STYLES.emoji}>
           Emoji
           <input
             value={newDraft.emoji}
             onChange={(event) => setNewDraft({ ...newDraft, emoji: event.target.value })}
-            placeholder="✅"
+            placeholder="paste here"
           />
         </label>
-        <label className="settings-field">
+        <label className="settings-field" style={FIELD_STYLES.delta}>
           {currencyName} delta
           <input
-            type="number"
-            value={newDraft.currencyDelta}
-            onChange={(event) =>
-              setNewDraft({ ...newDraft, currencyDelta: Number(event.target.value) })
-            }
+            type="text"
+            inputMode="numeric"
+            value={newDeltaText}
+            onChange={(event) => setDeltaText(NEW_ROW_KEY, event.target.value)}
+            placeholder="1 or -1"
           />
         </label>
-        <label className="settings-field">
-          Note
+        <label className="settings-field" style={FIELD_STYLES.note}>
+          Label
           <input
+            title="Internal label — shown only on the dashboard"
             value={newDraft.description ?? ""}
             onChange={(event) => setNewDraft({ ...newDraft, description: event.target.value })}
-            placeholder="optional"
+            placeholder="dashboard label (optional)"
           />
         </label>
-        <label className="settings-field">
+        <label className="settings-field" style={FIELD_STYLES.enabled}>
           Enabled
           <input
             type="checkbox"
@@ -284,22 +342,11 @@ export default function ReactionRulesEditor({
             onChange={(event) => setNewDraft({ ...newDraft, enabled: event.target.checked })}
           />
         </label>
-      </div>
-      <div className="capability-matrix-add">
-        <button
-          type="button"
-          onClick={() => void handleCreate()}
-          disabled={
-            isBusy ||
-            !newDraft.channelId ||
-            !newDraft.botUserId.trim() ||
-            !newDraft.emoji.trim() ||
-            !Number.isFinite(newDraft.currencyDelta) ||
-            newDraft.currencyDelta === 0
-          }
-        >
-          Add reaction rule
-        </button>
+        <div style={{ ...FIELD_STYLES.actions, display: "flex" }}>
+          <button type="button" onClick={() => void handleCreate()} disabled={!canSubmitNew}>
+            Add reaction rule
+          </button>
+        </div>
       </div>
     </fieldset>
   );
