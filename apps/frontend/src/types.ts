@@ -157,6 +157,29 @@ export type DiscordOption = {
   name: string;
 };
 
+export type ReactionRewardRule = {
+  id: string;
+  guildId: string;
+  channelId: string;
+  botUserId: string;
+  emoji: string;
+  currencyDelta: number;
+  description: string | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ReactionRewardRuleDraft = {
+  id?: string;
+  channelId: string;
+  botUserId: string;
+  emoji: string;
+  currencyDelta: number;
+  description: string | null;
+  enabled: boolean;
+};
+
 export type DashboardAccessLevel = "viewer" | "mentor" | "admin";
 
 export type AuthUser = {
@@ -199,6 +222,7 @@ export type BootstrapPayload = {
   assignments: Assignment[];
   participants: Participant[];
   submissions: Submission[];
+  reactionRules: ReactionRewardRule[];
 };
 
 export type TabId =

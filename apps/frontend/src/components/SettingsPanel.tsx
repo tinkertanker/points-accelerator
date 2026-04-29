@@ -1,6 +1,13 @@
 import { useId, useState } from "react";
 
-import type { DiscordOption, RoleCapability, Settings } from "../types";
+import type {
+  DiscordOption,
+  ReactionRewardRule,
+  ReactionRewardRuleDraft,
+  RoleCapability,
+  Settings,
+} from "../types";
+import ReactionRulesEditor from "./ReactionRulesEditor";
 
 type CapabilityToggleKey = keyof Pick<
   RoleCapability,
@@ -207,6 +214,7 @@ function ChannelMultiSelectField({
 type SettingsPanelProps = {
   settingsDraft: Settings;
   roleDrafts: RoleCapability[];
+  reactionRules: ReactionRewardRule[];
   discordRoles: DiscordOption[];
   discordChannels: DiscordOption[];
   isBusy: boolean;
@@ -214,11 +222,15 @@ type SettingsPanelProps = {
   onRoleDraftsChange: (next: RoleCapability[]) => void;
   onSaveSettings: () => Promise<void>;
   onSaveRoles: () => Promise<void>;
+  onCreateReactionRule: (draft: ReactionRewardRuleDraft) => Promise<boolean>;
+  onUpdateReactionRule: (id: string, draft: ReactionRewardRuleDraft) => Promise<boolean>;
+  onDeleteReactionRule: (id: string) => Promise<boolean>;
 };
 
 export default function SettingsPanel({
   settingsDraft,
   roleDrafts,
+  reactionRules,
   discordRoles,
   discordChannels,
   isBusy,
@@ -226,6 +238,9 @@ export default function SettingsPanel({
   onRoleDraftsChange,
   onSaveSettings,
   onSaveRoles,
+  onCreateReactionRule,
+  onUpdateReactionRule,
+  onDeleteReactionRule,
 }: SettingsPanelProps) {
   const sortedDiscordChannels = [...discordChannels].sort((left, right) => left.name.localeCompare(right.name));
 
@@ -721,6 +736,23 @@ export default function SettingsPanel({
                 Add Role Rule
               </button>
             </div>
+          </div>
+        </article>
+
+        <article className="section">
+          <header className="section-header">
+            <h2>React-to-reward rules</h2>
+          </header>
+          <div className="form-grid settings-form-grid">
+            <ReactionRulesEditor
+              rules={reactionRules}
+              channels={discordChannels}
+              currencyName={settingsDraft.currencyName}
+              isBusy={isBusy}
+              onCreate={onCreateReactionRule}
+              onUpdate={onUpdateReactionRule}
+              onDelete={onDeleteReactionRule}
+            />
           </div>
         </article>
       </section>

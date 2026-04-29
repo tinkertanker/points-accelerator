@@ -19,6 +19,10 @@ import {
   type GuildTextBasedChannel,
   type GuildMember,
   type Message,
+  type MessageReaction,
+  type PartialMessageReaction,
+  type PartialUser,
+  type User,
 } from "discord.js";
 
 import type { AppEnv } from "../config/env.js";
@@ -372,10 +376,11 @@ export class BotRuntime {
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildMessageReactions,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.MessageContent,
       ],
-      partials: [Partials.Channel],
+      partials: [Partials.Channel, Partials.Message, Partials.Reaction],
     });
 
     this.client.once("ready", async () => {
@@ -411,6 +416,14 @@ export class BotRuntime {
         content: message.content,
         channelId: message.channelId,
       });
+    });
+
+    this.client.on("messageReactionAdd", async (reaction, user) => {
+      try {
+        await this.handleBotReaction(reaction, user);
+      } catch (error) {
+        console.error("messageReactionAdd handling failed", error);
+      }
     });
 
     this.client.on("interactionCreate", async (interaction) => {
@@ -1802,6 +1815,82 @@ export class BotRuntime {
     if (entry) {
       this.passiveCooldowns.set(cooldownKey, { seenAt: now });
     }
+  }
+
+  private async handleBotReaction(
+    reaction: MessageReaction | PartialMessageReaction,
+    user: User | PartialUser,
+  ) {
+    if (user.id === this.client?.user?.id) {
+      return;
+    }
+
+    let resolvedReaction: MessageReaction;
+    try {
+      resolvedReaction = reaction.partial ? await reaction.fetch() : (reaction as MessageReaction);
+    } catch {
+      return;
+    }
+
+    const message = resolvedReaction.message;
+    const guildId = message.guildId ?? message.guild?.id;
+    if (!guildId || guildId !== this.env.GUILD_ID) {
+      return;
+    }
+
+    const channelId = resolvedReaction.message.channelId;
+    const emojiKey = resolvedReaction.emoji.id ?? resolvedReaction.emoji.name;
+    if (!emojiKey) {
+      return;
+    }
+
+    const rule = await this.services.reactionRewardService.findApplicable({
+      guildId,
+      channelId,
+      botUserId: user.id,
+      emoji: emojiKey,
+    });
+    if (!rule) {
+      return;
+    }
+
+    let resolvedMessage: Message;
+    try {
+      resolvedMessage = message.partial ? await message.fetch() : (message as Message);
+    } catch {
+      return;
+    }
+
+    const author = resolvedMessage.author;
+    if (!author || author.bot) {
+      return;
+    }
+
+    let member: GuildMember | null = resolvedMessage.member ?? null;
+    if (!member && resolvedMessage.guild) {
+      member = await resolvedMessage.guild.members.fetch(author.id).catch(() => null);
+    }
+    if (!member) {
+      return;
+    }
+
+    const resolved = await this.resolveActiveParticipant({
+      discordUserId: author.id,
+      discordUsername: author.username,
+      roleIds: this.getOrderedRoleIds(member),
+    }).catch(() => null);
+    if (!resolved) {
+      return;
+    }
+
+    await this.services.reactionRewardService.applyReaction({
+      guildId,
+      rule,
+      participantId: resolved.participant.id,
+      messageId: resolvedMessage.id,
+      messageAuthorUserId: author.id,
+      messageAuthorUsername: author.username,
+    });
   }
 
   /**

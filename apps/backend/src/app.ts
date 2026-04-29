@@ -186,6 +186,19 @@ const participantRegisterSchema = z.object({
   groupId: z.string().min(1),
 });
 
+const reactionRewardRuleSchema = z.object({
+  channelId: z.string().min(1),
+  botUserId: z.string().min(1),
+  emoji: z.string().min(1),
+  currencyDelta: z
+    .number()
+    .refine((value) => Number.isFinite(value) && value !== 0, {
+      message: "currencyDelta must be a non-zero number",
+    }),
+  description: z.string().nullable().optional(),
+  enabled: z.boolean().optional(),
+});
+
 export function createApp(params: {
   env: AppEnv;
   services: AppServices;
@@ -611,7 +624,7 @@ export function createApp(params: {
     const canManageAdminPages = session.canManageSettings || session.canManageGroups;
     const canManageMentorPages = session.canManageShop || session.canManageAssignments;
 
-    const [settings, leaderboard, capabilities, groups, shopItems, listings, ledger, roles, channels, members, assignments, participants, submissions] =
+    const [settings, leaderboard, capabilities, groups, shopItems, listings, ledger, roles, channels, members, assignments, participants, submissions, reactionRules] =
       await Promise.all([
         services.configService.getOrCreate(params.env.GUILD_ID),
         services.economyService.getLeaderboard(params.env.GUILD_ID),
@@ -630,6 +643,7 @@ export function createApp(params: {
           ? services.participantService.list(params.env.GUILD_ID)
           : Promise.resolve([]),
         canManageMentorPages ? services.submissionService.list(params.env.GUILD_ID) : Promise.resolve([]),
+        canManageAdminPages ? services.reactionRewardService.list(params.env.GUILD_ID) : Promise.resolve([]),
       ]);
 
     return {
@@ -655,6 +669,11 @@ export function createApp(params: {
       assignments,
       participants,
       submissions,
+      reactionRules: reactionRules.map((rule) => ({
+        ...rule,
+        createdAt: rule.createdAt.toISOString(),
+        updatedAt: rule.updatedAt.toISOString(),
+      })),
     };
   });
 
@@ -696,6 +715,57 @@ export function createApp(params: {
   app.post("/api/groups", { preHandler: requireAdmin }, async (request) => {
     const group = await services.groupService.upsert(params.env.GUILD_ID, groupSchema.parse(request.body));
     return group;
+  });
+
+  const serialiseReactionRule = (
+    rule: Awaited<ReturnType<AppServices["reactionRewardService"]["list"]>>[number],
+  ) => ({
+    ...rule,
+    createdAt: rule.createdAt.toISOString(),
+    updatedAt: rule.updatedAt.toISOString(),
+  });
+
+  app.get("/api/reaction-rules", { preHandler: requireAdmin }, async () => {
+    const rules = await services.reactionRewardService.list(params.env.GUILD_ID);
+    return rules.map(serialiseReactionRule);
+  });
+
+  app.post("/api/reaction-rules", { preHandler: requireAdmin }, async (request) => {
+    const session = await resolveDashboardSession(request);
+    const input = reactionRewardRuleSchema.parse(request.body);
+    const rule = await services.reactionRewardService.create({
+      guildId: params.env.GUILD_ID,
+      actorUserId: session.userId,
+      actorUsername: session.username,
+      input,
+    });
+    return serialiseReactionRule(rule);
+  });
+
+  app.put("/api/reaction-rules/:id", { preHandler: requireAdmin }, async (request) => {
+    const session = await resolveDashboardSession(request);
+    const { id } = request.params as { id: string };
+    const input = reactionRewardRuleSchema.parse(request.body);
+    const rule = await services.reactionRewardService.update({
+      guildId: params.env.GUILD_ID,
+      actorUserId: session.userId,
+      actorUsername: session.username,
+      id,
+      input,
+    });
+    return serialiseReactionRule(rule);
+  });
+
+  app.delete("/api/reaction-rules/:id", { preHandler: requireAdmin }, async (request, reply) => {
+    const session = await resolveDashboardSession(request);
+    const { id } = request.params as { id: string };
+    await services.reactionRewardService.remove({
+      guildId: params.env.GUILD_ID,
+      actorUserId: session.userId,
+      actorUsername: session.username,
+      id,
+    });
+    reply.status(204).send();
   });
 
   app.get("/api/leaderboard", { preHandler: requireDashboardMember }, async () => {

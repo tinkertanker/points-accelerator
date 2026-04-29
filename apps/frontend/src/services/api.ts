@@ -14,6 +14,8 @@ import type {
   AuthSession,
   BootstrapPayload,
   GroupDraft,
+  ReactionRewardRule,
+  ReactionRewardRuleDraft,
   RoleCapability,
   Settings,
   ShopRedemption,
@@ -64,6 +66,10 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { message?: string } | null;
     throw new Error(payload?.message ?? `Request failed with status ${response.status}`);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
   }
 
   return (await response.json()) as T;
@@ -171,6 +177,37 @@ export const api = {
     return request<ShopRedemption>(`/api/shop-redemptions/${redemptionId}/status`, {
       method: "POST",
       body: payload,
+    });
+  },
+  createReactionRule(payload: ReactionRewardRuleDraft) {
+    return request<ReactionRewardRule>("/api/reaction-rules", {
+      method: "POST",
+      body: {
+        channelId: payload.channelId,
+        botUserId: payload.botUserId,
+        emoji: payload.emoji,
+        currencyDelta: payload.currencyDelta,
+        description: payload.description,
+        enabled: payload.enabled,
+      },
+    });
+  },
+  updateReactionRule(id: string, payload: ReactionRewardRuleDraft) {
+    return request<ReactionRewardRule>(`/api/reaction-rules/${id}`, {
+      method: "PUT",
+      body: {
+        channelId: payload.channelId,
+        botUserId: payload.botUserId,
+        emoji: payload.emoji,
+        currencyDelta: payload.currencyDelta,
+        description: payload.description,
+        enabled: payload.enabled,
+      },
+    });
+  },
+  deleteReactionRule(id: string) {
+    return request<void>(`/api/reaction-rules/${id}`, {
+      method: "DELETE",
     });
   },
 };

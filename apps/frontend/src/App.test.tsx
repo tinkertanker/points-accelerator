@@ -141,6 +141,7 @@ const bootstrapPayload = {
   assignments: [],
   participants: [],
   submissions: [],
+  reactionRules: [],
   discord: {
     roles: [{ id: "role-1", name: "Admin" }],
     channels: [{ id: "channel-1", name: "general" }],

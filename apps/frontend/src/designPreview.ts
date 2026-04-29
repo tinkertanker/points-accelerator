@@ -492,6 +492,7 @@ function createInitialBootstrap(): BootstrapPayload {
         },
       },
     ],
+    reactionRules: [],
   };
 }
 

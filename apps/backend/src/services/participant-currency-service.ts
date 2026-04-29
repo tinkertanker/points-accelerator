@@ -23,7 +23,8 @@ type EntryKind =
   | "SUBMISSION_REWARD"
   | "BET_WIN"
   | "BET_LOSS"
-  | "LUCKYDRAW_WIN";
+  | "LUCKYDRAW_WIN"
+  | "REACTION_REWARD";
 
 type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
 

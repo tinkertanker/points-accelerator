@@ -20,6 +20,7 @@ import type {
   DashboardAccessLevel,
   Group,
   GroupDraft,
+  ReactionRewardRuleDraft,
   ShopRedemption,
   RoleCapability,
   Settings,
@@ -446,6 +447,7 @@ export default function App() {
           <SettingsPanel
             settingsDraft={settingsDraft}
             roleDrafts={roleDrafts}
+            reactionRules={bootstrap.reactionRules}
             discordRoles={discordRoles}
             discordChannels={discordChannels}
             isBusy={isMutating}
@@ -453,6 +455,9 @@ export default function App() {
             onRoleDraftsChange={setRoleDrafts}
             onSaveSettings={handleSaveSettings}
             onSaveRoles={handleSaveRoles}
+            onCreateReactionRule={handleCreateReactionRule}
+            onUpdateReactionRule={handleUpdateReactionRule}
+            onDeleteReactionRule={handleDeleteReactionRule}
           />
         );
       case "groups":
@@ -611,6 +616,30 @@ export default function App() {
       `${actionLabel} ${redemption.shopItem.name}.`,
       "Failed to update the redemption.",
       refreshRedemptions,
+    );
+  };
+
+  const handleCreateReactionRule = async (draft: ReactionRewardRuleDraft) => {
+    return withMutation(
+      () => api.createReactionRule(draft),
+      "Reaction rule added.",
+      "Failed to add reaction rule.",
+    );
+  };
+
+  const handleUpdateReactionRule = async (id: string, draft: ReactionRewardRuleDraft) => {
+    return withMutation(
+      () => api.updateReactionRule(id, draft),
+      "Reaction rule updated.",
+      "Failed to update reaction rule.",
+    );
+  };
+
+  const handleDeleteReactionRule = async (id: string) => {
+    return withMutation(
+      () => api.deleteReactionRule(id),
+      "Reaction rule removed.",
+      "Failed to remove reaction rule.",
     );
   };
 

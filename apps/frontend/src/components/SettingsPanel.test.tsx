@@ -33,6 +33,7 @@ function renderSettingsPanel(overrides?: Partial<Settings>) {
     <SettingsPanel
       settingsDraft={{ ...baseSettings, ...overrides }}
       roleDrafts={[]}
+      reactionRules={[]}
       discordRoles={[]}
       discordChannels={[
         { id: "channel-alpha", name: "alpha-chat" },
@@ -44,6 +45,9 @@ function renderSettingsPanel(overrides?: Partial<Settings>) {
       onRoleDraftsChange={vi.fn()}
       onSaveSettings={vi.fn(async () => undefined)}
       onSaveRoles={vi.fn(async () => undefined)}
+      onCreateReactionRule={vi.fn(async () => true)}
+      onUpdateReactionRule={vi.fn(async () => true)}
+      onDeleteReactionRule={vi.fn(async () => true)}
     />,
   );
 
