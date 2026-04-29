@@ -80,6 +80,7 @@ const LEDGER_FIELD_VALUE_MAX = 1024;
 const LEADERBOARD_FEATURED_COUNT = 4;
 const GROUP_LEADERBOARD_COLOUR = 0xf59e0b;
 const FORBES_EMBED_COLOUR = 0x38bdf8;
+const BALANCE_EMBED_COLOUR = 0x6366f1;
 const STORE_EMBED_COLOUR = 0x10b981;
 const INVENTORY_EMBED_COLOUR = 0xec4899;
 const AUTOCOMPLETE_CHOICE_LIMIT = 25;
@@ -2493,13 +2494,61 @@ export class BotRuntime {
           discordUsername: interaction.user.username,
           roleIds,
         });
-        const balance = await this.services.economyService.getGroupBalance(group.id);
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-        const walletBalance = await this.services.participantCurrencyService.getParticipantBalance(participant.id);
-        await interaction.reply({
-          content: `${group.displayName}: ${this.formatPointsAmount(balance.pointsBalance, config)} available for the leaderboard and /buy group. Your wallet: ${this.formatCurrencyAmount(walletBalance, config)}.`,
-          ephemeral: true,
-        });
+        const [config, balance, walletBalance, groupLeaderboard, currencyLeaderboard] = await Promise.all([
+          this.services.configService.getOrCreate(this.env.GUILD_ID),
+          this.services.economyService.getGroupBalance(group.id),
+          this.services.participantCurrencyService.getParticipantBalance(participant.id),
+          this.services.economyService.getLeaderboard(this.env.GUILD_ID),
+          this.services.participantService.getCurrencyLeaderboard(this.env.GUILD_ID),
+        ]);
+
+        const groupRankIndex = groupLeaderboard.findIndex((entry) => entry.id === group.id);
+        const walletRankIndex = currencyLeaderboard.findIndex((entry) => entry.id === participant.id);
+        const formatRankOf = (index: number, total: number) =>
+          index >= 0
+            ? index < 3
+              ? `${this.formatRankMarker(index)} of ${total}`
+              : `#${index + 1} of ${total}`
+            : "Unranked";
+
+        const memberDisplayName =
+          member?.displayName ?? interaction.user.globalName ?? interaction.user.username;
+
+        const embed = new EmbedBuilder()
+          .setColor(BALANCE_EMBED_COLOUR)
+          .setAuthor({
+            name: memberDisplayName,
+            iconURL: interaction.user.displayAvatarURL(),
+          })
+          .setTitle("Your Balance")
+          .setDescription(
+            `Snapshot of your shared ${config.pointsName} and personal ${config.currencyName}.`,
+          )
+          .addFields(
+            {
+              name: `Group ${config.pointsName}`,
+              value: [
+                `**${group.displayName}**`,
+                this.formatPointsAmount(balance.pointsBalance, config),
+                `Rank ${formatRankOf(groupRankIndex, groupLeaderboard.length)}`,
+              ].join("\n"),
+              inline: true,
+            },
+            {
+              name: `Wallet ${config.currencyName}`,
+              value: [
+                `**${memberDisplayName}**`,
+                this.formatCurrencyAmount(walletBalance, config),
+                `Rank ${formatRankOf(walletRankIndex, currencyLeaderboard.length)}`,
+              ].join("\n"),
+              inline: true,
+            },
+          )
+          .setFooter({
+            text: `Group ${config.pointsName} fuel /leaderboard and /buy group · Wallet ${config.currencyName} powers /forbes and /buy personal.`,
+          });
+
+        await interaction.reply({ embeds: [embed], ephemeral: true });
         return;
       }
       case "ledger": {
