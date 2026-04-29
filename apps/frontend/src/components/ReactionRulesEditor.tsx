@@ -114,7 +114,8 @@ export default function ReactionRulesEditor({
       <p className="role-checklist__help">
         Award or deduct {currencyName} when a configured bot reacts to a message in a chosen channel. The
         message author receives the delta. Find a bot's user ID by enabling Discord Developer Mode and
-        right-clicking the bot user.
+        right-clicking the bot user. For unicode emoji paste it directly (e.g. ✅); for a custom emoji
+        paste either the raw form (<code>{"<:name:id>"}</code>) or just the ID — both are accepted.
       </p>
 
       {rules.length === 0 ? (

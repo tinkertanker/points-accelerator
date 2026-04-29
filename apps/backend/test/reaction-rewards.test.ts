@@ -113,6 +113,38 @@ describe("reaction reward rules", () => {
     expect(finalList.json()).toEqual([]);
   });
 
+  it("normalises a pasted custom-emoji <:name:id> to the bare ID", async () => {
+    await ctx.services.configService.getOrCreate(ctx.env.GUILD_ID);
+
+    const create = await ctx.app.inject({
+      method: "POST",
+      url: "/api/reaction-rules",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        channelId: "ch-counting",
+        botUserId: "bot-counter",
+        emoji: "<:tally:123456789012345678>",
+        currencyDelta: 1,
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    expect((create.json() as { emoji: string }).emoji).toBe("123456789012345678");
+
+    const animated = await ctx.app.inject({
+      method: "POST",
+      url: "/api/reaction-rules",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        channelId: "ch-counting",
+        botUserId: "bot-counter",
+        emoji: "<a:partying:234567890123456789>",
+        currencyDelta: 1,
+      },
+    });
+    expect(animated.statusCode).toBe(200);
+    expect((animated.json() as { emoji: string }).emoji).toBe("234567890123456789");
+  });
+
   it("rejects zero currencyDelta and duplicate (channel, bot, emoji) tuples", async () => {
     await ctx.services.configService.getOrCreate(ctx.env.GUILD_ID);
 

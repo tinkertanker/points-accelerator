@@ -42,10 +42,18 @@ function serialise(rule: Prisma.ReactionRewardRuleGetPayload<{}>): ReactionRewar
   };
 }
 
+const CUSTOM_EMOJI_PATTERN = /^<a?:[^:]+:(\d{17,20})>$/;
+
+function normaliseEmoji(value: string): string {
+  const trimmed = value.trim();
+  const match = trimmed.match(CUSTOM_EMOJI_PATTERN);
+  return match ? match[1] : trimmed;
+}
+
 function normaliseInput(input: ReactionRewardRuleInput) {
   const channelId = input.channelId.trim();
   const botUserId = input.botUserId.trim();
-  const emoji = input.emoji.trim();
+  const emoji = normaliseEmoji(input.emoji);
   const description = input.description?.trim() || null;
 
   if (!channelId) {
