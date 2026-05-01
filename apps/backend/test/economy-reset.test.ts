@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import {
+  chunkGroupSplits,
+  chunkParticipantSplits,
+} from "../src/services/economy-reset-service.js";
 import { decimal, decimalToNumber } from "../src/utils/decimal.js";
 
 import { createTestApp, resetDatabase } from "./helpers/test-app.js";
@@ -535,5 +539,78 @@ describe("EconomyResetService.moduloBalances", () => {
         dryRun: true,
       }),
     ).rejects.toThrow(/at least one target/i);
+  });
+});
+
+describe("EconomyResetService chunking helpers", () => {
+  it("chunkParticipantSplits leaves small deltas alone", () => {
+    expect(chunkParticipantSplits([{ participantId: "p", currencyDelta: 500 }])).toEqual([
+      { participantId: "p", currencyDelta: 500 },
+    ]);
+  });
+
+  it("chunkParticipantSplits splits a delta exceeding the Decimal(18,6) integer limit", () => {
+    const delta = -119_999_999_999_001; // bigger than 999_999_999_999
+    const chunks = chunkParticipantSplits([{ participantId: "p", currencyDelta: delta }]);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(Math.abs(chunk.currencyDelta)).toBeLessThanOrEqual(999_999_999_999);
+    }
+    const sum = chunks.reduce((acc, c) => acc + c.currencyDelta, 0);
+    expect(sum).toBe(delta);
+  });
+
+  it("chunkGroupSplits chunks pointsDelta and currencyDelta independently", () => {
+    const splits = [
+      { groupId: "g", pointsDelta: 2_500_000_000_000, currencyDelta: 100 },
+    ];
+    const chunks = chunkGroupSplits(splits);
+    for (const c of chunks) {
+      expect(Math.abs(c.pointsDelta)).toBeLessThanOrEqual(999_999_999_999);
+      expect(Math.abs(c.currencyDelta)).toBeLessThanOrEqual(999_999_999_999);
+    }
+    const sumPoints = chunks.reduce((a, c) => a + c.pointsDelta, 0);
+    const sumCurrency = chunks.reduce((a, c) => a + c.currencyDelta, 0);
+    expect(sumPoints).toBe(2_500_000_000_000);
+    expect(sumCurrency).toBe(100);
+  });
+});
+
+describe("EconomyResetService.setBalances", () => {
+  it("nukes participant currency to 0 (handles even outsized abuse balances via chunking)", async () => {
+    const group = await seedGroup("alpha", "role-alpha");
+    const huge = await seedParticipant(group.id, "huge", "p-huge");
+
+    // simulate the abuse: 50 entries of 999_999_999_999 each
+    for (let i = 0; i < 50; i++) {
+      await recordParticipantEntry({
+        type: "LUCKYDRAW_WIN",
+        participantId: huge.id,
+        currencyDelta: 999_999_999_999,
+        createdAt: new Date(`2026-05-01T0${i % 10}:00:00Z`),
+      });
+    }
+    expect(await getParticipantBalance(huge.id)).toBe(50 * 999_999_999_999);
+
+    const result = await ctx.services.economyResetService.setBalances({
+      guildId: GUILD_ID,
+      actor: { userId: "admin-1", username: "Admin" },
+      targetParticipantCurrency: 0,
+      dryRun: false,
+    });
+
+    expect(result.dryRun).toBe(false);
+    expect(result.participantCorrectionEntryId).toBeTruthy();
+    expect(await getParticipantBalance(huge.id)).toBe(0);
+  });
+
+  it("rejects when no buckets are selected", async () => {
+    await expect(
+      ctx.services.economyResetService.setBalances({
+        guildId: GUILD_ID,
+        actor: { userId: "admin-1", username: "Admin" },
+        dryRun: true,
+      }),
+    ).rejects.toThrow(/at least one bucket/i);
   });
 });

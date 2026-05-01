@@ -247,6 +247,14 @@ const economyResetSchema = z.discriminatedUnion("mode", [
     note: z.string().max(500).optional(),
     dryRun: z.boolean(),
   }),
+  z.object({
+    mode: z.literal("set-balances"),
+    targetParticipantCurrency: z.number().optional(),
+    targetGroupPoints: z.number().optional(),
+    targetGroupCurrency: z.number().optional(),
+    note: z.string().max(500).optional(),
+    dryRun: z.boolean(),
+  }),
 ]);
 
 const PARTICIPANT_SANCTION_FLAGS = [
@@ -1121,13 +1129,25 @@ export function createApp(params: {
       });
     }
 
-    return services.economyResetService.moduloBalances({
+    if (payload.mode === "modulo-balance") {
+      return services.economyResetService.moduloBalances({
+        guildId: params.env.GUILD_ID,
+        actor,
+        modulus: payload.modulus,
+        applyToParticipantCurrency: payload.applyToParticipantCurrency,
+        applyToGroupPoints: payload.applyToGroupPoints,
+        applyToGroupCurrency: payload.applyToGroupCurrency,
+        dryRun: payload.dryRun,
+        note: payload.note,
+      });
+    }
+
+    return services.economyResetService.setBalances({
       guildId: params.env.GUILD_ID,
       actor,
-      modulus: payload.modulus,
-      applyToParticipantCurrency: payload.applyToParticipantCurrency,
-      applyToGroupPoints: payload.applyToGroupPoints,
-      applyToGroupCurrency: payload.applyToGroupCurrency,
+      targetParticipantCurrency: payload.targetParticipantCurrency,
+      targetGroupPoints: payload.targetGroupPoints,
+      targetGroupCurrency: payload.targetGroupCurrency,
       dryRun: payload.dryRun,
       note: payload.note,
     });

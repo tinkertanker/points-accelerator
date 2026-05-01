@@ -71,8 +71,23 @@ export type ModuloBalancesResult = {
   groupCorrectionEntryId: string | null;
 };
 
+export type SetBalancesResult = {
+  mode: "set-balances";
+  dryRun: boolean;
+  participantImpact: ParticipantImpact[];
+  groupImpact: GroupImpact[];
+  totalCurrencyDelta: number;
+  totalPointsDelta: number;
+  participantCorrectionEntryId: string | null;
+  groupCorrectionEntryId: string | null;
+};
+
 const PARTICIPANT_REVERSAL_TYPE: ParticipantCurrencyEntryType = "CORRECTION";
 const GROUP_REVERSAL_TYPE: LedgerEntryType = "CORRECTION";
+// Decimal(18,6) columns can hold up to 999_999_999_999.999999 in absolute
+// value (precision 18, scale 6 → 12 integer digits). Splits with a magnitude
+// exceeding this overflow Postgres on insert, so we chunk them before write.
+const MAX_SPLIT_MAGNITUDE = 999_999_999_999;
 
 export class EconomyResetService {
   public constructor(
@@ -201,7 +216,7 @@ export class EconomyResetService {
           : `Economy reset — reversed entries since ${params.since.toISOString()}`;
 
         if (participantSplitsToWrite.length > 0) {
-          const merged = mergeParticipantSplits(participantSplitsToWrite);
+          const merged = chunkParticipantSplits(mergeParticipantSplits(participantSplitsToWrite));
           const created = await tx.participantCurrencyEntry.create({
             data: {
               guildId: params.guildId,
@@ -221,7 +236,7 @@ export class EconomyResetService {
         }
 
         if (groupSplitsToWrite.length > 0) {
-          const merged = mergeGroupSplits(groupSplitsToWrite);
+          const merged = chunkGroupSplits(mergeGroupSplits(groupSplitsToWrite));
           const created = await tx.ledgerEntry.create({
             data: {
               guildId: params.guildId,
@@ -399,7 +414,8 @@ export class EconomyResetService {
           ? params.note.trim()
           : `Economy reset — capped balances`;
 
-        if (participantSplits.length > 0) {
+        const chunkedParticipantSplits = chunkParticipantSplits(participantSplits);
+        if (chunkedParticipantSplits.length > 0) {
           const created = await tx.participantCurrencyEntry.create({
             data: {
               guildId: params.guildId,
@@ -408,7 +424,7 @@ export class EconomyResetService {
               createdByUserId: params.actor.userId,
               createdByUsername: params.actor.username,
               splits: {
-                create: participantSplits.map((split) => ({
+                create: chunkedParticipantSplits.map((split) => ({
                   participantId: split.participantId,
                   currencyDelta: decimal(split.currencyDelta),
                 })),
@@ -418,7 +434,8 @@ export class EconomyResetService {
           participantCorrectionEntryId = created.id;
         }
 
-        if (groupSplits.length > 0) {
+        const chunkedGroupSplits = chunkGroupSplits(groupSplits);
+        if (chunkedGroupSplits.length > 0) {
           const created = await tx.ledgerEntry.create({
             data: {
               guildId: params.guildId,
@@ -427,7 +444,7 @@ export class EconomyResetService {
               createdByUserId: params.actor.userId,
               createdByUsername: params.actor.username,
               splits: {
-                create: groupSplits.map((split) => ({
+                create: chunkedGroupSplits.map((split) => ({
                   groupId: split.groupId,
                   pointsDelta: decimal(split.pointsDelta),
                   currencyDelta: decimal(split.currencyDelta),
@@ -591,7 +608,8 @@ export class EconomyResetService {
           ? params.note.trim()
           : `Economy reset — kept balances modulo ${params.modulus}`;
 
-        if (participantSplits.length > 0) {
+        const chunkedParticipantSplits = chunkParticipantSplits(participantSplits);
+        if (chunkedParticipantSplits.length > 0) {
           const created = await tx.participantCurrencyEntry.create({
             data: {
               guildId: params.guildId,
@@ -600,7 +618,7 @@ export class EconomyResetService {
               createdByUserId: params.actor.userId,
               createdByUsername: params.actor.username,
               splits: {
-                create: participantSplits.map((split) => ({
+                create: chunkedParticipantSplits.map((split) => ({
                   participantId: split.participantId,
                   currencyDelta: decimal(split.currencyDelta),
                 })),
@@ -610,7 +628,8 @@ export class EconomyResetService {
           participantCorrectionEntryId = created.id;
         }
 
-        if (groupSplits.length > 0) {
+        const chunkedGroupSplits = chunkGroupSplits(groupSplits);
+        if (chunkedGroupSplits.length > 0) {
           const created = await tx.ledgerEntry.create({
             data: {
               guildId: params.guildId,
@@ -619,7 +638,7 @@ export class EconomyResetService {
               createdByUserId: params.actor.userId,
               createdByUsername: params.actor.username,
               splits: {
-                create: groupSplits.map((split) => ({
+                create: chunkedGroupSplits.map((split) => ({
                   groupId: split.groupId,
                   pointsDelta: decimal(split.pointsDelta),
                   currencyDelta: decimal(split.currencyDelta),
@@ -655,6 +674,197 @@ export class EconomyResetService {
         mode: "modulo-balance",
         dryRun: params.dryRun,
         modulus: params.modulus,
+        participantImpact,
+        groupImpact,
+        totalCurrencyDelta,
+        totalPointsDelta,
+        participantCorrectionEntryId,
+        groupCorrectionEntryId,
+      };
+    });
+  }
+
+  /**
+   * Set every balance in the selected buckets to a fixed target value
+   * (default 0 — i.e. nuke). Writes a single CORRECTION entry per ledger
+   * containing one split per affected entity with delta = target - balance.
+   */
+  public async setBalances(params: {
+    guildId: string;
+    actor: ResetActor;
+    targetParticipantCurrency?: number;
+    targetGroupPoints?: number;
+    targetGroupCurrency?: number;
+    dryRun: boolean;
+    note?: string;
+  }): Promise<SetBalancesResult> {
+    const enabled = [
+      ["targetParticipantCurrency", params.targetParticipantCurrency],
+      ["targetGroupPoints", params.targetGroupPoints],
+      ["targetGroupCurrency", params.targetGroupCurrency],
+    ] as const;
+    if (enabled.every(([, value]) => value === undefined)) {
+      throw new AppError("Select at least one bucket to set.", 400);
+    }
+    for (const [name, value] of enabled) {
+      if (value !== undefined && !Number.isFinite(value)) {
+        throw new AppError(`${name} must be a finite number.`, 400);
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const participantImpact: ParticipantImpact[] = [];
+      const groupImpact: GroupImpact[] = [];
+      const participantSplits: Array<{ participantId: string; currencyDelta: number }> = [];
+      const groupSplits: Array<{ groupId: string; pointsDelta: number; currencyDelta: number }> = [];
+
+      if (params.targetParticipantCurrency !== undefined) {
+        const target = params.targetParticipantCurrency;
+        const grouped = await tx.participantCurrencySplit.groupBy({
+          by: ["participantId"],
+          _sum: { currencyDelta: true },
+          where: { participant: { guildId: params.guildId } },
+        });
+        const drift = grouped
+          .map((row) => ({ id: row.participantId, balance: decimalToNumber(row._sum.currencyDelta) }))
+          .filter((row) => row.balance !== target);
+        if (drift.length > 0) {
+          const participants = await tx.participant.findMany({
+            where: { id: { in: drift.map((row) => row.id) } },
+            select: { id: true, discordUserId: true, discordUsername: true },
+          });
+          const byId = new Map(participants.map((p) => [p.id, p]));
+          for (const row of drift) {
+            const p = byId.get(row.id);
+            if (!p) continue;
+            const delta = target - row.balance;
+            participantSplits.push({ participantId: row.id, currencyDelta: delta });
+            participantImpact.push({
+              participantId: row.id,
+              discordUserId: p.discordUserId,
+              discordUsername: p.discordUsername,
+              balanceBefore: row.balance,
+              delta,
+              balanceAfter: target,
+            });
+          }
+        }
+      }
+
+      if (
+        params.targetGroupPoints !== undefined ||
+        params.targetGroupCurrency !== undefined
+      ) {
+        const grouped = await tx.ledgerSplit.groupBy({
+          by: ["groupId"],
+          _sum: { pointsDelta: true, currencyDelta: true },
+          where: { group: { guildId: params.guildId } },
+        });
+        const groupIds = grouped.map((row) => row.groupId);
+        const groups = groupIds.length
+          ? await tx.group.findMany({ where: { id: { in: groupIds } }, select: { id: true, displayName: true } })
+          : [];
+        const byId = new Map(groups.map((g) => [g.id, g]));
+        for (const row of grouped) {
+          const group = byId.get(row.groupId);
+          if (!group) continue;
+          const pointsBefore = decimalToNumber(row._sum.pointsDelta);
+          const currencyBefore = decimalToNumber(row._sum.currencyDelta);
+          const pointsDelta =
+            params.targetGroupPoints !== undefined ? params.targetGroupPoints - pointsBefore : 0;
+          const currencyDelta =
+            params.targetGroupCurrency !== undefined ? params.targetGroupCurrency - currencyBefore : 0;
+          if (pointsDelta === 0 && currencyDelta === 0) continue;
+          groupSplits.push({ groupId: row.groupId, pointsDelta, currencyDelta });
+          groupImpact.push({
+            groupId: row.groupId,
+            displayName: group.displayName,
+            pointsBefore,
+            pointsDelta,
+            pointsAfter: pointsBefore + pointsDelta,
+            currencyBefore,
+            currencyDelta,
+            currencyAfter: currencyBefore + currencyDelta,
+          });
+        }
+      }
+
+      let participantCorrectionEntryId: string | null = null;
+      let groupCorrectionEntryId: string | null = null;
+      const totalCurrencyDelta =
+        participantImpact.reduce((sum, row) => sum + row.delta, 0) +
+        groupImpact.reduce((sum, row) => sum + row.currencyDelta, 0);
+      const totalPointsDelta = groupImpact.reduce((sum, row) => sum + row.pointsDelta, 0);
+
+      if (!params.dryRun) {
+        const description = params.note?.trim()
+          ? params.note.trim()
+          : `Economy reset — set balances`;
+
+        const chunkedParticipantSplits = chunkParticipantSplits(participantSplits);
+        if (chunkedParticipantSplits.length > 0) {
+          const created = await tx.participantCurrencyEntry.create({
+            data: {
+              guildId: params.guildId,
+              type: PARTICIPANT_REVERSAL_TYPE,
+              description,
+              createdByUserId: params.actor.userId,
+              createdByUsername: params.actor.username,
+              splits: {
+                create: chunkedParticipantSplits.map((split) => ({
+                  participantId: split.participantId,
+                  currencyDelta: decimal(split.currencyDelta),
+                })),
+              },
+            },
+          });
+          participantCorrectionEntryId = created.id;
+        }
+
+        const chunkedGroupSplits = chunkGroupSplits(groupSplits);
+        if (chunkedGroupSplits.length > 0) {
+          const created = await tx.ledgerEntry.create({
+            data: {
+              guildId: params.guildId,
+              type: GROUP_REVERSAL_TYPE,
+              description,
+              createdByUserId: params.actor.userId,
+              createdByUsername: params.actor.username,
+              splits: {
+                create: chunkedGroupSplits.map((split) => ({
+                  groupId: split.groupId,
+                  pointsDelta: decimal(split.pointsDelta),
+                  currencyDelta: decimal(split.currencyDelta),
+                })),
+              },
+            },
+          });
+          groupCorrectionEntryId = created.id;
+        }
+
+        await this.auditService.record({
+          guildId: params.guildId,
+          actorUserId: params.actor.userId,
+          actorUsername: params.actor.username,
+          action: "economy.reset.set_balances",
+          entityType: "EconomyReset",
+          payload: {
+            targetParticipantCurrency: params.targetParticipantCurrency ?? null,
+            targetGroupPoints: params.targetGroupPoints ?? null,
+            targetGroupCurrency: params.targetGroupCurrency ?? null,
+            participantCorrectionEntryId,
+            groupCorrectionEntryId,
+            totalCurrencyDelta,
+            totalPointsDelta,
+            note: params.note ?? null,
+          },
+          executor: tx,
+        });
+      }
+
+      return {
+        mode: "set-balances",
+        dryRun: params.dryRun,
         participantImpact,
         groupImpact,
         totalCurrencyDelta,
@@ -733,4 +943,64 @@ function mergeGroupSplits(
   return Array.from(merged, ([groupId, deltas]) => ({ groupId, ...deltas })).filter(
     (row) => row.pointsDelta !== 0 || row.currencyDelta !== 0,
   );
+}
+
+function chunkSigned(value: number): number[] {
+  if (value === 0) return [];
+  if (Math.abs(value) <= MAX_SPLIT_MAGNITUDE) return [value];
+  const chunks: number[] = [];
+  let remaining = value;
+  const sign = remaining > 0 ? 1 : -1;
+  while (Math.abs(remaining) > MAX_SPLIT_MAGNITUDE) {
+    chunks.push(sign * MAX_SPLIT_MAGNITUDE);
+    remaining -= sign * MAX_SPLIT_MAGNITUDE;
+  }
+  if (remaining !== 0) chunks.push(remaining);
+  return chunks;
+}
+
+export function chunkParticipantSplits(
+  splits: Array<{ participantId: string; currencyDelta: number }>,
+): Array<{ participantId: string; currencyDelta: number }> {
+  const out: Array<{ participantId: string; currencyDelta: number }> = [];
+  for (const split of splits) {
+    for (const currencyDelta of chunkSigned(split.currencyDelta)) {
+      out.push({ participantId: split.participantId, currencyDelta });
+    }
+  }
+  return out;
+}
+
+export function chunkGroupSplits(
+  splits: Array<{ groupId: string; pointsDelta: number; currencyDelta: number }>,
+): Array<{ groupId: string; pointsDelta: number; currencyDelta: number }> {
+  const out: Array<{ groupId: string; pointsDelta: number; currencyDelta: number }> = [];
+  for (const split of splits) {
+    let pointsRemaining = split.pointsDelta;
+    let currencyRemaining = split.currencyDelta;
+    while (
+      Math.abs(pointsRemaining) > MAX_SPLIT_MAGNITUDE ||
+      Math.abs(currencyRemaining) > MAX_SPLIT_MAGNITUDE
+    ) {
+      const pointsChunk =
+        Math.abs(pointsRemaining) > MAX_SPLIT_MAGNITUDE
+          ? (pointsRemaining > 0 ? MAX_SPLIT_MAGNITUDE : -MAX_SPLIT_MAGNITUDE)
+          : pointsRemaining;
+      const currencyChunk =
+        Math.abs(currencyRemaining) > MAX_SPLIT_MAGNITUDE
+          ? (currencyRemaining > 0 ? MAX_SPLIT_MAGNITUDE : -MAX_SPLIT_MAGNITUDE)
+          : currencyRemaining;
+      out.push({ groupId: split.groupId, pointsDelta: pointsChunk, currencyDelta: currencyChunk });
+      pointsRemaining -= pointsChunk;
+      currencyRemaining -= currencyChunk;
+    }
+    if (pointsRemaining !== 0 || currencyRemaining !== 0) {
+      out.push({
+        groupId: split.groupId,
+        pointsDelta: pointsRemaining,
+        currencyDelta: currencyRemaining,
+      });
+    }
+  }
+  return out;
 }

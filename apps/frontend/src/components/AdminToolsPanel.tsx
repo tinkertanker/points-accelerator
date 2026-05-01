@@ -83,6 +83,13 @@ type ResetState = {
   applyToParticipantCurrency: boolean;
   applyToGroupPoints: boolean;
   applyToGroupCurrency: boolean;
+  // set-balances
+  targetParticipantCurrency: string;
+  targetGroupPoints: string;
+  targetGroupCurrency: string;
+  setParticipantCurrencyEnabled: boolean;
+  setGroupPointsEnabled: boolean;
+  setGroupCurrencyEnabled: boolean;
   // shared
   note: string;
 };
@@ -102,6 +109,12 @@ function defaultState(): ResetState {
     applyToParticipantCurrency: true,
     applyToGroupPoints: true,
     applyToGroupCurrency: true,
+    targetParticipantCurrency: "0",
+    targetGroupPoints: "0",
+    targetGroupCurrency: "0",
+    setParticipantCurrencyEnabled: true,
+    setGroupPointsEnabled: true,
+    setGroupCurrencyEnabled: true,
     note: "",
   };
 }
@@ -130,12 +143,26 @@ function buildRequest(state: ResetState, dryRun: boolean): EconomyResetRequest {
       dryRun,
     };
   }
+  if (state.mode === "modulo-balance") {
+    return {
+      mode: "modulo-balance",
+      modulus: Number(state.modulus),
+      applyToParticipantCurrency: state.applyToParticipantCurrency,
+      applyToGroupPoints: state.applyToGroupPoints,
+      applyToGroupCurrency: state.applyToGroupCurrency,
+      note,
+      dryRun,
+    };
+  }
   return {
-    mode: "modulo-balance",
-    modulus: Number(state.modulus),
-    applyToParticipantCurrency: state.applyToParticipantCurrency,
-    applyToGroupPoints: state.applyToGroupPoints,
-    applyToGroupCurrency: state.applyToGroupCurrency,
+    mode: "set-balances",
+    targetParticipantCurrency: state.setParticipantCurrencyEnabled
+      ? Number(state.targetParticipantCurrency)
+      : undefined,
+    targetGroupPoints: state.setGroupPointsEnabled ? Number(state.targetGroupPoints) : undefined,
+    targetGroupCurrency: state.setGroupCurrencyEnabled
+      ? Number(state.targetGroupCurrency)
+      : undefined,
     note,
     dryRun,
   };
@@ -206,7 +233,7 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
         <header className="section-header">
           <h2>Economy reset</h2>
           <p className="section-help">
-            Three modes for reining in runaway balances. All modes write append-only{" "}
+            Four modes for reining in runaway balances. All modes write append-only{" "}
             <code>CORRECTION</code> ledger entries — nothing is destroyed; everything is auditable.
             Always run a dry run first.
           </p>
@@ -225,6 +252,7 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
               <option value="modulo-balance">Keep last N digits (balance % modulus)</option>
               <option value="reverse-entries-since">Reverse ledger entries since…</option>
               <option value="cap-balances">Cap balances at maximum</option>
+              <option value="set-balances">☢️ Nuke — set balances to a fixed value (default 0)</option>
             </select>
           </label>
         </div>
@@ -362,6 +390,59 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
               />
             </label>
           </div>
+        )}
+
+        {state.mode === "set-balances" && (
+          <>
+            <p className="section-help">
+              Set every selected balance to a fixed value (default 0). Leaves untouched balances
+              that already match. Use 0 across the board to nuke the economy.
+            </p>
+            <div className="form-row">
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={state.setParticipantCurrencyEnabled}
+                  onChange={(event) => update({ setParticipantCurrencyEnabled: event.target.checked })}
+                />
+                <span>Participant wallets to</span>
+                <input
+                  type="number"
+                  value={state.targetParticipantCurrency}
+                  onChange={(event) => update({ targetParticipantCurrency: event.target.value })}
+                  disabled={!state.setParticipantCurrencyEnabled}
+                />
+              </label>
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={state.setGroupPointsEnabled}
+                  onChange={(event) => update({ setGroupPointsEnabled: event.target.checked })}
+                />
+                <span>Group points to</span>
+                <input
+                  type="number"
+                  value={state.targetGroupPoints}
+                  onChange={(event) => update({ targetGroupPoints: event.target.value })}
+                  disabled={!state.setGroupPointsEnabled}
+                />
+              </label>
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={state.setGroupCurrencyEnabled}
+                  onChange={(event) => update({ setGroupCurrencyEnabled: event.target.checked })}
+                />
+                <span>Group currency to</span>
+                <input
+                  type="number"
+                  value={state.targetGroupCurrency}
+                  onChange={(event) => update({ targetGroupCurrency: event.target.value })}
+                  disabled={!state.setGroupCurrencyEnabled}
+                />
+              </label>
+            </div>
+          </>
         )}
 
         <div className="form-row">
@@ -648,7 +729,8 @@ function ResetResultView({ result }: { result: EconomyResetResult }) {
           {result.mode === "cap-balances" && <>Capped any balance over the configured maximum.</>}
           {result.mode === "modulo-balance" && (
             <>Trimmed positive balances using modulus {result.modulus}.</>
-          )}{" "}
+          )}
+          {result.mode === "set-balances" && <>Set selected balances to fixed targets.</>}{" "}
           Total currency delta: <strong>{formatDelta(result.totalCurrencyDelta)}</strong>. Total
           points delta: <strong>{formatDelta(result.totalPointsDelta)}</strong>.
         </p>

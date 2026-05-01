@@ -1693,14 +1693,16 @@ export class BotRuntime {
       currencySymbol: params.config.currencySymbol,
     });
     if (result.ok) return true;
-    const replyContent =
-      params.interaction.replied || params.interaction.deferred
-        ? null
-        : { content: result.message, ephemeral: true };
-    if (replyContent) {
-      await params.interaction.reply(replyContent).catch(() => undefined);
+    const publicContent = `<@${params.interaction.user.id}> ${result.message}`;
+    const allowedMentions = { users: [params.interaction.user.id] };
+    if (params.interaction.replied || params.interaction.deferred) {
+      await params.interaction
+        .followUp({ content: publicContent, allowedMentions })
+        .catch(() => undefined);
     } else {
-      await params.interaction.followUp({ content: result.message, ephemeral: true }).catch(() => undefined);
+      await params.interaction
+        .reply({ content: publicContent, allowedMentions })
+        .catch(() => undefined);
     }
     return false;
   }
