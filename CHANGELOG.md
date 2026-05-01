@@ -8,6 +8,18 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.6.0] - 2026-05-01
+
+### Added
+- **Admin tools** dashboard tab housing two new features for keeping the economy under control.
+- **Economy reset tool** — four modes for recovering from runaway balances: keep the last N digits (modulo), cap at a maximum, reverse ledger entries since a timestamp, or set everyone to a fixed value (the ☢️ Nuke option). Every mode has a dry-run preview, and all writes are append-only `CORRECTION` ledger entries — nothing is destroyed; everything is auditable.
+- **Per-participant sanctions** — timeout specific participants from betting, passive earnings, shop purchases, transfers, or receiving rewards. Reason and optional expiry per sanction; revoke any time.
+- **Activity channel allowlists with a wrong-channel tax** — restrict `/bet`, `/luckydraw`, points commands (`/award`, `/deduct`, `/transfer`, `/donate`), and shop commands to designated channels. Running them elsewhere costs the offender a configurable currency penalty (capped at their balance — never goes negative) and gets called out publicly in the channel. Empty allowlist = no restriction.
+
+### Changed
+- `/luckydraw` minimum duration raised from 10 seconds to 5 minutes — so draws are actually winnable.
+- `/luckydraw` prize cap — `prize × winners` must now fit under the caller's role `maxAward`. Admins with no max are still uncapped. The previous "system action" bypass is gone.
+
 ## [0.5.2] - 2026-04-29
 
 ### Changed
