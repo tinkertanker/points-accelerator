@@ -2146,6 +2146,38 @@ describe("bot runtime", () => {
       expect(services.luckyDrawService.create).not.toHaveBeenCalled();
     });
 
+    it("rejects when total payout (prize × winners) exceeds the caller's maxAward", async () => {
+      const { runtime, services } = createRuntimeFixture();
+      services.roleCapabilityService.listForRoleIds.mockResolvedValue([
+        { canAward: true, canDeduct: false, canManageDashboard: false, canMultiAward: true, canSell: false, maxAward: { toString: () => "100" }, actionCooldownSeconds: 0 },
+      ]);
+      const fetchMember = vi.fn().mockResolvedValue({
+        roles: { cache: new Map([["mentor-role", { id: "mentor-role", rawPosition: 5 }]]) },
+        permissions: { has: vi.fn().mockReturnValue(false) },
+      });
+
+      await expect(
+        (runtime as any).handleCommand({
+          commandName: "luckydraw",
+          guild: { members: { fetch: fetchMember } },
+          channel: { isTextBased: () => true, send: vi.fn() },
+          channelId: "channel-1",
+          options: {
+            getString: vi.fn((name: string) => (name === "duration" ? "5m" : null)),
+            getInteger: vi.fn((name: string) => {
+              if (name === "prize") return 60;
+              if (name === "winners") return 3;
+              return null;
+            }),
+          },
+          reply: vi.fn(),
+          user: { id: "mentor-1", username: "Mentor" },
+        }),
+      ).rejects.toThrow(/maximum award/i);
+
+      expect(services.luckyDrawService.create).not.toHaveBeenCalled();
+    });
+
     it("rejects callers without canAward unless they're a guild admin", async () => {
       const { runtime, services } = createRuntimeFixture();
       services.roleCapabilityService.listForRoleIds.mockResolvedValue([

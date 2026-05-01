@@ -26,7 +26,7 @@ const UNIT_MS: Record<string, number> = {
   days: DAY_MS,
 };
 
-export const MIN_LUCKY_DRAW_DURATION_MS = 10 * SECOND_MS;
+export const MIN_LUCKY_DRAW_DURATION_MS = 5 * MINUTE_MS;
 export const MAX_LUCKY_DRAW_DURATION_MS = 7 * DAY_MS;
 
 export function parseDuration(input: string): number {
@@ -52,7 +52,7 @@ export function parseDuration(input: string): number {
   }
   const total = Math.round(value * factor);
   if (total < MIN_LUCKY_DRAW_DURATION_MS) {
-    throw new AppError("Duration must be at least 10 seconds.", 400);
+    throw new AppError("Duration must be at least 5 minutes.", 400);
   }
   if (total > MAX_LUCKY_DRAW_DURATION_MS) {
     throw new AppError("Duration must be at most 7 days.", 400);

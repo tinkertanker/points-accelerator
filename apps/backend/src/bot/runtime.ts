@@ -26,7 +26,7 @@ import {
 } from "discord.js";
 
 import type { AppEnv } from "../config/env.js";
-import { resolveCapabilities } from "../domain/permissions.js";
+import { resolveCapabilities, type ResolvedCapabilities } from "../domain/permissions.js";
 import type { AppServices } from "../services/app-services.js";
 import type { StorageService } from "../services/storage-service.js";
 import { AppError } from "../utils/app-error.js";
@@ -2127,13 +2127,14 @@ export class BotRuntime {
     }
 
     const isAdmin = await this.canBypassActionCooldown(params.member, params.roleIds);
+    let resolvedCapabilities: ResolvedCapabilities | null = null;
     if (!isAdmin) {
       const capabilities = await this.services.roleCapabilityService.listForRoleIds(
         this.env.GUILD_ID,
         params.roleIds,
       );
-      const resolved = resolveCapabilities(capabilities);
-      if (!resolved.canAward) {
+      resolvedCapabilities = resolveCapabilities(capabilities);
+      if (!resolvedCapabilities.canAward) {
         throw new AppError("Only roles with the award capability can start a lucky draw.", 403);
       }
     }
@@ -2151,6 +2152,16 @@ export class BotRuntime {
       const winnerCount = interaction.options.getInteger("winners") ?? 1;
       const description = interaction.options.getString("description") ?? null;
       const durationMs = parseDuration(durationInput);
+
+      if (resolvedCapabilities && Number.isFinite(resolvedCapabilities.maxAward)) {
+        const totalPayout = prize * winnerCount;
+        if (totalPayout > resolvedCapabilities.maxAward) {
+          throw new AppError(
+            `Total lucky-draw payout (${totalPayout}) exceeds your role's maximum award of ${resolvedCapabilities.maxAward}. Reduce the prize or winner count.`,
+            403,
+          );
+        }
+      }
 
       const draw = await this.services.luckyDrawService.create({
         guildId: this.env.GUILD_ID,

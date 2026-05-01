@@ -9,17 +9,17 @@ import {
 describe("parseDuration", () => {
   it("accepts the short and long forms of every unit", () => {
     const cases: Array<[string, number]> = [
-      ["30s", 30_000],
-      ["30 s", 30_000],
-      ["30sec", 30_000],
-      ["30 seconds", 30_000],
+      ["600s", 600_000],
+      ["600 s", 600_000],
+      ["600sec", 600_000],
+      ["600 seconds", 600_000],
       ["5m", 5 * 60_000],
       ["5 m", 5 * 60_000],
       ["5min", 5 * 60_000],
       ["5 mins", 5 * 60_000],
-      ["1minute", 60_000],
-      ["1 minute", 60_000],
-      ["2 minutes", 2 * 60_000],
+      ["10minute", 10 * 60_000],
+      ["10 minute", 10 * 60_000],
+      ["10 minutes", 10 * 60_000],
       ["1h", 3_600_000],
       ["1 h", 3_600_000],
       ["1hr", 3_600_000],
@@ -52,9 +52,11 @@ describe("parseDuration", () => {
     expect(() => parseDuration("5 weeks")).toThrow(/unknown time unit/i);
   });
 
-  it("enforces the lower bound (10 seconds)", () => {
-    expect(parseDuration("10s")).toBe(MIN_LUCKY_DRAW_DURATION_MS);
-    expect(() => parseDuration("9s")).toThrow(/at least 10 seconds/);
+  it("enforces the lower bound (5 minutes)", () => {
+    expect(parseDuration("5m")).toBe(MIN_LUCKY_DRAW_DURATION_MS);
+    expect(() => parseDuration("4m")).toThrow(/at least 5 minutes/);
+    expect(() => parseDuration("10s")).toThrow(/at least 5 minutes/);
+    expect(() => parseDuration("299s")).toThrow(/at least 5 minutes/);
   });
 
   it("enforces the upper bound (7 days)", () => {
