@@ -509,6 +509,80 @@ export default function SettingsPanel({
                 />
               </div>
             </fieldset>
+            <fieldset className="settings-section span-full">
+              <legend>Activity channel restrictions</legend>
+              <p className="section-help">
+                If a list is empty, the activity is allowed in any channel. Otherwise commands run
+                outside the listed channels are blocked, and the offender pays the wrong-channel
+                penalty (capped at their current balance, never goes negative).
+              </p>
+              <div className="form-row">
+                <label className="field">
+                  <span>Wrong-channel penalty (currency)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.000001"
+                    value={settingsDraft.wrongChannelPenalty}
+                    onChange={(event) =>
+                      onSettingsChange({
+                        ...settingsDraft,
+                        wrongChannelPenalty: Number(event.target.value),
+                      })
+                    }
+                  />
+                  <small className="field-hint">
+                    Set to 0 to block without taxing.
+                  </small>
+                </label>
+              </div>
+              <div className="settings-section__grid settings-section__grid--channels">
+                <ChannelMultiSelectField
+                  label="Betting channels"
+                  selectedIds={settingsDraft.bettingChannelIds}
+                  channels={sortedDiscordChannels}
+                  emptyState="Empty = no restriction (betting allowed anywhere)."
+                  hint="Allowed channels for /bet and /betstats. Anyone running these elsewhere pays the penalty."
+                  placeholder="Type a channel name or ID"
+                  onChange={(bettingChannelIds) =>
+                    onSettingsChange({ ...settingsDraft, bettingChannelIds })
+                  }
+                />
+                <ChannelMultiSelectField
+                  label="Lucky-draw channels"
+                  selectedIds={settingsDraft.luckyDrawChannelIds}
+                  channels={sortedDiscordChannels}
+                  emptyState="Empty = no restriction (lucky draws allowed anywhere)."
+                  hint="Allowed channels for /luckydraw."
+                  placeholder="Type a channel name or ID"
+                  onChange={(luckyDrawChannelIds) =>
+                    onSettingsChange({ ...settingsDraft, luckyDrawChannelIds })
+                  }
+                />
+                <ChannelMultiSelectField
+                  label="Points-action channels"
+                  selectedIds={settingsDraft.pointsChannelIds}
+                  channels={sortedDiscordChannels}
+                  emptyState="Empty = no restriction."
+                  hint="Allowed channels for /award, /deduct, /transfer and /donate."
+                  placeholder="Type a channel name or ID"
+                  onChange={(pointsChannelIds) =>
+                    onSettingsChange({ ...settingsDraft, pointsChannelIds })
+                  }
+                />
+                <ChannelMultiSelectField
+                  label="Shop channels"
+                  selectedIds={settingsDraft.shopChannelIds}
+                  channels={sortedDiscordChannels}
+                  emptyState="Empty = no restriction."
+                  hint="Allowed channels for /buy."
+                  placeholder="Type a channel name or ID"
+                  onChange={(shopChannelIds) =>
+                    onSettingsChange({ ...settingsDraft, shopChannelIds })
+                  }
+                />
+              </div>
+            </fieldset>
             <fieldset className="span-full role-checklist">
               <legend>Mentor roles</legend>
               <p className="role-checklist__help">

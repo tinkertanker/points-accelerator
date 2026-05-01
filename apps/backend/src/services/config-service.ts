@@ -16,6 +16,11 @@ export type GuildConfigUpdateInput = {
   passiveMinimumCharacters?: number;
   passiveAllowedChannelIds?: string[];
   passiveDeniedChannelIds?: string[];
+  bettingChannelIds?: string[];
+  luckyDrawChannelIds?: string[];
+  pointsChannelIds?: string[];
+  shopChannelIds?: string[];
+  wrongChannelPenalty?: number;
   commandLogChannelId?: string | null;
   redemptionChannelId?: string | null;
   listingChannelId?: string | null;
@@ -61,6 +66,12 @@ export class ConfigService {
         passiveMinimumCharacters: input.passiveMinimumCharacters,
         passiveAllowedChannelIds: input.passiveAllowedChannelIds,
         passiveDeniedChannelIds: input.passiveDeniedChannelIds,
+        bettingChannelIds: input.bettingChannelIds,
+        luckyDrawChannelIds: input.luckyDrawChannelIds,
+        pointsChannelIds: input.pointsChannelIds,
+        shopChannelIds: input.shopChannelIds,
+        wrongChannelPenalty:
+          input.wrongChannelPenalty === undefined ? undefined : decimal(input.wrongChannelPenalty),
         commandLogChannelId: input.commandLogChannelId,
         redemptionChannelId: input.redemptionChannelId,
         listingChannelId: input.listingChannelId,

@@ -3,7 +3,9 @@ import type { PrismaClient } from "@prisma/client";
 import { AssignmentService } from "./assignment-service.js";
 import { AuditService } from "./audit-service.js";
 import { BettingService } from "./betting-service.js";
+import { ChannelGuardService } from "./channel-guard-service.js";
 import { ConfigService } from "./config-service.js";
+import { EconomyResetService } from "./economy-reset-service.js";
 import { EconomyService } from "./economy-service.js";
 import { GroupService } from "./group-service.js";
 import { ListingService } from "./listing-service.js";
@@ -12,6 +14,7 @@ import { ParticipantService } from "./participant-service.js";
 import { ParticipantCurrencyService } from "./participant-currency-service.js";
 import { ReactionRewardService } from "./reaction-reward-service.js";
 import { RoleCapabilityService } from "./role-capability-service.js";
+import { SanctionService } from "./sanction-service.js";
 import { ShopService } from "./shop-service.js";
 import { SubmissionService } from "./submission-service.js";
 
@@ -39,6 +42,9 @@ export function createServices(prisma: PrismaClient) {
   const submissionService = new SubmissionService(prisma, economyService, participantCurrencyService, auditService);
   const luckyDrawService = new LuckyDrawService(prisma);
   const reactionRewardService = new ReactionRewardService(prisma, participantCurrencyService, auditService);
+  const economyResetService = new EconomyResetService(prisma, auditService);
+  const sanctionService = new SanctionService(prisma, auditService);
+  const channelGuardService = new ChannelGuardService(prisma, auditService);
 
   return {
     prisma,
@@ -56,5 +62,8 @@ export function createServices(prisma: PrismaClient) {
     submissionService,
     luckyDrawService,
     reactionRewardService,
+    economyResetService,
+    sanctionService,
+    channelGuardService,
   };
 }

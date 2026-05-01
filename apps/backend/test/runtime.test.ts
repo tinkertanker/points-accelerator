@@ -117,6 +117,15 @@ function createRuntimeFixture() {
       listResumable: vi.fn().mockResolvedValue([]),
       settle: vi.fn(),
     },
+    sanctionService: {
+      assertNotSanctioned: vi.fn().mockResolvedValue(undefined),
+      getActiveFlags: vi.fn().mockResolvedValue(new Set()),
+      getActiveFlagsByDiscordUserId: vi.fn().mockResolvedValue(new Set()),
+    },
+    channelGuardService: {
+      check: vi.fn().mockResolvedValue({ ok: true, penaltyApplied: 0 }),
+      allowsActivity: vi.fn().mockReturnValue(true),
+    },
   };
   const storageService = {
     isConfigured: false,

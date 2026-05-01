@@ -27,6 +27,7 @@ import {
 
 import type { AppEnv } from "../config/env.js";
 import { resolveCapabilities, type ResolvedCapabilities } from "../domain/permissions.js";
+import type { GuardedActivity } from "../services/channel-guard-service.js";
 import type { AppServices } from "../services/app-services.js";
 import type { StorageService } from "../services/storage-service.js";
 import { AppError } from "../utils/app-error.js";
@@ -1674,6 +1675,36 @@ export class BotRuntime {
       .setFooter({ text: footer });
   }
 
+  private async enforceChannelGuard(params: {
+    interaction: ChatInputCommandInteraction;
+    activity: GuardedActivity;
+    participantId: string | null;
+    config: GuildConfig;
+  }): Promise<boolean> {
+    const result = await this.services.channelGuardService.check({
+      guildId: this.env.GUILD_ID,
+      config: params.config,
+      activity: params.activity,
+      channelId: params.interaction.channelId ?? null,
+      participantId: params.participantId,
+      actorUserId: params.interaction.user.id,
+      actorUsername: params.interaction.user.username,
+      currencyName: params.config.currencyName,
+      currencySymbol: params.config.currencySymbol,
+    });
+    if (result.ok) return true;
+    const replyContent =
+      params.interaction.replied || params.interaction.deferred
+        ? null
+        : { content: result.message, ephemeral: true };
+    if (replyContent) {
+      await params.interaction.reply(replyContent).catch(() => undefined);
+    } else {
+      await params.interaction.followUp({ content: result.message, ephemeral: true }).catch(() => undefined);
+    }
+    return false;
+  }
+
   private async resolveActiveParticipant(params: {
     discordUserId: string;
     discordUsername?: string;
@@ -1801,6 +1832,11 @@ export class BotRuntime {
       return;
     }
 
+    const sanctioned = await this.services.sanctionService.getActiveFlags(resolved.participant.id);
+    if (sanctioned.has("CANNOT_EARN_PASSIVE") || sanctioned.has("CANNOT_RECEIVE_REWARDS")) {
+      return;
+    }
+
     const entry = await this.services.economyService.rewardPassiveMessage({
       guildId: this.env.GUILD_ID,
       groupId: resolved.group.id,
@@ -1881,6 +1917,11 @@ export class BotRuntime {
       roleIds: this.getOrderedRoleIds(member),
     }).catch(() => null);
     if (!resolved) {
+      return;
+    }
+
+    const sanctioned = await this.services.sanctionService.getActiveFlags(resolved.participant.id);
+    if (sanctioned.has("CANNOT_RECEIVE_REWARDS")) {
       return;
     }
 
@@ -2125,6 +2166,15 @@ export class BotRuntime {
     if (!interaction.guild || !interaction.channel || !interaction.channel.isTextBased()) {
       throw new AppError("Lucky draws can only be started in a server text channel.", 400);
     }
+
+    const luckyDrawConfig = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    const luckyDrawGuardOk = await this.enforceChannelGuard({
+      interaction,
+      activity: "luckyDraw",
+      participantId: null,
+      config: luckyDrawConfig,
+    });
+    if (!luckyDrawGuardOk) return;
 
     const isAdmin = await this.canBypassActionCooldown(params.member, params.roleIds);
     let resolvedCapabilities: ResolvedCapabilities | null = null;
@@ -2389,6 +2439,11 @@ export class BotRuntime {
           discordUsername: winner.username ?? guildMember?.user?.username,
           roleIds: this.getOrderedRoleIds(guildMember ?? null),
         });
+        const sanctioned = await this.services.sanctionService.getActiveFlags(participant.id);
+        if (sanctioned.has("CANNOT_RECEIVE_REWARDS")) {
+          skippedWinnerUserIds.push(winner.userId);
+          continue;
+        }
         resolvedParticipantIds.push(participant.id);
         resolvedWinnerUserIds.push(winner.userId);
       } catch (error) {
@@ -2581,6 +2636,18 @@ export class BotRuntime {
           discordUsername: interaction.user.username,
           roleIds,
         });
+        const transferGuardOk = await this.enforceChannelGuard({
+          interaction,
+          activity: "points",
+          participantId: sourceParticipant.id,
+          config,
+        });
+        if (!transferGuardOk) return;
+        await this.services.sanctionService.assertNotSanctioned(
+          sourceParticipant.id,
+          "CANNOT_TRANSFER",
+          { message: "🚫 You are sanctioned and cannot transfer currency right now." },
+        );
         const targetMember = await interaction.guild?.members.fetch(targetUser.id).catch(() => null);
         if (!targetMember) {
           throw new AppError("Target user is not in this server.", 404);
@@ -2613,6 +2680,13 @@ export class BotRuntime {
           roleIds,
         });
         const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const donateGuardOk = await this.enforceChannelGuard({
+          interaction,
+          activity: "points",
+          participantId: sourceParticipant.id,
+          config,
+        });
+        if (!donateGuardOk) return;
         const donation = await this.services.economyService.donateParticipantCurrencyToGroupPoints({
           guildId: this.env.GUILD_ID,
           actor,
@@ -2631,6 +2705,14 @@ export class BotRuntime {
       }
       case "award":
       case "deduct": {
+        const awardConfig = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const awardGuardOk = await this.enforceChannelGuard({
+          interaction,
+          activity: "points",
+          participantId: null,
+          config: awardConfig,
+        });
+        if (!awardGuardOk) return;
         const subcommand = interaction.options.getSubcommand();
         const commandKey = `${interaction.commandName}:${subcommand}` as AwardLikeCommandKey;
         const commandConfig = getAwardCommandConfig(commandKey);
@@ -2952,6 +3034,16 @@ export class BotRuntime {
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
           roleIds,
+        });
+        const buyGuardOk = await this.enforceChannelGuard({
+          interaction,
+          activity: "shop",
+          participantId: participant.id,
+          config,
+        });
+        if (!buyGuardOk) return;
+        await this.services.sanctionService.assertNotSanctioned(participant.id, "CANNOT_BUY", {
+          message: "🚫 You are sanctioned and cannot buy from the shop right now.",
         });
         let groupMemberCount: number | undefined;
         if (purchaseMode === "GROUP") {
@@ -3316,6 +3408,16 @@ export class BotRuntime {
           discordUsername: interaction.user.username,
           roleIds,
         });
+        const betGuardOk = await this.enforceChannelGuard({
+          interaction,
+          activity: "betting",
+          participantId: participant.id,
+          config,
+        });
+        if (!betGuardOk) return;
+        await this.services.sanctionService.assertNotSanctioned(participant.id, "CANNOT_BET", {
+          message: "🚫 You are sanctioned and cannot place bets right now.",
+        });
         const result = await this.services.bettingService.placeBet({
           guildId: this.env.GUILD_ID,
           actor,
@@ -3336,9 +3438,21 @@ export class BotRuntime {
         return;
       }
       case "betstats": {
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const { participant: invokerParticipant } = await this.resolveActiveParticipant({
+          discordUserId: interaction.user.id,
+          discordUsername: interaction.user.username,
+          roleIds,
+        }).catch(() => ({ participant: null as null | { id: string } }));
+        const betstatsGuardOk = await this.enforceChannelGuard({
+          interaction,
+          activity: "betting",
+          participantId: invokerParticipant?.id ?? null,
+          config,
+        });
+        if (!betstatsGuardOk) return;
         const targetUser = interaction.options.getUser("user") ?? interaction.user;
         const stats = await this.services.bettingService.getStats(this.env.GUILD_ID, targetUser.id);
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
 
         if (stats.totalBets === 0) {
           await interaction.reply(

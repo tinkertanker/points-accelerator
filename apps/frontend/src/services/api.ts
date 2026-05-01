@@ -13,6 +13,10 @@ import type {
   AssignmentDraft,
   AuthSession,
   BootstrapPayload,
+  EconomyResetRequest,
+  EconomyResetResult,
+  ParticipantSanction,
+  SanctionApplyRequest,
   GroupDraft,
   ReactionRewardRule,
   ReactionRewardRuleDraft,
@@ -208,6 +212,26 @@ export const api = {
   deleteReactionRule(id: string) {
     return request<void>(`/api/reaction-rules/${id}`, {
       method: "DELETE",
+    });
+  },
+  economyReset(payload: EconomyResetRequest) {
+    return request<EconomyResetResult>("/api/admin/economy/reset", {
+      method: "POST",
+      body: payload,
+    });
+  },
+  listSanctions() {
+    return request<ParticipantSanction[]>("/api/sanctions");
+  },
+  applySanction(participantId: string, payload: SanctionApplyRequest) {
+    return request<ParticipantSanction>(`/api/participants/${participantId}/sanctions`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+  revokeSanction(sanctionId: string) {
+    return request<ParticipantSanction>(`/api/sanctions/${sanctionId}/revoke`, {
+      method: "POST",
     });
   },
 };

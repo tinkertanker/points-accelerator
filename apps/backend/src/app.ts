@@ -40,6 +40,11 @@ const settingsSchema = z.object({
   passiveMinimumCharacters: z.number().int().nonnegative(),
   passiveAllowedChannelIds: z.array(z.string()),
   passiveDeniedChannelIds: z.array(z.string()),
+  bettingChannelIds: z.array(z.string()).default([]),
+  luckyDrawChannelIds: z.array(z.string()).default([]),
+  pointsChannelIds: z.array(z.string()).default([]),
+  shopChannelIds: z.array(z.string()).default([]),
+  wrongChannelPenalty: z.number().nonnegative().default(0),
   commandLogChannelId: z.string().nullable(),
   redemptionChannelId: z.string().nullable(),
   listingChannelId: z.string().nullable(),
@@ -184,6 +189,78 @@ const participantRegisterSchema = z.object({
   discordUsername: z.string().optional(),
   indexId: z.string().min(1),
   groupId: z.string().min(1),
+});
+
+const PARTICIPANT_LEDGER_TYPES = [
+  "MESSAGE_REWARD",
+  "MANUAL_AWARD",
+  "MANUAL_DEDUCT",
+  "CORRECTION",
+  "TRANSFER",
+  "DONATION",
+  "SHOP_REDEMPTION",
+  "SUBMISSION_REWARD",
+  "BET_WIN",
+  "BET_LOSS",
+  "LUCKYDRAW_WIN",
+  "REACTION_REWARD",
+] as const;
+
+const GROUP_LEDGER_TYPES = [
+  "MESSAGE_REWARD",
+  "MANUAL_AWARD",
+  "MANUAL_DEDUCT",
+  "CORRECTION",
+  "TRANSFER",
+  "DONATION",
+  "SHOP_REDEMPTION",
+  "ADJUSTMENT",
+  "SUBMISSION_REWARD",
+  "BET_WIN",
+  "BET_LOSS",
+  "LUCKYDRAW_WIN",
+] as const;
+
+const economyResetSchema = z.discriminatedUnion("mode", [
+  z.object({
+    mode: z.literal("reverse-entries-since"),
+    since: z.string().datetime({ offset: true }),
+    participantTypes: z.array(z.enum(PARTICIPANT_LEDGER_TYPES)).optional(),
+    groupTypes: z.array(z.enum(GROUP_LEDGER_TYPES)).optional(),
+    note: z.string().max(500).optional(),
+    dryRun: z.boolean(),
+  }),
+  z.object({
+    mode: z.literal("cap-balances"),
+    maxParticipantCurrency: z.number().nonnegative().optional(),
+    maxGroupPoints: z.number().nonnegative().optional(),
+    maxGroupCurrency: z.number().nonnegative().optional(),
+    note: z.string().max(500).optional(),
+    dryRun: z.boolean(),
+  }),
+  z.object({
+    mode: z.literal("modulo-balance"),
+    modulus: z.number().int().positive(),
+    applyToParticipantCurrency: z.boolean().optional(),
+    applyToGroupPoints: z.boolean().optional(),
+    applyToGroupCurrency: z.boolean().optional(),
+    note: z.string().max(500).optional(),
+    dryRun: z.boolean(),
+  }),
+]);
+
+const PARTICIPANT_SANCTION_FLAGS = [
+  "CANNOT_BET",
+  "CANNOT_EARN_PASSIVE",
+  "CANNOT_BUY",
+  "CANNOT_TRANSFER",
+  "CANNOT_RECEIVE_REWARDS",
+] as const;
+
+const sanctionApplySchema = z.object({
+  flag: z.enum(PARTICIPANT_SANCTION_FLAGS),
+  reason: z.string().max(500).optional(),
+  expiresAt: z.string().datetime({ offset: true }).nullable().optional(),
 });
 
 const reactionRewardRuleSchema = z.object({
@@ -418,6 +495,11 @@ export function createApp(params: {
     passiveMinimumCharacters: settings.passiveMinimumCharacters,
     passiveAllowedChannelIds: settings.passiveAllowedChannelIds,
     passiveDeniedChannelIds: settings.passiveDeniedChannelIds,
+    bettingChannelIds: settings.bettingChannelIds,
+    luckyDrawChannelIds: settings.luckyDrawChannelIds,
+    pointsChannelIds: settings.pointsChannelIds,
+    shopChannelIds: settings.shopChannelIds,
+    wrongChannelPenalty: decimalToNumber(settings.wrongChannelPenalty),
     commandLogChannelId: settings.commandLogChannelId,
     redemptionChannelId: settings.redemptionChannelId,
     listingChannelId: settings.listingChannelId,
@@ -1001,6 +1083,96 @@ export function createApp(params: {
       approvedByUsername: payload.approvedByUsername,
       currentGroupMemberCount,
       currentGroupMemberDiscordUserIds,
+    });
+  });
+
+  // --- Economy reset (admin tools) ---
+
+  app.post("/api/admin/economy/reset", { preHandler: requireAdmin }, async (request) => {
+    const payload = economyResetSchema.parse(request.body);
+    const session = await resolveDashboardSession(request);
+    const actor = { userId: session.userId, username: session.username ?? "admin" };
+
+    if (payload.mode === "reverse-entries-since") {
+      const since = new Date(payload.since);
+      if (Number.isNaN(since.getTime())) {
+        throw new AppError("`since` must be a valid ISO date.", 400);
+      }
+      return services.economyResetService.reverseEntriesByTypeSince({
+        guildId: params.env.GUILD_ID,
+        actor,
+        participantTypes: payload.participantTypes,
+        groupTypes: payload.groupTypes,
+        since,
+        dryRun: payload.dryRun,
+        note: payload.note,
+      });
+    }
+
+    if (payload.mode === "cap-balances") {
+      return services.economyResetService.capBalances({
+        guildId: params.env.GUILD_ID,
+        actor,
+        maxParticipantCurrency: payload.maxParticipantCurrency,
+        maxGroupPoints: payload.maxGroupPoints,
+        maxGroupCurrency: payload.maxGroupCurrency,
+        dryRun: payload.dryRun,
+        note: payload.note,
+      });
+    }
+
+    return services.economyResetService.moduloBalances({
+      guildId: params.env.GUILD_ID,
+      actor,
+      modulus: payload.modulus,
+      applyToParticipantCurrency: payload.applyToParticipantCurrency,
+      applyToGroupPoints: payload.applyToGroupPoints,
+      applyToGroupCurrency: payload.applyToGroupCurrency,
+      dryRun: payload.dryRun,
+      note: payload.note,
+    });
+  });
+
+  // --- Sanctions (admin tools) ---
+
+  app.get("/api/sanctions", { preHandler: requireAdmin }, async () => {
+    return services.sanctionService.listForGuild(params.env.GUILD_ID);
+  });
+
+  app.get(
+    "/api/participants/:id/sanctions",
+    { preHandler: requireAdmin },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      return services.sanctionService.listForParticipant(params.env.GUILD_ID, id);
+    },
+  );
+
+  app.post(
+    "/api/participants/:id/sanctions",
+    { preHandler: requireAdmin },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const payload = sanctionApplySchema.parse(request.body);
+      const session = await resolveDashboardSession(request);
+      return services.sanctionService.apply({
+        guildId: params.env.GUILD_ID,
+        participantId: id,
+        flag: payload.flag,
+        reason: payload.reason ?? null,
+        expiresAt: payload.expiresAt ? new Date(payload.expiresAt) : null,
+        actor: { userId: session.userId, username: session.username ?? "admin" },
+      });
+    },
+  );
+
+  app.post("/api/sanctions/:id/revoke", { preHandler: requireAdmin }, async (request) => {
+    const { id } = request.params as { id: string };
+    const session = await resolveDashboardSession(request);
+    return services.sanctionService.revoke({
+      guildId: params.env.GUILD_ID,
+      sanctionId: id,
+      actor: { userId: session.userId, username: session.username ?? "admin" },
     });
   });
 

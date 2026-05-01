@@ -12,6 +12,11 @@ export type Settings = {
   passiveMinimumCharacters: number;
   passiveAllowedChannelIds: string[];
   passiveDeniedChannelIds: string[];
+  bettingChannelIds: string[];
+  luckyDrawChannelIds: string[];
+  pointsChannelIds: string[];
+  shopChannelIds: string[];
+  wrongChannelPenalty: number;
   commandLogChannelId: string | null;
   redemptionChannelId: string | null;
   listingChannelId: string | null;
@@ -233,7 +238,146 @@ export type TabId =
   | "fulfilment"
   | "assignments"
   | "activity"
+  | "admin"
   | "guide";
+
+export type ParticipantLedgerEntryType =
+  | "MESSAGE_REWARD"
+  | "MANUAL_AWARD"
+  | "MANUAL_DEDUCT"
+  | "CORRECTION"
+  | "TRANSFER"
+  | "DONATION"
+  | "SHOP_REDEMPTION"
+  | "SUBMISSION_REWARD"
+  | "BET_WIN"
+  | "BET_LOSS"
+  | "LUCKYDRAW_WIN"
+  | "REACTION_REWARD";
+
+export type GroupLedgerEntryType =
+  | "MESSAGE_REWARD"
+  | "MANUAL_AWARD"
+  | "MANUAL_DEDUCT"
+  | "CORRECTION"
+  | "TRANSFER"
+  | "DONATION"
+  | "SHOP_REDEMPTION"
+  | "ADJUSTMENT"
+  | "SUBMISSION_REWARD"
+  | "BET_WIN"
+  | "BET_LOSS"
+  | "LUCKYDRAW_WIN";
+
+export type ResetParticipantImpact = {
+  participantId: string;
+  discordUserId: string;
+  discordUsername: string | null;
+  balanceBefore: number;
+  delta: number;
+  balanceAfter: number;
+};
+
+export type ResetGroupImpact = {
+  groupId: string;
+  displayName: string;
+  pointsBefore: number;
+  pointsDelta: number;
+  pointsAfter: number;
+  currencyBefore: number;
+  currencyDelta: number;
+  currencyAfter: number;
+};
+
+export type EconomyResetRequest =
+  | {
+      mode: "reverse-entries-since";
+      since: string;
+      participantTypes?: ParticipantLedgerEntryType[];
+      groupTypes?: GroupLedgerEntryType[];
+      note?: string;
+      dryRun: boolean;
+    }
+  | {
+      mode: "cap-balances";
+      maxParticipantCurrency?: number;
+      maxGroupPoints?: number;
+      maxGroupCurrency?: number;
+      note?: string;
+      dryRun: boolean;
+    }
+  | {
+      mode: "modulo-balance";
+      modulus: number;
+      applyToParticipantCurrency?: boolean;
+      applyToGroupPoints?: boolean;
+      applyToGroupCurrency?: boolean;
+      note?: string;
+      dryRun: boolean;
+    };
+
+export type ParticipantSanctionFlag =
+  | "CANNOT_BET"
+  | "CANNOT_EARN_PASSIVE"
+  | "CANNOT_BUY"
+  | "CANNOT_TRANSFER"
+  | "CANNOT_RECEIVE_REWARDS";
+
+export type ParticipantSanction = {
+  id: string;
+  participantId: string;
+  flag: ParticipantSanctionFlag;
+  reason: string | null;
+  expiresAt: string | null;
+  createdByUserId: string | null;
+  createdByUsername: string | null;
+  revokedAt: string | null;
+  revokedByUserId: string | null;
+  revokedByUsername: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SanctionApplyRequest = {
+  flag: ParticipantSanctionFlag;
+  reason?: string;
+  expiresAt?: string | null;
+};
+
+export type EconomyResetResult =
+  | {
+      mode: "reverse-entries-since";
+      dryRun: boolean;
+      scannedParticipantEntries: number;
+      scannedGroupEntries: number;
+      participantImpact: ResetParticipantImpact[];
+      groupImpact: ResetGroupImpact[];
+      totalCurrencyDelta: number;
+      totalPointsDelta: number;
+      participantCorrectionEntryId: string | null;
+      groupCorrectionEntryId: string | null;
+    }
+  | {
+      mode: "cap-balances";
+      dryRun: boolean;
+      participantImpact: ResetParticipantImpact[];
+      groupImpact: ResetGroupImpact[];
+      totalCurrencyDelta: number;
+      totalPointsDelta: number;
+      participantCorrectionEntryId: string | null;
+      groupCorrectionEntryId: string | null;
+    }
+  | {
+      mode: "modulo-balance";
+      dryRun: boolean;
+      modulus: number;
+      participantImpact: ResetParticipantImpact[];
+      groupImpact: ResetGroupImpact[];
+      totalCurrencyDelta: number;
+      totalPointsDelta: number;
+      participantCorrectionEntryId: string | null;
+      groupCorrectionEntryId: string | null;
+    };
 
 export type Assignment = {
   id: string;

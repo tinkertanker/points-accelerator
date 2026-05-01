@@ -53,6 +53,7 @@ export async function resetDatabase(prisma: ReturnType<typeof createPrismaClient
   await prisma.submission.deleteMany();
   await prisma.assignment.deleteMany();
   await prisma.shopRedemptionApproval.deleteMany();
+  await prisma.participantSanction.deleteMany();
   await prisma.participant.deleteMany();
   await prisma.participantCurrencySplit.deleteMany();
   await prisma.participantCurrencyEntry.deleteMany();

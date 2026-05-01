@@ -1,6 +1,7 @@
 import { startTransition, useCallback, useEffect, useState } from "react";
 
 import ActivityPanel from "./components/ActivityPanel";
+import AdminToolsPanel from "./components/AdminToolsPanel";
 import AssignmentsPanel from "./components/AssignmentsPanel";
 import FulfilmentPanel from "./components/FulfilmentPanel";
 import GroupsPanel from "./components/GroupsPanel";
@@ -142,7 +143,7 @@ function toAssignmentDraft(assignment?: Assignment): AssignmentDraft {
   };
 }
 
-const ALL_TAB_IDS = new Set<string>(["overview", "settings", "groups", "shop", "fulfilment", "assignments", "activity", "guide"]);
+const ALL_TAB_IDS = new Set<string>(["overview", "settings", "groups", "shop", "fulfilment", "assignments", "activity", "admin", "guide"]);
 
 function tabFromHash(): TabId | null {
   const raw = window.location.hash.replace("#", "");
@@ -157,6 +158,7 @@ const DASHBOARD_TABS: TabDefinition[] = [
   { id: "fulfilment", label: "Fulfilment", description: "Redemption queue and handover status" },
   { id: "assignments", label: "Assignments", description: "Prompts and submission review" },
   { id: "activity", label: "Activity", description: "Leaderboard and ledger feed" },
+  { id: "admin", label: "Admin tools", description: "Economy reset and sanctions" },
 ];
 
 const MENTOR_TABS: TabDefinition[] = [
@@ -523,6 +525,11 @@ export default function App() {
             canViewLedger={sessionUser.canManageSettings}
           />
         );
+      case "admin":
+        if (!sessionUser.canManageSettings) {
+          return null;
+        }
+        return <AdminToolsPanel participants={bootstrap.participants} />;
       case "guide":
         return <GuidePanel />;
       default:
