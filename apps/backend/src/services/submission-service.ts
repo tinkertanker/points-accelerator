@@ -388,15 +388,42 @@ export class SubmissionService {
 
     if (existing) {
       const previousImageKey = existing.imageKey;
-      const updated = await this.prisma.submission.update({
-        where: { id: existing.id },
-        data: { groupId: participant.groupId, text, imageUrl: data.imageUrl, imageKey: data.imageKey },
-        include,
+      const previousFeedChannelId = existing.feedChannelId;
+      const previousFeedMessageId = existing.feedMessageId;
+      const updated = await this.prisma.$transaction(async (tx) => {
+        // Status-guarded claim so a concurrent review() that flips the row to
+        // APPROVED/OUTSTANDING/REJECTED cannot have its content overwritten here.
+        const claim = await tx.submission.updateMany({
+          where: { id: existing.id, guildId: params.guildId, status: "PENDING" },
+          data: {
+            groupId: participant.groupId,
+            text,
+            imageUrl: data.imageUrl,
+            imageKey: data.imageKey,
+            feedChannelId: null,
+            feedMessageId: null,
+          },
+        });
+
+        if (claim.count === 0) {
+          const latest = await tx.submission.findFirst({
+            where: { id: existing.id, guildId: params.guildId },
+            select: { status: true },
+          });
+          throw new AppError(
+            `Your submission has already been reviewed (${latest?.status ?? "REVIEWED"}). Contact an admin if you need to resubmit.`,
+            409,
+          );
+        }
+
+        return tx.submission.findUniqueOrThrow({ where: { id: existing.id }, include });
       });
       return {
         submission: this.toSubmissionResponse(updated),
         replaced: true,
         previousImageKey,
+        previousFeedChannelId,
+        previousFeedMessageId,
       };
     }
 
@@ -406,6 +433,8 @@ export class SubmissionService {
         submission: this.toSubmissionResponse(created),
         replaced: false,
         previousImageKey: null,
+        previousFeedChannelId: null,
+        previousFeedMessageId: null,
       };
     } catch (error) {
       if (
@@ -419,6 +448,61 @@ export class SubmissionService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Stamp the feed channel and message id onto a submission so the
+   * Accept/Reject buttons can later locate and edit/delete the message.
+   *
+   * Returns false when no row was updated (the submission was deleted between
+   * the message being posted and this call) so callers can clean up the
+   * orphaned feed message.
+   */
+  public async setFeedMessage(params: {
+    guildId: string;
+    submissionId: string;
+    feedChannelId: string;
+    feedMessageId: string;
+  }): Promise<boolean> {
+    const result = await this.prisma.submission.updateMany({
+      where: { id: params.submissionId, guildId: params.guildId },
+      data: { feedChannelId: params.feedChannelId, feedMessageId: params.feedMessageId },
+    });
+    return result.count > 0;
+  }
+
+  /**
+   * Delete a PENDING submission, used by the feed-channel Reject button.
+   * Returns the imageKey so callers can clean up R2.  Refuses to operate
+   * on already-reviewed records — those keep their ledger references.
+   */
+  public async deletePending(params: { guildId: string; submissionId: string }) {
+    const submission = await this.prisma.submission.findFirst({
+      where: { id: params.submissionId, guildId: params.guildId },
+      select: { id: true, status: true, imageKey: true, feedChannelId: true, feedMessageId: true },
+    });
+
+    if (!submission) {
+      throw new AppError("Submission not found.", 404);
+    }
+
+    if (submission.status !== "PENDING") {
+      throw new AppError(`This submission has already been reviewed (status: ${submission.status}).`, 409);
+    }
+
+    const result = await this.prisma.submission.deleteMany({
+      where: { id: params.submissionId, guildId: params.guildId, status: "PENDING" },
+    });
+
+    if (result.count === 0) {
+      throw new AppError("Submission was reviewed by someone else just now.", 409);
+    }
+
+    return {
+      imageKey: submission.imageKey,
+      feedChannelId: submission.feedChannelId,
+      feedMessageId: submission.feedMessageId,
+    };
   }
 
   public async resolveIdentifier(guildId: string, identifier: string) {
