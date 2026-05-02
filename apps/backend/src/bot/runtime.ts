@@ -13,6 +13,7 @@ import {
   Routes,
   SlashCommandBuilder,
   SlashCommandSubcommandBuilder,
+  escapeMarkdown,
   type AutocompleteInteraction,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
@@ -480,6 +481,25 @@ export class BotRuntime {
         return;
       }
 
+      if (interaction.isButton() && interaction.customId.startsWith("submission:")) {
+        try {
+          await this.handleSubmissionButton(interaction);
+        } catch (error) {
+          console.error("Submission button handling failed", error);
+          const message = error instanceof AppError ? error.message : "Unexpected button error.";
+          try {
+            if (interaction.replied || interaction.deferred) {
+              await interaction.editReply({ content: message });
+            } else {
+              await interaction.reply({ content: message, ephemeral: true });
+            }
+          } catch (replyError) {
+            console.error("Failed to send button error response", replyError);
+          }
+        }
+        return;
+      }
+
       if (interaction.isButton() && interaction.customId.startsWith(`${PAGINATION_VERSION}:page:`)) {
         try {
           await this.handlePaginationButton(interaction);
@@ -856,6 +876,149 @@ export class BotRuntime {
     return { channelId: sent.channelId, messageId: sent.id };
   }
 
+  private buildSubmissionActionRow(submissionId: string) {
+    return new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`submission:approve:${submissionId}`)
+        .setLabel("Accept")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`submission:reject:${submissionId}`)
+        .setLabel("Reject")
+        .setStyle(ButtonStyle.Danger),
+    );
+  }
+
+  private async postSubmissionFeedEntry(params: {
+    channelId: string;
+    submissionId: string;
+    studentUserId: string | null;
+    studentDisplay: string;
+    assignmentTitle: string;
+    groupName: string;
+    text: string;
+    imageUrl: string | null;
+  }): Promise<{ channelId: string; messageId: string } | null> {
+    if (!this.client) {
+      return null;
+    }
+
+    const channel = await this.client.channels.fetch(params.channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      console.error("Submission feed channel is missing or not text-based", {
+        submissionId: params.submissionId,
+        channelId: params.channelId,
+      });
+      return null;
+    }
+
+    const validUserId = isDiscordSnowflake(params.studentUserId) ? params.studentUserId : null;
+    // Escape student-controlled text so titles/group names with `**`, backticks, or
+    // bare `<@…>` strings can't break formatting or impersonate a mention.
+    const safeStudentDisplay = validUserId ? null : escapeMarkdown(params.studentDisplay);
+    const studentMention = validUserId ? `<@${validUserId}>` : safeStudentDisplay;
+    const safeTitle = escapeMarkdown(params.assignmentTitle);
+    const safeGroupName = escapeMarkdown(params.groupName);
+    const trimmedText = params.text.trim();
+    const lines = [
+      `${studentMention} submitted **${safeTitle}** (${safeGroupName})`,
+    ];
+    if (trimmedText) {
+      const preview = trimmedText.length > 1500 ? `${trimmedText.slice(0, 1500)}…` : trimmedText;
+      lines.push("", preview);
+    }
+    if (params.imageUrl) {
+      lines.push("", params.imageUrl);
+    }
+
+    const sent = await (channel as GuildTextBasedChannel)
+      .send({
+        content: lines.join("\n"),
+        components: [this.buildSubmissionActionRow(params.submissionId)],
+        allowedMentions: { users: validUserId ? [validUserId] : [] },
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to post submission feed entry", {
+          submissionId: params.submissionId,
+          channelId: params.channelId,
+          error,
+        });
+        return null;
+      });
+
+    if (!sent) {
+      return null;
+    }
+
+    return { channelId: sent.channelId, messageId: sent.id };
+  }
+
+  private async broadcastSubmissionToFeed(params: {
+    submissionId: string;
+    studentUserId: string | null;
+    studentDisplay: string;
+    assignmentTitle: string;
+    groupName: string;
+    text: string;
+    imageUrl: string | null;
+  }): Promise<void> {
+    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    if (!config.submissionFeedChannelId) {
+      return;
+    }
+
+    const posted = await this.postSubmissionFeedEntry({
+      channelId: config.submissionFeedChannelId,
+      submissionId: params.submissionId,
+      studentUserId: params.studentUserId,
+      studentDisplay: params.studentDisplay,
+      assignmentTitle: params.assignmentTitle,
+      groupName: params.groupName,
+      text: params.text,
+      imageUrl: params.imageUrl,
+    });
+
+    if (posted) {
+      const stamped = await this.services.submissionService
+        .setFeedMessage({
+          guildId: this.env.GUILD_ID,
+          submissionId: params.submissionId,
+          feedChannelId: posted.channelId,
+          feedMessageId: posted.messageId,
+        })
+        .catch((error: unknown) => {
+          console.error("Failed to record submission feed message id", {
+            submissionId: params.submissionId,
+            error,
+          });
+          return true;
+        });
+
+      if (!stamped) {
+        // Submission was deleted between post and stamp — clean up the orphan.
+        await this.deleteSubmissionFeedMessage({
+          channelId: posted.channelId,
+          messageId: posted.messageId,
+        });
+      }
+    }
+  }
+
+  private async deleteSubmissionFeedMessage(params: { channelId: string; messageId: string }) {
+    if (!this.client) {
+      return;
+    }
+    const channel = await this.client.channels.fetch(params.channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      return;
+    }
+    await (channel as GuildTextBasedChannel).messages
+      .delete(params.messageId)
+      .catch((error: unknown) => {
+        console.error("Failed to delete stale submission feed message", error);
+      });
+  }
+
   private buildPaginationRow(
     kind: PaginationKind,
     subkey: string,
@@ -1200,6 +1363,128 @@ export class BotRuntime {
       const message = error instanceof AppError ? error.message : "Failed to update redemption.";
       await interaction.followUp({ content: message, ephemeral: true });
     }
+  }
+
+  private async handleSubmissionButton(interaction: ButtonInteraction) {
+    const parts = interaction.customId.split(":");
+    if (parts.length !== 3 || parts[0] !== "submission") {
+      return;
+    }
+
+    const [, action, submissionId] = parts;
+    if (action !== "approve" && action !== "reject") {
+      return;
+    }
+
+    // Defer immediately so slow auth/work stays inside Discord's 3s acknowledgement
+    // window. Approve uses deferUpdate (we'll edit the original feed message);
+    // reject uses an ephemeral reply (we'll delete the original message separately).
+    if (action === "approve") {
+      await interaction.deferUpdate();
+    } else {
+      await interaction.deferReply({ ephemeral: true });
+    }
+
+    const respondWithError = async (message: string) => {
+      if (action === "approve") {
+        await interaction.followUp({ content: message, ephemeral: true }).catch(() => {});
+      } else {
+        await interaction.editReply({ content: message }).catch(() => {});
+      }
+    };
+
+    const guildMember = await interaction.guild?.members
+      .fetch(interaction.user.id)
+      .catch(() => null) ?? null;
+    const rawMember = interaction.member;
+    const apiRoleIds =
+      rawMember && "roles" in rawMember && Array.isArray((rawMember as { roles: unknown }).roles)
+        ? ((rawMember as { roles: string[] }).roles)
+        : [];
+    const roleIds = guildMember ? this.getOrderedRoleIds(guildMember) : apiRoleIds;
+
+    try {
+      await this.assertCanManageSubmissions(guildMember, roleIds);
+    } catch (error) {
+      const message = error instanceof AppError ? error.message : "Only staff can review submissions.";
+      await respondWithError(message);
+      return;
+    }
+
+    if (action === "approve") {
+      let reviewed: Awaited<ReturnType<AppServices["submissionService"]["review"]>>;
+      try {
+        reviewed = await this.services.submissionService.review({
+          guildId: this.env.GUILD_ID,
+          submissionId,
+          status: "APPROVED",
+          reviewedByUserId: interaction.user.id,
+          reviewedByUsername: interaction.user.username,
+        });
+      } catch (error) {
+        const message = error instanceof AppError ? error.message : "Failed to approve submission.";
+        await respondWithError(message);
+        return;
+      }
+
+      const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+      const rewardParts: string[] = [];
+      if (reviewed.pointsAwarded && reviewed.pointsAwarded > 0) {
+        rewardParts.push(this.formatPointsAmount(reviewed.pointsAwarded, config));
+      }
+      if (reviewed.currencyAwarded && reviewed.currencyAwarded > 0) {
+        rewardParts.push(this.formatCurrencyAmount(reviewed.currencyAwarded, config));
+      }
+      const rewardSuffix = rewardParts.length > 0 ? ` — +${rewardParts.join(" +")}` : "";
+      const approvalLine = `\n\n✅ Approved by <@${interaction.user.id}>${rewardSuffix}`;
+      const rawOriginal = interaction.message?.content ?? "";
+      const maxOriginalLen = Math.max(0, 1900 - approvalLine.length);
+      const trimmedOriginal =
+        rawOriginal.length > maxOriginalLen ? `${rawOriginal.slice(0, maxOriginalLen)}…` : rawOriginal;
+      const updatedContent = `${trimmedOriginal}${approvalLine}`.trim();
+
+      try {
+        await interaction.editReply({
+          content: updatedContent,
+          components: [],
+          allowedMentions: { parse: [] },
+        });
+      } catch (error) {
+        console.error("Failed to update submission feed message after approve", { submissionId, error });
+      }
+      return;
+    }
+
+    // Reject path: delete the record + the feed message + best-effort R2 cleanup.
+    let deleted: Awaited<ReturnType<AppServices["submissionService"]["deletePending"]>>;
+    try {
+      deleted = await this.services.submissionService.deletePending({
+        guildId: this.env.GUILD_ID,
+        submissionId,
+      });
+    } catch (error) {
+      const message = error instanceof AppError ? error.message : "Failed to reject submission.";
+      await respondWithError(message);
+      return;
+    }
+
+    console.info("Submission rejected via feed channel", {
+      submissionId,
+      rejecterUserId: interaction.user.id,
+      rejecterUsername: interaction.user.username,
+    });
+
+    if (deleted.imageKey && this.storageService.isConfigured) {
+      await this.storageService.delete(deleted.imageKey).catch(() => {});
+    }
+
+    await interaction.message?.delete().catch((error: unknown) => {
+      console.error("Failed to delete submission feed message after reject", { submissionId, error });
+    });
+
+    await interaction.editReply({
+      content: `Rejected submission \`${submissionId.slice(0, 8)}\`. The student can resubmit.`,
+    });
   }
 
   private async assertCanManageSubmissions(member: GuildMember | null, roleIds: string[]) {
@@ -2111,6 +2396,23 @@ export class BotRuntime {
         await this.storageService.delete(result.previousImageKey).catch(() => {});
       }
 
+      if (result.replaced && result.previousFeedChannelId && result.previousFeedMessageId) {
+        await this.deleteSubmissionFeedMessage({
+          channelId: result.previousFeedChannelId,
+          messageId: result.previousFeedMessageId,
+        });
+      }
+
+      await this.broadcastSubmissionToFeed({
+        submissionId: result.submission.id,
+        studentUserId: message.author.id,
+        studentDisplay: result.submission.participant?.discordUsername ?? message.author.username,
+        assignmentTitle: result.submission.assignment.title,
+        groupName: result.submission.group?.displayName ?? "",
+        text: submissionText,
+        imageUrl: result.submission.imageUrl,
+      });
+
       const verb = result.replaced ? "updated" : "received";
       await message.reply(
         `Submission ${verb} for **${result.submission.assignment.title}**! It will be reviewed by an admin.`,
@@ -2122,6 +2424,28 @@ export class BotRuntime {
   }
 
   private async handleAutocomplete(interaction: AutocompleteInteraction) {
+    if (interaction.commandName === "submit") {
+      const focused = interaction.options.getFocused(true);
+      if (focused.name !== "assignment") {
+        await interaction.respond([]);
+        return;
+      }
+      const assignments = await this.services.assignmentService.listActive(this.env.GUILD_ID);
+      const query = focused.value.trim().toLowerCase();
+      const matches = assignments
+        .filter((assignment) => (query.length === 0 ? true : assignment.title.toLowerCase().includes(query)))
+        .slice(0, AUTOCOMPLETE_CHOICE_LIMIT)
+        .map((assignment) => {
+          const name =
+            assignment.title.length > AUTOCOMPLETE_CHOICE_NAME_MAX
+              ? `${assignment.title.slice(0, AUTOCOMPLETE_CHOICE_NAME_MAX - 1)}…`
+              : assignment.title;
+          return { name, value: assignment.id };
+        });
+      await interaction.respond(matches);
+      return;
+    }
+
     if (interaction.commandName !== "buy") {
       return;
     }
@@ -3213,6 +3537,56 @@ export class BotRuntime {
         });
         return;
       }
+      case "assignments": {
+        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const assignments = await this.services.assignmentService.listActive(this.env.GUILD_ID);
+
+        if (assignments.length === 0) {
+          await interaction.reply({
+            content: "There are no active assignments right now.",
+            ephemeral: true,
+          });
+          return;
+        }
+
+        const lines = assignments.map((assignment) => {
+          const segments: string[] = [`**${assignment.title}**`];
+          if (assignment.description) {
+            segments.push(assignment.description);
+          }
+          const baseParts: string[] = [];
+          if (assignment.basePointsReward > 0) {
+            baseParts.push(this.formatPointsAmount(assignment.basePointsReward, config));
+          }
+          if (assignment.baseCurrencyReward > 0) {
+            baseParts.push(this.formatCurrencyAmount(assignment.baseCurrencyReward, config));
+          }
+          if (baseParts.length > 0) {
+            segments.push(`Reward on approval: ${baseParts.join(" + ")}`);
+          }
+          const bonusParts: string[] = [];
+          if (assignment.bonusPointsReward > 0) {
+            bonusParts.push(this.formatPointsAmount(assignment.bonusPointsReward, config));
+          }
+          if (assignment.bonusCurrencyReward > 0) {
+            bonusParts.push(this.formatCurrencyAmount(assignment.bonusCurrencyReward, config));
+          }
+          if (bonusParts.length > 0) {
+            segments.push(`Outstanding bonus: ${bonusParts.join(" + ")}`);
+          }
+          if (assignment.deadline) {
+            const deadlineSeconds = Math.floor(new Date(assignment.deadline).getTime() / 1000);
+            segments.push(`Deadline: <t:${deadlineSeconds}:F> (<t:${deadlineSeconds}:R>)`);
+          }
+          return segments.join("\n");
+        });
+
+        await interaction.reply({
+          content: `Active assignments — submit with \`/submit\`:\n\n${lines.join("\n\n")}`,
+          ephemeral: true,
+        });
+        return;
+      }
       case "submit": {
         await interaction.deferReply({ ephemeral: true });
 
@@ -3286,6 +3660,16 @@ export class BotRuntime {
           text,
           imageUrl,
           imageKey,
+        });
+
+        await this.broadcastSubmissionToFeed({
+          submissionId: submission.id,
+          studentUserId: interaction.user.id,
+          studentDisplay: submission.participant?.discordUsername ?? interaction.user.username,
+          assignmentTitle: submission.assignment.title,
+          groupName: submission.group?.displayName ?? "",
+          text,
+          imageUrl: submission.imageUrl,
         });
 
         await interaction.editReply(
@@ -3833,9 +4217,18 @@ export class BotRuntime {
       new SlashCommandBuilder()
         .setName("submit")
         .setDescription("Submit work for an assignment.")
-        .addStringOption((option) => option.setName("assignment").setDescription("Assignment ID or exact title").setRequired(true))
+        .addStringOption((option) =>
+          option
+            .setName("assignment")
+            .setDescription("Pick an active assignment")
+            .setRequired(true)
+            .setAutocomplete(true),
+        )
         .addAttachmentOption((option) => option.setName("image").setDescription("Image attachment").setRequired(false))
         .addStringOption((option) => option.setName("text").setDescription("Description or notes for your submission").setRequired(false)),
+      new SlashCommandBuilder()
+        .setName("assignments")
+        .setDescription("List active assignments you can submit for."),
       new SlashCommandBuilder()
         .setName("submissions")
         .setDescription("View recent submissions (admin).")
