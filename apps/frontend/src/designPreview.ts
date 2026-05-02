@@ -138,6 +138,7 @@ function createInitialBootstrap(): BootstrapPayload {
       redemptionChannelId: "ch-redeem",
       listingChannelId: "ch-listings",
       announcementsChannelId: "ch-announce",
+      submissionFeedChannelId: "ch-submissions",
       betWinChance: 50,
       bettingCooldownSeconds: 0,
     },

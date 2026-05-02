@@ -21,6 +21,7 @@ export type Settings = {
   redemptionChannelId: string | null;
   listingChannelId: string | null;
   announcementsChannelId: string | null;
+  submissionFeedChannelId: string | null;
   betWinChance: number;
   bettingCooldownSeconds: number;
 };
