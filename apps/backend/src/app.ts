@@ -49,6 +49,7 @@ const settingsSchema = z.object({
   redemptionChannelId: z.string().nullable(),
   listingChannelId: z.string().nullable(),
   announcementsChannelId: z.string().nullable(),
+  submissionFeedChannelId: z.string().nullable(),
   betWinChance: z.number().int().min(0).max(100),
   bettingCooldownSeconds: z.number().int().nonnegative(),
 });
@@ -512,6 +513,7 @@ export function createApp(params: {
     redemptionChannelId: settings.redemptionChannelId,
     listingChannelId: settings.listingChannelId,
     announcementsChannelId: settings.announcementsChannelId,
+    submissionFeedChannelId: settings.submissionFeedChannelId,
     betWinChance: settings.betWinChance,
     bettingCooldownSeconds: settings.bettingCooldownSeconds,
   });

@@ -25,6 +25,7 @@ export type GuildConfigUpdateInput = {
   redemptionChannelId?: string | null;
   listingChannelId?: string | null;
   announcementsChannelId?: string | null;
+  submissionFeedChannelId?: string | null;
   betWinChance?: number;
   bettingCooldownSeconds?: number;
 };
@@ -76,6 +77,7 @@ export class ConfigService {
         redemptionChannelId: input.redemptionChannelId,
         listingChannelId: input.listingChannelId,
         announcementsChannelId: input.announcementsChannelId,
+        submissionFeedChannelId: input.submissionFeedChannelId,
         betWinChance: input.betWinChance,
         bettingCooldownSeconds: input.bettingCooldownSeconds,
       },
