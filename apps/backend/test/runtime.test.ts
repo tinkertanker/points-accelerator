@@ -1577,6 +1577,7 @@ describe("bot runtime", () => {
       user: {
         id: "user-1",
         username: "Alice",
+        displayAvatarURL: vi.fn().mockReturnValue("https://cdn.discordapp.com/embed/avatars/0.png"),
       },
     });
 
@@ -1586,10 +1587,32 @@ describe("bot runtime", () => {
       discordUsername: "Alice",
       groupId: "group-1",
     });
-    expect(reply).toHaveBeenCalledWith({
-      content: "Gryffindor: 12 blorgshj 🏅 available for the leaderboard and /buy group. Your wallet: 7 bananas 💲.",
-      ephemeral: true,
-    });
+
+    const [{ embeds, ephemeral }] = reply.mock.calls[0] as [
+      { embeds: Array<{ toJSON(): Record<string, unknown> }>; ephemeral: boolean },
+    ];
+    expect(ephemeral).toBe(true);
+    expect(embeds).toHaveLength(1);
+
+    const embed = embeds[0]!.toJSON() as {
+      title?: string;
+      fields?: Array<{ name: string; value: string }>;
+    };
+    expect(embed.title).toBe("Your Balance");
+    expect(embed.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Group blorgshj",
+          value: expect.stringContaining("Gryffindor"),
+        }),
+        expect.objectContaining({
+          name: "Wallet bananas",
+          value: expect.stringContaining("7 bananas 💲"),
+        }),
+      ]),
+    );
+    const groupField = embed.fields?.find((field) => field.name === "Group blorgshj");
+    expect(groupField?.value).toContain("12 blorgshj 🏅");
   });
 
   it("shows the group leaderboard in an embed card", async () => {
