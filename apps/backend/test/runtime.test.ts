@@ -1468,6 +1468,138 @@ describe("bot runtime", () => {
     );
   });
 
+  it("creates /submit payloads with note, link, video media, and group credit", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.assignmentService.listActive.mockResolvedValue([
+      {
+        id: "assign-1",
+        title: "Video Demo",
+        description: "Submit your demo.",
+        basePointsReward: 5,
+        baseCurrencyReward: 2,
+        bonusPointsReward: 0,
+        bonusCurrencyReward: 0,
+        createdAt: new Date("2026-05-08T08:00:00Z"),
+        sortOrder: 0,
+      },
+    ]);
+    services.submissionService.create.mockResolvedValue({
+      id: "submission-12345678",
+      assignment: { title: "Video Demo" },
+      group: { displayName: "Gryffindor" },
+      participant: { discordUsername: "Alice" },
+      imageUrl: "https://cdn.example.test/sample-submission-video.mp4",
+    });
+    const broadcast = vi.spyOn(runtime as any, "broadcastSubmissionToFeed").mockResolvedValue(undefined);
+
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "submit",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue(null),
+        },
+      },
+      options: {
+        getString: vi.fn((name: string) => {
+          if (name === "assignment") return "Video Demo";
+          if (name === "note") return "Here is my walkthrough.";
+          if (name === "link") return "code.tk.sg";
+          return null;
+        }),
+        getAttachment: vi.fn((name: string) =>
+          name === "media"
+            ? {
+                contentType: "video/mp4",
+                size: 1024,
+                url: "https://cdn.example.test/sample-submission-video.mp4",
+              }
+            : null,
+        ),
+      },
+      deferReply,
+      editReply,
+      user: {
+        id: "user-1",
+        username: "Alice",
+      },
+    });
+
+    expect(services.submissionService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "Here is my walkthrough.\n\nLink: https://code.tk.sg/",
+        imageUrl: "https://cdn.example.test/sample-submission-video.mp4",
+      }),
+    );
+    expect(broadcast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupName: "Gryffindor",
+        text: "Here is my walkthrough.\n\nLink: https://code.tk.sg/",
+        imageUrl: "https://cdn.example.test/sample-submission-video.mp4",
+      }),
+    );
+    expect(editReply).toHaveBeenCalledWith(
+      "Submission received for **Video Demo** (Gryffindor). It will be reviewed by an admin.",
+    );
+  });
+
+  it("shows /assignments publicly as a newest-first paginated embed", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.assignmentService.listActive.mockResolvedValue(
+      Array.from({ length: 11 }, (_, index) => ({
+        id: `assign-${index + 1}`,
+        title: `Task ${index + 1}`,
+        description: `Prompt ${index + 1}`,
+        basePointsReward: index + 1,
+        baseCurrencyReward: 0,
+        bonusPointsReward: 0,
+        bonusCurrencyReward: 0,
+        deadline: null,
+        createdAt: new Date(`2026-05-${String(index + 1).padStart(2, "0")}T08:00:00Z`),
+        sortOrder: index,
+        submissionCount: index,
+      })),
+    );
+
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "assignments",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue(null),
+        },
+      },
+      options: {},
+      deferReply,
+      editReply,
+      user: {
+        id: "user-1",
+        username: "Alice",
+      },
+    });
+
+    expect(deferReply).toHaveBeenCalledWith();
+    const [{ embeds, components }] = editReply.mock.calls[0] as [
+      { embeds: Array<{ toJSON(): Record<string, unknown> }>; components: unknown[] },
+    ];
+    const embed = embeds[0]!.toJSON() as {
+      title?: string;
+      description?: string;
+      fields?: Array<{ name: string; value: string }>;
+      footer?: { text?: string };
+    };
+    expect(embed.title).toBe("Active Assignments");
+    expect(embed.description).toContain("11 active assignments, newest first");
+    expect(embed.fields?.[0]?.name).toBe("Task 11");
+    expect(embed.fields?.[0]?.value).toContain("10 submitted");
+    expect(embed.footer?.text).toContain("page 1/2");
+    expect(components).toHaveLength(1);
+  });
+
   it("uses the original message as the submission payload and cleans up replaced images", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.participantService.ensureForGroup.mockResolvedValue({
@@ -1981,6 +2113,7 @@ describe("bot runtime", () => {
     const awardCommand = commands.find((command) => command.name === "award");
     const deductCommand = commands.find((command) => command.name === "deduct");
     const forbesCommand = commands.find((command) => command.name === "forbes");
+    const submitCommand = commands.find((command) => command.name === "submit");
     const flatAwardPoints = commands.find((command) => command.name === "awardpoints");
     const flatAwardMixed = commands.find((command) => command.name === "awardmixed");
 
@@ -2024,6 +2157,14 @@ describe("bot runtime", () => {
         expect.objectContaining({ name: "member", required: true }),
         expect.objectContaining({ name: "currency", required: true, min_value: 0.01 }),
         expect.objectContaining({ name: "reason", required: false }),
+      ]),
+    );
+    expect(submitCommand?.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "assignment", required: true }),
+        expect.objectContaining({ name: "note", required: false }),
+        expect.objectContaining({ name: "link", required: false }),
+        expect.objectContaining({ name: "media", required: false }),
       ]),
     );
   });

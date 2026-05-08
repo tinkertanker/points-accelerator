@@ -61,6 +61,9 @@ export class AssignmentService {
   public async listActive(guildId: string) {
     const assignments = await this.prisma.assignment.findMany({
       where: { guildId, active: true },
+      include: {
+        _count: { select: { submissions: true } },
+      },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     });
 

@@ -85,11 +85,12 @@ const FORBES_EMBED_COLOUR = 0x38bdf8;
 const BALANCE_EMBED_COLOUR = 0x6366f1;
 const STORE_EMBED_COLOUR = 0x10b981;
 const INVENTORY_EMBED_COLOUR = 0xec4899;
+const ASSIGNMENTS_EMBED_COLOUR = 0x14b8a6;
 const AUTOCOMPLETE_CHOICE_LIMIT = 25;
 const AUTOCOMPLETE_CHOICE_NAME_MAX = 100;
 const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
 
-type PaginationKind = "inventory" | "store" | "ledger" | "leaderboard" | "forbes";
+type PaginationKind = "inventory" | "store" | "ledger" | "leaderboard" | "forbes" | "assignments";
 type InventoryAudience = "personal" | "group";
 type StoreAudience = "personal" | "group";
 
@@ -121,7 +122,7 @@ function parsePaginationCustomId(raw: string): PaginationCustomId | null {
     string,
   ];
   if (version !== PAGINATION_VERSION || tag !== "page") return null;
-  if (!["inventory", "store", "ledger", "leaderboard", "forbes"].includes(kind)) return null;
+  if (!["inventory", "store", "ledger", "leaderboard", "forbes", "assignments"].includes(kind)) return null;
   const page = Number.parseInt(pageRaw, 10);
   if (!Number.isFinite(page) || page < 1) return null;
   return { kind: kind as PaginationKind, subkey, ownerId, page };
@@ -918,13 +919,14 @@ export class BotRuntime {
     const safeStudentDisplay = validUserId ? null : escapeMarkdown(params.studentDisplay);
     const studentMention = validUserId ? `<@${validUserId}>` : safeStudentDisplay;
     const safeTitle = escapeMarkdown(params.assignmentTitle);
-    const safeGroupName = escapeMarkdown(params.groupName);
+    const safeGroupName = params.groupName ? escapeMarkdown(params.groupName) : "No group";
     const trimmedText = params.text.trim();
     const lines = [
-      `${studentMention} submitted **${safeTitle}** (${safeGroupName})`,
+      `📝 **${safeTitle}** · **${safeGroupName}**`,
+      `By ${studentMention} · ID \`${params.submissionId.slice(0, 8)}\``,
     ];
     if (trimmedText) {
-      const preview = trimmedText.length > 1500 ? `${trimmedText.slice(0, 1500)}…` : trimmedText;
+      const preview = trimmedText.length > 900 ? `${trimmedText.slice(0, 897)}...` : trimmedText;
       lines.push("", preview);
     }
     if (params.imageUrl) {
@@ -1050,7 +1052,7 @@ export class BotRuntime {
     }
 
     const isEphemeralSource = Boolean(interaction.message.flags?.has?.(MessageFlags.Ephemeral));
-    if (!isEphemeralSource && parsed.ownerId !== interaction.user.id) {
+    if (!isEphemeralSource && parsed.kind !== "assignments" && parsed.ownerId !== interaction.user.id) {
       await interaction.reply({
         content: "Only the person who ran this command can page through it.",
         ephemeral: true,
@@ -1087,6 +1089,8 @@ export class BotRuntime {
             page: parsed.page,
             guild: interaction.guild,
           });
+        case "assignments":
+          return this.buildAssignmentsView({ ownerId: parsed.ownerId, page: parsed.page });
       }
     })();
 
@@ -1242,6 +1246,25 @@ export class BotRuntime {
       paged.hasNext,
     );
     return { embed, row, totalEntries: leaderboard.length };
+  }
+
+  private async buildAssignmentsView(params: { ownerId: string; page: number }) {
+    const [config, activeAssignments] = await Promise.all([
+      this.services.configService.getOrCreate(this.env.GUILD_ID),
+      this.services.assignmentService.listActive(this.env.GUILD_ID),
+    ]);
+    const assignments = this.sortAssignmentsRecentFirst(activeAssignments);
+    const paged = paginateArray(assignments, params.page);
+    const embed = this.buildAssignmentsEmbed(assignments, config, paged);
+    const row = this.buildPaginationRow(
+      "assignments",
+      "-",
+      params.ownerId,
+      paged.clampedPage,
+      paged.hasPrev,
+      paged.hasNext,
+    );
+    return { embed, row, totalEntries: assignments.length };
   }
 
   private async checkRedemptionActorPermissions(params: {
@@ -1681,6 +1704,97 @@ export class BotRuntime {
       : "none";
   }
 
+  private sortAssignmentsRecentFirst(assignments: ActiveAssignment[]) {
+    return [...assignments].sort((a, b) => {
+      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      if (bTime !== aTime) return bTime - aTime;
+      return (b.sortOrder ?? 0) - (a.sortOrder ?? 0);
+    });
+  }
+
+  private formatAssignmentRewards(assignment: ActiveAssignment, config: GuildConfig) {
+    const baseParts: string[] = [];
+    if (assignment.basePointsReward > 0) {
+      baseParts.push(this.formatPointsAmount(assignment.basePointsReward, config));
+    }
+    if (assignment.baseCurrencyReward > 0) {
+      baseParts.push(this.formatCurrencyAmount(assignment.baseCurrencyReward, config));
+    }
+
+    const bonusParts: string[] = [];
+    if (assignment.bonusPointsReward > 0) {
+      bonusParts.push(this.formatPointsAmount(assignment.bonusPointsReward, config));
+    }
+    if (assignment.bonusCurrencyReward > 0) {
+      bonusParts.push(this.formatCurrencyAmount(assignment.bonusCurrencyReward, config));
+    }
+
+    const parts: string[] = [];
+    if (baseParts.length > 0) {
+      parts.push(`Reward ${baseParts.join(" + ")}`);
+    }
+    if (bonusParts.length > 0) {
+      parts.push(`Outstanding +${bonusParts.join(" + ")}`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : "No reward configured";
+  }
+
+  private formatAssignmentLine(assignment: ActiveAssignment, config: GuildConfig) {
+    const meta = [this.formatAssignmentRewards(assignment, config)];
+    if (assignment.deadline) {
+      const deadlineSeconds = Math.floor(new Date(assignment.deadline).getTime() / 1000);
+      meta.push(`Due <t:${deadlineSeconds}:R>`);
+    }
+    if (typeof assignment.submissionCount === "number") {
+      meta.push(`${assignment.submissionCount} submitted`);
+    }
+
+    const description = assignment.description.trim();
+    const clippedDescription = description.length > 180 ? `${description.slice(0, 177)}...` : description;
+    return [
+      clippedDescription,
+      meta.join(" · "),
+      `ID \`${assignment.id}\``,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  private normalizeSubmissionLink(value: string | null) {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+      return "";
+    }
+
+    try {
+      const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+      const url = new URL(candidate);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error("unsupported protocol");
+      }
+      return url.toString();
+    } catch {
+      throw new AppError("Link must be a valid http or https URL, for example code.tk.sg.", 400);
+    }
+  }
+
+  private buildSubmissionText(note: string, link: string) {
+    const parts: string[] = [];
+    const trimmedNote = note.trim();
+    if (trimmedNote) {
+      parts.push(trimmedNote);
+    }
+    if (link) {
+      parts.push(`Link: ${link}`);
+    }
+    return parts.join("\n\n");
+  }
+
+  private isSupportedSubmissionAttachment(contentType: string | null | undefined) {
+    return contentType?.startsWith("image/") || contentType?.startsWith("video/");
+  }
+
   private formatGroupPurchaseProgress(approvalsCount: number, threshold: number) {
     return `${approvalsCount}/${threshold} approval${threshold === 1 ? "" : "s"}`;
   }
@@ -1837,6 +1951,31 @@ export class BotRuntime {
       .addFields(fields)
       .setFooter({ text: "Server display names are shown when Discord can resolve them." });
     return embed;
+  }
+
+  private buildAssignmentsEmbed(
+    assignments: ActiveAssignment[],
+    config: GuildConfig,
+    paged: ReturnType<typeof paginateArray<ActiveAssignment>>,
+  ) {
+    const fields = paged.slice.map((assignment) => ({
+      name: escapeMarkdown(assignment.title),
+      value: this.formatAssignmentLine(assignment, config),
+      inline: false,
+    }));
+    const footerParts = ["Use /submit with a note, link, image, or video"];
+    if (paged.totalPages > 1) {
+      footerParts.push(`page ${paged.clampedPage}/${paged.totalPages}`);
+    }
+
+    return new EmbedBuilder()
+      .setColor(ASSIGNMENTS_EMBED_COLOUR)
+      .setTitle("Active Assignments")
+      .setDescription(
+        `${assignments.length} active assignment${assignments.length === 1 ? "" : "s"}, newest first.`,
+      )
+      .addFields(fields)
+      .setFooter({ text: footerParts.join(" · ") });
   }
 
   private formatStoreLine(item: ShopListItem, priceLabel: string) {
@@ -2251,19 +2390,19 @@ export class BotRuntime {
         return;
       }
 
-      // --- 2. Extract the preferred submission image -------------------------
-      // Prefer an image on the original message. If the original is text-only,
-      // allow the reply to provide the image instead.
-      const imageAttachment = original.attachments.find((a) =>
-        a.contentType?.startsWith("image/"),
+      // --- 2. Extract the preferred submission media -------------------------
+      // Prefer media on the original message. If the original is text-only,
+      // allow the reply to provide the media instead.
+      const mediaAttachment = original.attachments.find((a) =>
+        this.isSupportedSubmissionAttachment(a.contentType),
       );
 
-      // Also consider images in the reply itself as a fallback
-      const replyImageAttachment = message.attachments.find((a) =>
-        a.contentType?.startsWith("image/"),
+      // Also consider media in the reply itself as a fallback
+      const replyMediaAttachment = message.attachments.find((a) =>
+        this.isSupportedSubmissionAttachment(a.contentType),
       );
 
-      const attachment = imageAttachment ?? replyImageAttachment;
+      const attachment = mediaAttachment ?? replyMediaAttachment;
 
       // Strip the bot mention from the reply so only the assignment selector remains.
       const botMentionPattern = this.client?.user
@@ -2335,18 +2474,18 @@ export class BotRuntime {
 
       if (!submissionText && !attachment) {
         await message.reply(
-          "The message you replied to has no image and no text. There is nothing to submit.",
+          "The message you replied to has no media and no text. There is nothing to submit.",
         );
         return;
       }
 
-      // --- 7. Upload image if present ---------------------------------------
+      // --- 7. Upload media if present ---------------------------------------
       let imageUrl: string | undefined;
       let imageKey: string | undefined;
 
       if (attachment) {
-        if (attachment.size > 10 * 1024 * 1024) {
-          await message.reply("Image must be under 10 MB.");
+        if (attachment.size > 25 * 1024 * 1024) {
+          await message.reply("Attachment must be under 25 MB.");
           return;
         }
 
@@ -2354,20 +2493,20 @@ export class BotRuntime {
           try {
             const response = await fetch(attachment.url);
             if (!response.ok) {
-              await message.reply("Failed to download the image. It may have expired — try re-uploading it.");
+              await message.reply("Failed to download the attachment. It may have expired — try re-uploading it.");
               return;
             }
             const buffer = Buffer.from(await response.arrayBuffer());
             const result = await this.storageService.upload({
               buffer,
-              contentType: attachment.contentType ?? "image/png",
+              contentType: attachment.contentType ?? "application/octet-stream",
               folder: `submissions/${guildId}`,
               originalFilename: attachment.name ?? undefined,
             });
             imageUrl = result.url;
             imageKey = result.key;
           } catch {
-            await message.reply("Failed to upload image. Please try again or contact an admin.");
+            await message.reply("Failed to upload the attachment. Please try again or contact an admin.");
             return;
           }
         } else {
@@ -3538,53 +3677,13 @@ export class BotRuntime {
         return;
       }
       case "assignments": {
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-        const assignments = await this.services.assignmentService.listActive(this.env.GUILD_ID);
-
-        if (assignments.length === 0) {
-          await interaction.reply({
-            content: "There are no active assignments right now.",
-            ephemeral: true,
-          });
+        await interaction.deferReply();
+        const view = await this.buildAssignmentsView({ ownerId: interaction.user.id, page: 1 });
+        if (view.totalEntries === 0) {
+          await interaction.editReply({ content: "There are no active assignments right now." });
           return;
         }
-
-        const lines = assignments.map((assignment) => {
-          const segments: string[] = [`**${assignment.title}**`];
-          if (assignment.description) {
-            segments.push(assignment.description);
-          }
-          const baseParts: string[] = [];
-          if (assignment.basePointsReward > 0) {
-            baseParts.push(this.formatPointsAmount(assignment.basePointsReward, config));
-          }
-          if (assignment.baseCurrencyReward > 0) {
-            baseParts.push(this.formatCurrencyAmount(assignment.baseCurrencyReward, config));
-          }
-          if (baseParts.length > 0) {
-            segments.push(`Reward on approval: ${baseParts.join(" + ")}`);
-          }
-          const bonusParts: string[] = [];
-          if (assignment.bonusPointsReward > 0) {
-            bonusParts.push(this.formatPointsAmount(assignment.bonusPointsReward, config));
-          }
-          if (assignment.bonusCurrencyReward > 0) {
-            bonusParts.push(this.formatCurrencyAmount(assignment.bonusCurrencyReward, config));
-          }
-          if (bonusParts.length > 0) {
-            segments.push(`Outstanding bonus: ${bonusParts.join(" + ")}`);
-          }
-          if (assignment.deadline) {
-            const deadlineSeconds = Math.floor(new Date(assignment.deadline).getTime() / 1000);
-            segments.push(`Deadline: <t:${deadlineSeconds}:F> (<t:${deadlineSeconds}:R>)`);
-          }
-          return segments.join("\n");
-        });
-
-        await interaction.reply({
-          content: `Active assignments — submit with \`/submit\`:\n\n${lines.join("\n\n")}`,
-          ephemeral: true,
-        });
+        await interaction.editReply({ embeds: [view.embed], components: view.row ? [view.row] : [] });
         return;
       }
       case "submit": {
@@ -3597,8 +3696,10 @@ export class BotRuntime {
         });
 
         const assignmentIdentifier = interaction.options.getString("assignment", true);
-        const text = interaction.options.getString("text") ?? "";
-        const attachment = interaction.options.getAttachment("image");
+        const note = interaction.options.getString("note") ?? interaction.options.getString("text") ?? "";
+        const link = this.normalizeSubmissionLink(interaction.options.getString("link"));
+        const text = this.buildSubmissionText(note, link);
+        const attachment = interaction.options.getAttachment("media") ?? interaction.options.getAttachment("image");
 
         const activeAssignments = await this.services.assignmentService.listActive(this.env.GUILD_ID);
         const assignmentLookup = this.resolveActiveAssignment(activeAssignments, assignmentIdentifier);
@@ -3622,13 +3723,13 @@ export class BotRuntime {
         let imageKey: string | undefined;
 
         if (attachment) {
-          if (!attachment.contentType?.startsWith("image/")) {
-            await interaction.editReply("Only image files are accepted as attachments.");
+          if (!this.isSupportedSubmissionAttachment(attachment.contentType)) {
+            await interaction.editReply("Only image or video files are accepted as attachments.");
             return;
           }
 
-          if (attachment.size > 10 * 1024 * 1024) {
-            await interaction.editReply("Image must be under 10 MB.");
+          if (attachment.size > 25 * 1024 * 1024) {
+            await interaction.editReply("Attachment must be under 25 MB.");
             return;
           }
 
@@ -3673,7 +3774,7 @@ export class BotRuntime {
         });
 
         await interaction.editReply(
-          `Submission received for **${submission.assignment.title}**! It will be reviewed by an admin.`,
+          `Submission received for **${submission.assignment.title}** (${submission.group?.displayName ?? "your group"}). It will be reviewed by an admin.`,
         );
         return;
       }
@@ -4224,8 +4325,15 @@ export class BotRuntime {
             .setRequired(true)
             .setAutocomplete(true),
         )
-        .addAttachmentOption((option) => option.setName("image").setDescription("Image attachment").setRequired(false))
-        .addStringOption((option) => option.setName("text").setDescription("Description or notes for your submission").setRequired(false)),
+        .addStringOption((option) =>
+          option.setName("note").setDescription("Note or comment shown with your submission").setRequired(false),
+        )
+        .addStringOption((option) =>
+          option.setName("link").setDescription("Optional work link, for example code.tk.sg").setRequired(false),
+        )
+        .addAttachmentOption((option) =>
+          option.setName("media").setDescription("Image or video attachment").setRequired(false),
+        ),
       new SlashCommandBuilder()
         .setName("assignments")
         .setDescription("List active assignments you can submit for."),

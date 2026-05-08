@@ -82,7 +82,7 @@ export class SubmissionService {
     const text = params.text.trim();
 
     if (text.length === 0 && !params.imageUrl) {
-      throw new AppError("Add some text or an image before submitting.", 400);
+      throw new AppError("Add a note, link, image, or video before submitting.", 400);
     }
 
     const assignment = await this.prisma.assignment.findFirst({
@@ -325,7 +325,7 @@ export class SubmissionService {
     const text = params.text.trim();
 
     if (text.length === 0 && !params.imageUrl) {
-      throw new AppError("Add some text or an image before submitting.", 400);
+      throw new AppError("Add a note, link, image, or video before submitting.", 400);
     }
 
     const assignment = await this.prisma.assignment.findFirst({

@@ -447,7 +447,7 @@ describe("participants, assignments and submissions", () => {
       ).rejects.toThrow(/already submitted/i);
     });
 
-    it("rejects empty submissions with no text and no image", async () => {
+    it("rejects empty submissions with no note, link, image, or video", async () => {
       const group = await seedGroupWithCapability();
 
       const participant = await ctx.services.participantService.register({
@@ -474,7 +474,7 @@ describe("participants, assignments and submissions", () => {
           participantId: participant.id,
           text: "   ",
         }),
-      ).rejects.toThrow(/add some text or an image/i);
+      ).rejects.toThrow(/add a note, link, image, or video/i);
     });
 
     it("approves a submission and awards base rewards to the group", async () => {

@@ -17,6 +17,8 @@ const STATUS_CLASSES: Record<Submission["status"], string> = {
   REJECTED: "badge--rejected",
 };
 
+const VIDEO_URL_PATTERN = /\.(mp4|m4v|mov|webm)(?:[?#].*)?$/i;
+
 type ReviewStatus = Exclude<Submission["status"], "PENDING">;
 
 type AssignmentsPanelProps = {
@@ -292,7 +294,18 @@ export default function AssignmentsPanel({
                           rel="noopener noreferrer"
                           className="submission-image-link"
                         >
-                          <img src={submission.imageUrl} alt="Submission" className="submission-thumbnail" />
+                          {VIDEO_URL_PATTERN.test(submission.imageUrl) ? (
+                            <video
+                              src={submission.imageUrl}
+                              className="submission-thumbnail"
+                              muted
+                              playsInline
+                              preload="metadata"
+                              aria-label="Submission video preview"
+                            />
+                          ) : (
+                            <img src={submission.imageUrl} alt="Submission" className="submission-thumbnail" />
+                          )}
                         </a>
                       ) : (
                         "\u2014"
