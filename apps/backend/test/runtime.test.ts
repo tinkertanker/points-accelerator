@@ -1352,7 +1352,7 @@ describe("bot runtime", () => {
           username: "Alice",
         },
       }),
-    ).rejects.toThrow(/configured staff roles/i);
+    ).rejects.toThrow(/configured reviewer roles/i);
   });
 
   it("lets configured mentor roles review submissions from Discord", async () => {
@@ -1898,6 +1898,7 @@ describe("bot runtime", () => {
         name: "sample-video.mp4",
       },
     ]);
+    expect(payload.allowedMentions).toEqual({ parse: [], users: ["111111111111111111"] });
     const embed = payload.embeds[0].toJSON();
     expect(embed.fields).toContainEqual(expect.objectContaining({
       name: "Media",
@@ -1947,6 +1948,7 @@ describe("bot runtime", () => {
       },
     ]);
     expect(send.mock.calls[1][0].files).toBeUndefined();
+    expect(send.mock.calls[1][0].allowedMentions).toEqual({ parse: [], users: ["111111111111111111"] });
     const fallbackEmbed = send.mock.calls[1][0].embeds[0].toJSON();
     expect(fallbackEmbed.fields).toContainEqual(expect.objectContaining({
       name: "Media",

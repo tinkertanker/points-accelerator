@@ -979,7 +979,7 @@ export class BotRuntime {
     const messagePayload = {
       embeds: [embed],
       components: [this.buildSubmissionActionRow(params.submissionId)],
-      allowedMentions: { users: validUserId ? [validUserId] : [] },
+      allowedMentions: { parse: [], users: validUserId ? [validUserId] : [] },
     };
     const textChannel = channel as GuildTextBasedChannel;
 
@@ -1731,7 +1731,7 @@ export class BotRuntime {
 
   private async assertCanManageSubmissions(member: GuildMember | null, roleIds: string[]) {
     if (!member) {
-      throw new AppError("This command is only available to configured staff roles.", 403);
+      throw new AppError("This command is only available to configured reviewer roles.", 403);
     }
 
     if (
@@ -1751,7 +1751,7 @@ export class BotRuntime {
     const canManageSubmissions = resolved.canManageDashboard || resolved.canAward || resolved.canDeduct;
 
     if (!canManageSubmissions) {
-      throw new AppError("This command is only available to configured staff roles.", 403);
+      throw new AppError("This command is only available to configured reviewer roles.", 403);
     }
   }
 
