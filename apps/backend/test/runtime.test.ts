@@ -1472,6 +1472,7 @@ describe("bot runtime", () => {
 
   it("creates /submit payloads with note, link, video media, and group credit", async () => {
     const { runtime, services } = createRuntimeFixture();
+    const studentUserId = "111111111111111111";
     services.assignmentService.listActive.mockResolvedValue([
       {
         id: "assign-1",
@@ -1533,7 +1534,7 @@ describe("bot runtime", () => {
       followUp,
       deleteReply,
       user: {
-        id: "user-1",
+        id: studentUserId,
         username: "Alice",
       },
     });
@@ -1553,8 +1554,8 @@ describe("bot runtime", () => {
     );
     expect(followUp).not.toHaveBeenCalled();
     expect(channelSend).toHaveBeenCalledWith({
-      content: "<@user-1> Submission received for **Video Demo** (Gryffindor). It will be reviewed by an admin.",
-      allowedMentions: { users: [] },
+      content: `<@${studentUserId}> Submission received for **Video Demo** (Gryffindor). It will be reviewed by an admin.`,
+      allowedMentions: { parse: [], users: [studentUserId] },
     });
     expect(deleteReply).toHaveBeenCalledTimes(1);
   });
@@ -1695,6 +1696,7 @@ describe("bot runtime", () => {
 
   it("replaces a pending submission after confirmation", async () => {
     const { runtime, services } = createRuntimeFixture();
+    const studentUserId = "111111111111111111";
     services.submissionService.createOrReplace.mockResolvedValue({
       replaced: true,
       previousImageKey: "submissions/guild-test/old-image.png",
@@ -1717,7 +1719,7 @@ describe("bot runtime", () => {
     const broadcast = vi.spyOn(runtime as any, "broadcastSubmissionToFeed").mockResolvedValue(undefined);
     (runtime as any).pendingSubmissionReplacements.set("token-1", {
       createdAt: Date.now(),
-      userId: "user-1",
+      userId: studentUserId,
       guildId: "guild-test",
       assignmentId: "assign-1",
       participantId: "participant-1",
@@ -1733,7 +1735,7 @@ describe("bot runtime", () => {
 
     await (runtime as any).handleSubmissionReplacementButton(
       {
-        user: { id: "user-1" },
+        user: { id: studentUserId },
         deferUpdate,
         editReply,
         followUp,
@@ -1768,8 +1770,8 @@ describe("bot runtime", () => {
       }),
     );
     expect(followUp).toHaveBeenCalledWith({
-      content: "<@user-1> Submission updated for **Reply Task** (Gryffindor). It will be reviewed by an admin.",
-      allowedMentions: { users: [] },
+      content: `<@${studentUserId}> Submission updated for **Reply Task** (Gryffindor). It will be reviewed by an admin.`,
+      allowedMentions: { parse: [], users: [studentUserId] },
     });
   });
 

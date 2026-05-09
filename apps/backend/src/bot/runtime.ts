@@ -2012,7 +2012,7 @@ export class BotRuntime {
   }
 
   private buildStudentAllowedMentions(studentUserId: string) {
-    return { users: isDiscordSnowflake(studentUserId) ? [studentUserId] : [] };
+    return { parse: [], users: isDiscordSnowflake(studentUserId) ? [studentUserId] : [] };
   }
 
   private async sendSubmissionReceiptToChannel(
