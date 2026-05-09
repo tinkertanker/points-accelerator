@@ -2131,7 +2131,7 @@ export class BotRuntime {
     submittedAssignmentIds: Set<string>,
   ) {
     const fields = paged.slice.map((assignment) => ({
-      name: escapeMarkdown(assignment.title),
+      name: `📝 ${escapeMarkdown(assignment.title)}`,
       value: this.formatAssignmentLine(assignment, config, submittedAssignmentIds),
       inline: false,
     }));
