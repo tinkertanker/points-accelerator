@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { KeyboardEvent } from "react";
 
 import { api } from "../services/api";
 import type {
@@ -63,26 +64,41 @@ const RESET_MODE_OPTIONS: Array<{
 
 const MODULUS_PRESETS = ["10", "100", "1000", "10000"];
 
-const ECONOMY_BUCKETS = [
-  {
+type EconomyBucketId = "participant-currency" | "group-points" | "group-currency";
+
+type EconomyBucket = {
+  id: EconomyBucketId;
+  title: string;
+  label: string;
+  description: string;
+};
+
+const ECONOMY_BUCKET_BY_ID = {
+  "participant-currency": {
     id: "participant-currency",
     title: "Participant wallet currency",
     label: "Student wallet currency",
     description: "Personal spendable balance used for transfers, personal shop buys, bets and donations.",
   },
-  {
+  "group-points": {
     id: "group-points",
     title: "Group points",
     label: "Leaderboard group points",
     description: "Shared group score shown on the leaderboard and spent by group purchases.",
   },
-  {
+  "group-currency": {
     id: "group-currency",
     title: "Group currency",
     label: "Legacy shared group currency",
     description: "Shared group ledger currency used by group-to-group transfers and older group currency flows.",
   },
-] as const;
+} satisfies Record<EconomyBucketId, EconomyBucket>;
+
+const ECONOMY_BUCKETS: EconomyBucket[] = [
+  ECONOMY_BUCKET_BY_ID["participant-currency"],
+  ECONOMY_BUCKET_BY_ID["group-points"],
+  ECONOMY_BUCKET_BY_ID["group-currency"],
+];
 
 const PARTICIPANT_LEDGER_TYPES: ParticipantLedgerEntryType[] = [
   "MESSAGE_REWARD",
@@ -260,13 +276,61 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
   };
 
   const selectedMode = RESET_MODE_OPTIONS.find((option) => option.id === state.mode)!;
+  const participantCurrencyBucket = ECONOMY_BUCKET_BY_ID["participant-currency"];
+  const groupPointsBucket = ECONOMY_BUCKET_BY_ID["group-points"];
+  const groupCurrencyBucket = ECONOMY_BUCKET_BY_ID["group-currency"];
+  const modulusValue = Number(state.modulus);
+  const modulusIsValid =
+    state.mode !== "modulo-balance" ||
+    (state.modulus.trim() !== "" && Number.isInteger(modulusValue) && modulusValue >= 1);
   const selectedTargetCount = [
     state.mode === "set-balances" ? state.setParticipantCurrencyEnabled : state.applyToParticipantCurrency,
     state.mode === "set-balances" ? state.setGroupPointsEnabled : state.applyToGroupPoints,
     state.mode === "set-balances" ? state.setGroupCurrencyEnabled : state.applyToGroupCurrency,
   ].filter(Boolean).length;
 
+  const selectMode = (mode: ResetMode) => {
+    setResult(null);
+    update({ mode });
+  };
+
+  const moveModeSelection = (currentMode: ResetMode, offset: number) => {
+    const currentIndex = RESET_MODE_OPTIONS.findIndex((option) => option.id === currentMode);
+    const nextIndex = (currentIndex + offset + RESET_MODE_OPTIONS.length) % RESET_MODE_OPTIONS.length;
+    const nextMode = RESET_MODE_OPTIONS[nextIndex].id;
+    selectMode(nextMode);
+    return nextMode;
+  };
+
+  const focusModeButton = (mode: ResetMode) => {
+    window.requestAnimationFrame(() => {
+      const selector = `[data-reset-mode="${mode}"]`;
+      document.querySelector<HTMLButtonElement>(selector)?.focus();
+    });
+  };
+
+  const handleModeKeyDown = (event: KeyboardEvent<HTMLButtonElement>, mode: ResetMode) => {
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      event.preventDefault();
+      focusModeButton(moveModeSelection(mode, 1));
+      return;
+    }
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      event.preventDefault();
+      focusModeButton(moveModeSelection(mode, -1));
+      return;
+    }
+    if (event.key === " " || event.key === "Enter") {
+      event.preventDefault();
+      selectMode(mode);
+    }
+  };
+
   const run = async (dryRun: boolean) => {
+    if (!modulusIsValid) {
+      setError("Enter a whole-number modulus of at least 1 before previewing or executing.");
+      return;
+    }
     setBusy(true);
     setError(null);
     if (!dryRun) {
@@ -330,11 +394,11 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
               className="reset-mode-card"
               aria-checked={state.mode === option.id}
               role="radio"
+              tabIndex={state.mode === option.id ? 0 : -1}
               key={option.id}
-              onClick={() => {
-                setResult(null);
-                update({ mode: option.id });
-              }}
+              data-reset-mode={option.id}
+              onClick={() => selectMode(option.id)}
+              onKeyDown={(event) => handleModeKeyDown(event, option.id)}
             >
               <span className="reset-mode-card__title">{option.title}</span>
               <span className="reset-mode-card__summary">{option.summary}</span>
@@ -355,7 +419,7 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
             <>
               <div className="reset-control-grid">
                 <label className="field reset-number-field">
-                  <span>Last digits to keep</span>
+                  <span>Modulus</span>
                   <input
                     type="number"
                     min={1}
@@ -364,9 +428,11 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
                     onChange={(event) => update({ modulus: event.target.value })}
                   />
                   <small className="field-hint">
-                    A modulus of 1,000 keeps the last 3 digits. Non-positive balances are left
-                    alone.
+                    Enter 1,000 to keep the last 3 digits. Non-positive balances are left alone.
                   </small>
+                  {!modulusIsValid && (
+                    <small className="field-error">Enter a whole-number modulus of at least 1.</small>
+                  )}
                 </label>
                 <div className="reset-presets" aria-label="Common modulus presets">
                   {MODULUS_PRESETS.map((preset) => (
@@ -390,8 +456,8 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
                     onChange={(event) => update({ applyToParticipantCurrency: event.target.checked })}
                   />
                   <span>
-                    <strong>{ECONOMY_BUCKETS[0].label}</strong>
-                    <small>{ECONOMY_BUCKETS[0].description}</small>
+                    <strong>{participantCurrencyBucket.label}</strong>
+                    <small>{participantCurrencyBucket.description}</small>
                   </span>
                 </label>
                 <label className="reset-target-card">
@@ -401,8 +467,8 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
                     onChange={(event) => update({ applyToGroupPoints: event.target.checked })}
                   />
                   <span>
-                    <strong>{ECONOMY_BUCKETS[1].label}</strong>
-                    <small>{ECONOMY_BUCKETS[1].description}</small>
+                    <strong>{groupPointsBucket.label}</strong>
+                    <small>{groupPointsBucket.description}</small>
                   </span>
                 </label>
                 <label className="reset-target-card">
@@ -412,8 +478,8 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
                     onChange={(event) => update({ applyToGroupCurrency: event.target.checked })}
                   />
                   <span>
-                    <strong>{ECONOMY_BUCKETS[2].label}</strong>
-                    <small>{ECONOMY_BUCKETS[2].description}</small>
+                    <strong>{groupCurrencyBucket.label}</strong>
+                    <small>{groupCurrencyBucket.description}</small>
                   </span>
                 </label>
               </div>
@@ -502,8 +568,8 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
           {state.mode === "cap-balances" && (
             <div className="reset-target-grid">
               <label className="field reset-target-card reset-target-card--stacked">
-                <span>{ECONOMY_BUCKETS[0].label}</span>
-                <small>{ECONOMY_BUCKETS[0].description}</small>
+                <span>{participantCurrencyBucket.label}</span>
+                <small>{participantCurrencyBucket.description}</small>
                 <input
                   type="number"
                   min={0}
@@ -513,8 +579,8 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
                 />
               </label>
               <label className="field reset-target-card reset-target-card--stacked">
-                <span>{ECONOMY_BUCKETS[1].label}</span>
-                <small>{ECONOMY_BUCKETS[1].description}</small>
+                <span>{groupPointsBucket.label}</span>
+                <small>{groupPointsBucket.description}</small>
                 <input
                   type="number"
                   min={0}
@@ -524,8 +590,8 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
                 />
               </label>
               <label className="field reset-target-card reset-target-card--stacked">
-                <span>{ECONOMY_BUCKETS[2].label}</span>
-                <small>{ECONOMY_BUCKETS[2].description}</small>
+                <span>{groupCurrencyBucket.label}</span>
+                <small>{groupCurrencyBucket.description}</small>
                 <input
                   type="number"
                   min={0}
@@ -546,9 +612,9 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
                     checked={state.setParticipantCurrencyEnabled}
                     onChange={(event) => update({ setParticipantCurrencyEnabled: event.target.checked })}
                   />
-                  <strong>{ECONOMY_BUCKETS[0].label}</strong>
+                  <strong>{participantCurrencyBucket.label}</strong>
                 </span>
-                <small>{ECONOMY_BUCKETS[0].description}</small>
+                <small>{participantCurrencyBucket.description}</small>
                 <input
                   type="number"
                   value={state.targetParticipantCurrency}
@@ -563,9 +629,9 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
                     checked={state.setGroupPointsEnabled}
                     onChange={(event) => update({ setGroupPointsEnabled: event.target.checked })}
                   />
-                  <strong>{ECONOMY_BUCKETS[1].label}</strong>
+                  <strong>{groupPointsBucket.label}</strong>
                 </span>
-                <small>{ECONOMY_BUCKETS[1].description}</small>
+                <small>{groupPointsBucket.description}</small>
                 <input
                   type="number"
                   value={state.targetGroupPoints}
@@ -580,9 +646,9 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
                     checked={state.setGroupCurrencyEnabled}
                     onChange={(event) => update({ setGroupCurrencyEnabled: event.target.checked })}
                   />
-                  <strong>{ECONOMY_BUCKETS[2].label}</strong>
+                  <strong>{groupCurrencyBucket.label}</strong>
                 </span>
-                <small>{ECONOMY_BUCKETS[2].description}</small>
+                <small>{groupCurrencyBucket.description}</small>
                 <input
                   type="number"
                   value={state.targetGroupCurrency}
@@ -608,14 +674,14 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
         </div>
 
         <div className="form-actions">
-          <button type="button" onClick={() => run(true)} disabled={busy}>
+          <button type="button" onClick={() => run(true)} disabled={busy || !modulusIsValid}>
             {busy ? "Working…" : "Preview (dry run)"}
           </button>
           <button
             type="button"
             className="button button--danger"
             onClick={() => run(false)}
-            disabled={busy}
+            disabled={busy || !modulusIsValid}
           >
             {busy ? "Working…" : "Execute"}
           </button>
