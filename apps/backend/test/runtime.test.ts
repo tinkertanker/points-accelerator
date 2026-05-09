@@ -1660,6 +1660,7 @@ describe("bot runtime", () => {
 
   it("creates /submit payloads with note, link, video media, and group credit", async () => {
     const { runtime, services } = createRuntimeFixture();
+    const studentUserId = "111111111111111111";
     services.assignmentService.listActive.mockResolvedValue([
       {
         id: "assign-1",
@@ -1684,9 +1685,16 @@ describe("bot runtime", () => {
 
     const deferReply = vi.fn().mockResolvedValue(undefined);
     const editReply = vi.fn().mockResolvedValue(undefined);
+    const followUp = vi.fn().mockResolvedValue(undefined);
+    const deleteReply = vi.fn().mockResolvedValue(undefined);
+    const channelSend = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
       commandName: "submit",
+      channel: {
+        isTextBased: () => true,
+        send: channelSend,
+      },
       guild: {
         members: {
           fetch: vi.fn().mockResolvedValue(null),
@@ -1711,8 +1719,10 @@ describe("bot runtime", () => {
       },
       deferReply,
       editReply,
+      followUp,
+      deleteReply,
       user: {
-        id: "user-1",
+        id: studentUserId,
         username: "Alice",
       },
     });
@@ -1730,9 +1740,12 @@ describe("bot runtime", () => {
         imageUrl: "https://cdn.example.test/sample-submission-video.mp4",
       }),
     );
-    expect(editReply).toHaveBeenCalledWith(
-      "Submission received for **Video Demo** (Gryffindor). It will be reviewed by an admin.",
-    );
+    expect(followUp).not.toHaveBeenCalled();
+    expect(channelSend).toHaveBeenCalledWith({
+      content: `<@${studentUserId}> Submission received for **Video Demo** (Gryffindor). It will be reviewed by an admin.`,
+      allowedMentions: { parse: [], users: [studentUserId] },
+    });
+    expect(deleteReply).toHaveBeenCalledTimes(1);
   });
 
   it("shows /assignments publicly as a newest-first paginated embed", async () => {
@@ -1871,6 +1884,7 @@ describe("bot runtime", () => {
 
   it("replaces a pending submission after confirmation", async () => {
     const { runtime, services } = createRuntimeFixture();
+    const studentUserId = "111111111111111111";
     services.submissionService.createOrReplace.mockResolvedValue({
       replaced: true,
       previousImageKey: "submissions/guild-test/old-image.png",
@@ -1893,7 +1907,7 @@ describe("bot runtime", () => {
     const broadcast = vi.spyOn(runtime as any, "broadcastSubmissionToFeed").mockResolvedValue(undefined);
     (runtime as any).pendingSubmissionReplacements.set("token-1", {
       createdAt: Date.now(),
-      userId: "user-1",
+      userId: studentUserId,
       guildId: "guild-test",
       assignmentId: "assign-1",
       participantId: "participant-1",
@@ -1905,12 +1919,14 @@ describe("bot runtime", () => {
 
     const deferUpdate = vi.fn().mockResolvedValue(undefined);
     const editReply = vi.fn().mockResolvedValue(undefined);
+    const followUp = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleSubmissionReplacementButton(
       {
-        user: { id: "user-1" },
+        user: { id: studentUserId },
         deferUpdate,
         editReply,
+        followUp,
       },
       "replace",
       "token-1",
@@ -1937,10 +1953,14 @@ describe("bot runtime", () => {
     );
     expect(editReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining("Submission updated for **Reply Task**"),
+        content: "Submission replacement confirmed.",
         components: [],
       }),
     );
+    expect(followUp).toHaveBeenCalledWith({
+      content: `<@${studentUserId}> Submission updated for **Reply Task** (Gryffindor). It will be reviewed by an admin.`,
+      allowedMentions: { parse: [], users: [studentUserId] },
+    });
   });
 
   it("replies with a default message for direct bot mentions outside submission handling", async () => {
