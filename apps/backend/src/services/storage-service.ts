@@ -45,7 +45,11 @@ export class StorageService {
       throw new Error("Storage is not configured. Set R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME.");
     }
 
-    const extension = params.originalFilename ? extname(params.originalFilename) : this.extensionFromContentType(params.contentType);
+    const metadata = this.normaliseUploadMetadata({
+      contentType: params.contentType,
+      originalFilename: params.originalFilename,
+    });
+    const extension = params.originalFilename ? extname(params.originalFilename) : this.extensionFromContentType(metadata.contentType);
     const uniqueId = randomBytes(16).toString("hex");
     const key = `${params.folder}/${uniqueId}${extension}`;
 
@@ -54,7 +58,8 @@ export class StorageService {
         Bucket: this.bucketName,
         Key: key,
         Body: params.buffer,
-        ContentType: params.contentType,
+        ContentType: metadata.contentType,
+        ContentDisposition: "inline",
       }),
     );
 
@@ -84,7 +89,31 @@ export class StorageService {
       "image/webp": ".webp",
       "image/svg+xml": ".svg",
       "application/pdf": ".pdf",
+      "video/mp4": ".mp4",
+      "video/quicktime": ".mov",
     };
     return mapping[contentType] ?? "";
+  }
+
+  private normaliseUploadMetadata(params: { contentType: string; originalFilename?: string }) {
+    const extension = params.originalFilename ? extname(params.originalFilename).toLowerCase() : "";
+    const contentType = params.contentType.toLowerCase();
+
+    // Discord often labels macOS screen recordings, and sometimes .mp4 files
+    // exported from macOS, as QuickTime. If the file is actually named .mp4,
+    // serve it as MP4 so clients such as Discord can render an inline player.
+    if (extension === ".mp4" || extension === ".m4v") {
+      return { contentType: "video/mp4" };
+    }
+
+    if (extension === ".mov") {
+      return { contentType: "video/quicktime" };
+    }
+
+    if (contentType === "video/x-m4v") {
+      return { contentType: "video/mp4" };
+    }
+
+    return { contentType: params.contentType };
   }
 }
