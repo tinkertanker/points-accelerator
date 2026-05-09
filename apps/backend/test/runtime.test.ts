@@ -1602,7 +1602,7 @@ describe("bot runtime", () => {
     };
     expect(embed.title).toBe("Active Assignments");
     expect(embed.description).toContain("11 active assignments, newest first");
-    expect(embed.fields?.[0]?.name).toBe("Task 11");
+    expect(embed.fields?.[0]?.name).toBe("📝 Task 11");
     expect(embed.fields?.[0]?.value).toContain("✅ Submitted");
     expect(embed.fields?.[0]?.value).toContain("10 submitted");
     expect(embed.footer?.text).toContain("page 1/2");
