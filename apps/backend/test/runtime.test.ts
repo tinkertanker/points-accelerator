@@ -1470,6 +1470,194 @@ describe("bot runtime", () => {
     );
   });
 
+  it("shows a card-style /submit assignment not found response", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.participantService.ensureForGroup.mockResolvedValue({
+      id: "participant-1",
+      indexId: "S001",
+      groupId: "group-1",
+      discordUsername: "Alice",
+      group: { id: "group-1", displayName: "Gryffindor", slug: "gryffindor" },
+    });
+    services.assignmentService.listActive.mockResolvedValue([
+      {
+        id: "assign-11111111",
+        title: "Reflection 1",
+        createdAt: new Date("2026-05-08T08:00:00Z"),
+      },
+      {
+        id: "assign-22222222",
+        title: "Demo Day",
+        createdAt: new Date("2026-05-09T08:00:00Z"),
+      },
+    ]);
+
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "submit",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue(null),
+        },
+      },
+      options: {
+        getString: vi.fn((name: string) => {
+          if (name === "assignment") return "Missing Brief";
+          if (name === "text") return "Here is my work";
+          return null;
+        }),
+        getAttachment: vi.fn().mockReturnValue(null),
+      },
+      deferReply,
+      editReply,
+      user: {
+        id: "user-1",
+        username: "Alice",
+      },
+    });
+
+    expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(services.submissionService.create).not.toHaveBeenCalled();
+
+    const [{ embeds }] = editReply.mock.calls[0] as [{ embeds: Array<{ toJSON(): Record<string, unknown> }> }];
+    expect(embeds).toHaveLength(1);
+
+    const embed = embeds[0]!.toJSON() as {
+      title?: string;
+      description?: string;
+      fields?: Array<{ name: string; value: string }>;
+      footer?: { text?: string };
+    };
+
+    expect(embed.title).toBe("Assignment Not Found");
+    expect(embed.description).toContain("Missing Brief");
+    expect(embed.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Available assignments",
+          value: expect.stringContaining("Demo Day"),
+        }),
+        expect.objectContaining({
+          name: "Assignments tracked",
+          value: "2",
+        }),
+      ]),
+    );
+    expect(embed.fields?.[0]?.value).toContain("assign-22222222");
+    expect(embed.fields?.[0]?.value.length).toBeLessThanOrEqual(1024);
+    expect(embed.footer?.text).toContain("Copy an ID");
+  });
+
+  it("keeps long /submit assignment not found cards within Discord field limits", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.participantService.ensureForGroup.mockResolvedValue({
+      id: "participant-1",
+      indexId: "S001",
+      groupId: "group-1",
+      discordUsername: "Alice",
+      group: { id: "group-1", displayName: "Gryffindor", slug: "gryffindor" },
+    });
+    services.assignmentService.listActive.mockResolvedValue(
+      Array.from({ length: 10 }, (_, index) => ({
+        id: `assign-${String(index + 1).padStart(8, "0")}`,
+        title: `Very long assignment title ${index + 1} ${"with detailed recovery text ".repeat(12)}`,
+        createdAt: new Date(`2026-05-${String(index + 1).padStart(2, "0")}T08:00:00Z`),
+      })),
+    );
+
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "submit",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue(null),
+        },
+      },
+      options: {
+        getString: vi.fn((name: string) => {
+          if (name === "assignment") return "Missing Brief";
+          if (name === "text") return "Here is my work";
+          return null;
+        }),
+        getAttachment: vi.fn().mockReturnValue(null),
+      },
+      deferReply,
+      editReply,
+      user: {
+        id: "user-1",
+        username: "Alice",
+      },
+    });
+
+    const [{ embeds }] = editReply.mock.calls[0] as [{ embeds: Array<{ toJSON(): Record<string, unknown> }> }];
+    const embed = embeds[0]!.toJSON() as {
+      fields?: Array<{ name: string; value: string }>;
+    };
+
+    expect(embed.fields?.[0]?.name).toBe("Available assignments");
+    expect(embed.fields?.[0]?.value.length).toBeLessThanOrEqual(1024);
+    expect(embed.fields?.[0]?.value).toContain("...");
+    expect(services.submissionService.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps long /submit assignment identifiers within Discord description limits", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.participantService.ensureForGroup.mockResolvedValue({
+      id: "participant-1",
+      indexId: "S001",
+      groupId: "group-1",
+      discordUsername: "Alice",
+      group: { id: "group-1", displayName: "Gryffindor", slug: "gryffindor" },
+    });
+    services.assignmentService.listActive.mockResolvedValue([
+      {
+        id: "assign-11111111",
+        title: "Reflection 1",
+        createdAt: new Date("2026-05-08T08:00:00Z"),
+      },
+    ]);
+
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const longIdentifier = `Missing Brief ${"with a very long copied message ".repeat(180)}`;
+
+    await (runtime as any).handleCommand({
+      commandName: "submit",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue(null),
+        },
+      },
+      options: {
+        getString: vi.fn((name: string) => {
+          if (name === "assignment") return longIdentifier;
+          if (name === "text") return "Here is my work";
+          return null;
+        }),
+        getAttachment: vi.fn().mockReturnValue(null),
+      },
+      deferReply,
+      editReply,
+      user: {
+        id: "user-1",
+        username: "Alice",
+      },
+    });
+
+    const [{ embeds }] = editReply.mock.calls[0] as [{ embeds: Array<{ toJSON(): Record<string, unknown> }> }];
+    const embed = embeds[0]!.toJSON() as {
+      description?: string;
+    };
+
+    expect(embed.description?.length).toBeLessThanOrEqual(4096);
+    expect(embed.description).toContain("...");
+    expect(services.submissionService.create).not.toHaveBeenCalled();
+  });
+
   it("creates /submit payloads with note, link, video media, and group credit", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.assignmentService.listActive.mockResolvedValue([

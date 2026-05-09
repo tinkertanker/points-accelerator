@@ -92,6 +92,8 @@ const PAGINATION_PAGE_SIZE = 10;
 const LEDGER_EMBED_COLOUR = 0x8b5cf6;
 const LEDGER_DESCRIPTION_MAX = 300;
 const LEDGER_FIELD_VALUE_MAX = 1024;
+const ASSIGNMENT_CHOICE_FIELD_VALUE_MAX = 1024;
+const MISSING_ASSIGNMENT_IDENTIFIER_MAX = 3900;
 const LEADERBOARD_FEATURED_COUNT = 4;
 const GROUP_LEADERBOARD_COLOUR = 0xf59e0b;
 const FORBES_EMBED_COLOUR = 0x38bdf8;
@@ -1868,6 +1870,58 @@ export class BotRuntime {
       : "none";
   }
 
+  private formatAssignmentChoiceCards(assignments: ActiveAssignment[]) {
+    if (assignments.length === 0) {
+      return "No active assignments are open right now.";
+    }
+
+    const visibleAssignments = this.sortAssignmentsRecentFirst(assignments).slice(0, PAGINATION_PAGE_SIZE);
+    const assignmentLines = visibleAssignments.map((assignment, index) => {
+      const rank = `#${index + 1}`;
+      return `${rank} **${escapeMarkdown(assignment.title)}**\nID \`${assignment.id}\``;
+    });
+
+    if (assignments.length > visibleAssignments.length) {
+      assignmentLines.push(`+${assignments.length - visibleAssignments.length} more. Use /assignments to browse the full list.`);
+    }
+
+    return this.truncateText(assignmentLines.join("\n\n"), ASSIGNMENT_CHOICE_FIELD_VALUE_MAX);
+  }
+
+  private buildMissingAssignmentEmbed(identifier: string, assignments: ActiveAssignment[]) {
+    const trimmedIdentifier = identifier.trim();
+    const escapedIdentifier = this.truncateText(
+      escapeMarkdown(trimmedIdentifier),
+      MISSING_ASSIGNMENT_IDENTIFIER_MAX,
+    );
+    const description = trimmedIdentifier
+      ? `No active assignment matches **${escapedIdentifier}**.`
+      : "Please include an active assignment name or ID.";
+
+    const fields: { name: string; value: string; inline: boolean }[] = [
+      {
+        name: assignments.length > 0 ? "Available assignments" : "Active assignments",
+        value: this.formatAssignmentChoiceCards(assignments),
+        inline: false,
+      },
+    ];
+
+    if (assignments.length > 0) {
+      fields.push({
+        name: "Assignments tracked",
+        value: `${assignments.length}`,
+        inline: true,
+      });
+    }
+
+    return new EmbedBuilder()
+      .setColor(FORBES_EMBED_COLOUR)
+      .setTitle("Assignment Not Found")
+      .setDescription(description)
+      .addFields(fields)
+      .setFooter({ text: "Copy an ID into /submit if titles are similar." });
+  }
+
   private sortAssignmentsRecentFirst(assignments: ActiveAssignment[]) {
     return [...assignments].sort((a, b) => {
       const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -2624,9 +2678,7 @@ export class BotRuntime {
       const assignmentLookup = this.resolveActiveAssignment(activeAssignments, assignmentIdentifier);
 
       if (assignmentLookup.kind === "missing") {
-        await message.reply(
-          `Assignment not found. Available assignments: ${this.formatAssignmentChoices(activeAssignments)}`,
-        );
+        await message.reply({ embeds: [this.buildMissingAssignmentEmbed(assignmentIdentifier, activeAssignments)] });
         return;
       }
 
@@ -3908,9 +3960,9 @@ export class BotRuntime {
         const assignmentLookup = this.resolveActiveAssignment(activeAssignments, assignmentIdentifier);
 
         if (assignmentLookup.kind === "missing") {
-          await interaction.editReply(
-            `Assignment not found. Available assignments: ${this.formatAssignmentChoices(activeAssignments)}`,
-          );
+          await interaction.editReply({
+            embeds: [this.buildMissingAssignmentEmbed(assignmentIdentifier, activeAssignments)],
+          });
           return;
         }
         if (assignmentLookup.kind === "ambiguous") {
