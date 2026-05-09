@@ -8,6 +8,22 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.6.1] - 2026-05-09
+
+### Added
+- `/assignments` is now public, newest-first, paginated, and shows whether the caller has already submitted each assignment.
+- `/submit` now makes notes/comments and work links explicit, including normalising plain domains such as `code.tk.sg`.
+- Submissions can now post public receipts back to the submitter while keeping the admin review flow in the configured submissions channel.
+
+### Changed
+- Submission review messages now use a compact board-style embed with group credit, submitter, short ID, media link, and Accept/Reject controls.
+- Resubmissions now ask for confirmation before replacing the pending submission. Confirmed replacements delete the old feed message and keep the latest submission for review.
+- Assignment lookup errors now render as a clearer Discord card instead of a long plain-text message.
+- Economy reset tooling in the dashboard has a cleaner, denser layout for safer admin review before applying changes.
+
+### Fixed
+- MP4 submission uploads are now stored with inline, preview-friendly metadata for Discord, including macOS screen recordings that Discord labels as QuickTime.
+
 ## [0.6.0] - 2026-05-01
 
 ### Added
