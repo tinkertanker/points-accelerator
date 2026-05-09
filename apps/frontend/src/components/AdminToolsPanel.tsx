@@ -29,6 +29,61 @@ const FLAG_LABEL: Record<ParticipantSanctionFlag, string> = {
 
 type ResetMode = EconomyResetRequest["mode"];
 
+const RESET_MODE_OPTIONS: Array<{
+  id: ResetMode;
+  title: string;
+  summary: string;
+  detail: string;
+}> = [
+  {
+    id: "modulo-balance",
+    title: "Keep last digits",
+    summary: "Trim huge balances while preserving a small remainder.",
+    detail: "Best for runaway numbers. Example: 12,345 with a 1,000 modulus becomes 345.",
+  },
+  {
+    id: "cap-balances",
+    title: "Cap balances",
+    summary: "Only reduce balances above a maximum.",
+    detail: "Useful when the economy is mostly fine but outliers need a ceiling.",
+  },
+  {
+    id: "reverse-entries-since",
+    title: "Reverse entries",
+    summary: "Undo selected ledger entry types since a date.",
+    detail: "Best when you know exactly which recent reward or event caused the problem.",
+  },
+  {
+    id: "set-balances",
+    title: "Set balances",
+    summary: "Move selected buckets to a fixed value.",
+    detail: "The blunt reset option. Use zero to wipe a selected bucket.",
+  },
+];
+
+const MODULUS_PRESETS = ["10", "100", "1000", "10000"];
+
+const ECONOMY_BUCKETS = [
+  {
+    id: "participant-currency",
+    title: "Participant wallet currency",
+    label: "Student wallet currency",
+    description: "Personal spendable balance used for transfers, personal shop buys, bets and donations.",
+  },
+  {
+    id: "group-points",
+    title: "Group points",
+    label: "Leaderboard group points",
+    description: "Shared group score shown on the leaderboard and spent by group purchases.",
+  },
+  {
+    id: "group-currency",
+    title: "Group currency",
+    label: "Legacy shared group currency",
+    description: "Shared group ledger currency used by group-to-group transfers and older group currency flows.",
+  },
+] as const;
+
 const PARTICIPANT_LEDGER_TYPES: ParticipantLedgerEntryType[] = [
   "MESSAGE_REWARD",
   "MANUAL_AWARD",
@@ -197,6 +252,19 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
       return { ...prev, groupTypes: next };
     });
   };
+  const setParticipantTypes = (types: ParticipantLedgerEntryType[]) => {
+    setState((prev) => ({ ...prev, participantTypes: new Set(types) }));
+  };
+  const setGroupTypes = (types: GroupLedgerEntryType[]) => {
+    setState((prev) => ({ ...prev, groupTypes: new Set(types) }));
+  };
+
+  const selectedMode = RESET_MODE_OPTIONS.find((option) => option.id === state.mode)!;
+  const selectedTargetCount = [
+    state.mode === "set-balances" ? state.setParticipantCurrencyEnabled : state.applyToParticipantCurrency,
+    state.mode === "set-balances" ? state.setGroupPointsEnabled : state.applyToGroupPoints,
+    state.mode === "set-balances" ? state.setGroupCurrencyEnabled : state.applyToGroupCurrency,
+  ].filter(Boolean).length;
 
   const run = async (dryRun: boolean) => {
     setBusy(true);
@@ -230,182 +298,257 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
   return (
     <div className="panel-stack">
       <section className="section">
-        <header className="section-header">
-          <h2>Economy reset</h2>
-          <p className="section-help">
-            Four modes for reining in runaway balances. All modes write append-only{" "}
-            <code>CORRECTION</code> ledger entries — nothing is destroyed; everything is auditable.
-            Always run a dry run first.
-          </p>
+        <header className="section-header economy-reset-header">
+          <div>
+            <p className="section-kicker">Admin tools</p>
+            <h2>Economy reset</h2>
+            <p className="section-help">
+              Choose the balance bucket, preview the impact, then execute only after the dry run
+              looks right. Resets write append-only correction ledger entries, so the audit trail is
+              preserved.
+            </p>
+          </div>
+          <div className="reset-safety-note" aria-label="Reset safety note">
+            <strong>Dry run first</strong>
+            <span>No balances change until you press Execute.</span>
+          </div>
         </header>
 
-        <div className="form-row">
-          <label className="field">
-            <span>Mode</span>
-            <select
-              value={state.mode}
-              onChange={(event) => {
-                setResult(null);
-                update({ mode: event.target.value as ResetMode });
-              }}
-            >
-              <option value="modulo-balance">Keep last N digits (balance % modulus)</option>
-              <option value="reverse-entries-since">Reverse ledger entries since…</option>
-              <option value="cap-balances">Cap balances at maximum</option>
-              <option value="set-balances">☢️ Nuke — set balances to a fixed value (default 0)</option>
-            </select>
-          </label>
+        <div className="reset-explainer-grid" aria-label="Economy balance buckets">
+          {ECONOMY_BUCKETS.map((bucket) => (
+            <article className="reset-explainer" key={bucket.id}>
+              <h3>{bucket.title}</h3>
+              <p>{bucket.description}</p>
+            </article>
+          ))}
         </div>
 
-        {state.mode === "modulo-balance" && (
-          <div className="form-row">
-            <label className="field">
-              <span>Modulus</span>
-              <input
-                type="number"
-                min={1}
-                step={1}
-                value={state.modulus}
-                onChange={(event) => update({ modulus: event.target.value })}
-              />
-              <small className="field-hint">
-                Modulus 1000 keeps the last 3 digits — 999,999,999,999 → 999, 50 → 50, 4500 → 500.
-                Non-positive balances are left alone.
-              </small>
-            </label>
-          </div>
-        )}
-        {state.mode === "modulo-balance" && (
-          <div className="form-row">
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={state.applyToParticipantCurrency}
-                onChange={(event) => update({ applyToParticipantCurrency: event.target.checked })}
-              />
-              <span>Apply to participant wallets (currency)</span>
-            </label>
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={state.applyToGroupPoints}
-                onChange={(event) => update({ applyToGroupPoints: event.target.checked })}
-              />
-              <span>Apply to group points</span>
-            </label>
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={state.applyToGroupCurrency}
-                onChange={(event) => update({ applyToGroupCurrency: event.target.checked })}
-              />
-              <span>Apply to group currency</span>
-            </label>
-          </div>
-        )}
+        <div className="reset-mode-grid" role="radiogroup" aria-label="Economy reset mode">
+          {RESET_MODE_OPTIONS.map((option) => (
+            <button
+              type="button"
+              className="reset-mode-card"
+              aria-checked={state.mode === option.id}
+              role="radio"
+              key={option.id}
+              onClick={() => {
+                setResult(null);
+                update({ mode: option.id });
+              }}
+            >
+              <span className="reset-mode-card__title">{option.title}</span>
+              <span className="reset-mode-card__summary">{option.summary}</span>
+            </button>
+          ))}
+        </div>
 
-        {state.mode === "reverse-entries-since" && (
-          <>
-            <div className="form-row">
-              <label className="field">
-                <span>Since (UTC)</span>
+        <div className="reset-workspace">
+          <div className="reset-workspace__intro">
+            <h3>{selectedMode.title}</h3>
+            <p>{selectedMode.detail}</p>
+            {(state.mode === "modulo-balance" || state.mode === "set-balances") && (
+              <span className="reset-target-count">{selectedTargetCount} bucket(s) selected</span>
+            )}
+          </div>
+
+          {state.mode === "modulo-balance" && (
+            <>
+              <div className="reset-control-grid">
+                <label className="field reset-number-field">
+                  <span>Last digits to keep</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={state.modulus}
+                    onChange={(event) => update({ modulus: event.target.value })}
+                  />
+                  <small className="field-hint">
+                    A modulus of 1,000 keeps the last 3 digits. Non-positive balances are left
+                    alone.
+                  </small>
+                </label>
+                <div className="reset-presets" aria-label="Common modulus presets">
+                  {MODULUS_PRESETS.map((preset) => (
+                    <button
+                      type="button"
+                      className="button button--small"
+                      key={preset}
+                      onClick={() => update({ modulus: preset })}
+                    >
+                      {formatNumber(Number(preset))}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="reset-target-grid" aria-label="Modulo reset targets">
+                <label className="reset-target-card">
+                  <input
+                    type="checkbox"
+                    checked={state.applyToParticipantCurrency}
+                    onChange={(event) => update({ applyToParticipantCurrency: event.target.checked })}
+                  />
+                  <span>
+                    <strong>{ECONOMY_BUCKETS[0].label}</strong>
+                    <small>{ECONOMY_BUCKETS[0].description}</small>
+                  </span>
+                </label>
+                <label className="reset-target-card">
+                  <input
+                    type="checkbox"
+                    checked={state.applyToGroupPoints}
+                    onChange={(event) => update({ applyToGroupPoints: event.target.checked })}
+                  />
+                  <span>
+                    <strong>{ECONOMY_BUCKETS[1].label}</strong>
+                    <small>{ECONOMY_BUCKETS[1].description}</small>
+                  </span>
+                </label>
+                <label className="reset-target-card">
+                  <input
+                    type="checkbox"
+                    checked={state.applyToGroupCurrency}
+                    onChange={(event) => update({ applyToGroupCurrency: event.target.checked })}
+                  />
+                  <span>
+                    <strong>{ECONOMY_BUCKETS[2].label}</strong>
+                    <small>{ECONOMY_BUCKETS[2].description}</small>
+                  </span>
+                </label>
+              </div>
+            </>
+          )}
+
+          {state.mode === "reverse-entries-since" && (
+            <>
+              <div className="form-row">
+                <label className="field">
+                  <span>Reverse entries since</span>
+                  <input
+                    type="datetime-local"
+                    value={state.since}
+                    onChange={(event) => update({ since: event.target.value })}
+                  />
+                  <small className="field-hint">
+                    The browser date is converted to UTC before sending. The reset writes one
+                    correction entry per affected ledger.
+                  </small>
+                </label>
+              </div>
+              <div className="reset-ledger-grid">
+                <fieldset className="reset-ledger-fieldset">
+                  <legend>Participant wallet entry types</legend>
+                  <div className="reset-fieldset-actions">
+                    <button
+                      type="button"
+                      className="button button--small"
+                      onClick={() => setParticipantTypes(PARTICIPANT_LEDGER_TYPES)}
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      className="button button--small"
+                      onClick={() => setParticipantTypes([])}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="checkbox-grid">
+                    {PARTICIPANT_LEDGER_TYPES.map((type) => (
+                      <label className="checkbox-field" key={`p-${type}`}>
+                        <input
+                          type="checkbox"
+                          checked={state.participantTypes.has(type)}
+                          onChange={() => toggleParticipantType(type)}
+                        />
+                        <span>{type}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <fieldset className="reset-ledger-fieldset">
+                  <legend>Group ledger entry types</legend>
+                  <div className="reset-fieldset-actions">
+                    <button
+                      type="button"
+                      className="button button--small"
+                      onClick={() => setGroupTypes(GROUP_LEDGER_TYPES)}
+                    >
+                      Select all
+                    </button>
+                    <button type="button" className="button button--small" onClick={() => setGroupTypes([])}>
+                      Clear
+                    </button>
+                  </div>
+                  <div className="checkbox-grid">
+                    {GROUP_LEDGER_TYPES.map((type) => (
+                      <label className="checkbox-field" key={`g-${type}`}>
+                        <input
+                          type="checkbox"
+                          checked={state.groupTypes.has(type)}
+                          onChange={() => toggleGroupType(type)}
+                        />
+                        <span>{type}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              </div>
+            </>
+          )}
+
+          {state.mode === "cap-balances" && (
+            <div className="reset-target-grid">
+              <label className="field reset-target-card reset-target-card--stacked">
+                <span>{ECONOMY_BUCKETS[0].label}</span>
+                <small>{ECONOMY_BUCKETS[0].description}</small>
                 <input
-                  type="datetime-local"
-                  value={state.since}
-                  onChange={(event) => update({ since: event.target.value })}
+                  type="number"
+                  min={0}
+                  value={state.maxParticipantCurrency}
+                  onChange={(event) => update({ maxParticipantCurrency: event.target.value })}
+                  placeholder="leave blank to skip"
                 />
-                <small className="field-hint">
-                  Reverses every targeted ledger entry created at or after this moment by writing a
-                  single CORRECTION entry that mirrors the splits with negated deltas.
-                </small>
+              </label>
+              <label className="field reset-target-card reset-target-card--stacked">
+                <span>{ECONOMY_BUCKETS[1].label}</span>
+                <small>{ECONOMY_BUCKETS[1].description}</small>
+                <input
+                  type="number"
+                  min={0}
+                  value={state.maxGroupPoints}
+                  onChange={(event) => update({ maxGroupPoints: event.target.value })}
+                  placeholder="leave blank to skip"
+                />
+              </label>
+              <label className="field reset-target-card reset-target-card--stacked">
+                <span>{ECONOMY_BUCKETS[2].label}</span>
+                <small>{ECONOMY_BUCKETS[2].description}</small>
+                <input
+                  type="number"
+                  min={0}
+                  value={state.maxGroupCurrency}
+                  onChange={(event) => update({ maxGroupCurrency: event.target.value })}
+                  placeholder="leave blank to skip"
+                />
               </label>
             </div>
-            <div className="form-row">
-              <fieldset className="field">
-                <legend>Participant ledger types</legend>
-                <div className="checkbox-grid">
-                  {PARTICIPANT_LEDGER_TYPES.map((type) => (
-                    <label className="checkbox-field" key={`p-${type}`}>
-                      <input
-                        type="checkbox"
-                        checked={state.participantTypes.has(type)}
-                        onChange={() => toggleParticipantType(type)}
-                      />
-                      <span>{type}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-            </div>
-            <div className="form-row">
-              <fieldset className="field">
-                <legend>Group ledger types</legend>
-                <div className="checkbox-grid">
-                  {GROUP_LEDGER_TYPES.map((type) => (
-                    <label className="checkbox-field" key={`g-${type}`}>
-                      <input
-                        type="checkbox"
-                        checked={state.groupTypes.has(type)}
-                        onChange={() => toggleGroupType(type)}
-                      />
-                      <span>{type}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-            </div>
-          </>
-        )}
+          )}
 
-        {state.mode === "cap-balances" && (
-          <div className="form-row">
-            <label className="field">
-              <span>Max participant currency</span>
-              <input
-                type="number"
-                min={0}
-                value={state.maxParticipantCurrency}
-                onChange={(event) => update({ maxParticipantCurrency: event.target.value })}
-                placeholder="leave blank to skip"
-              />
-            </label>
-            <label className="field">
-              <span>Max group points</span>
-              <input
-                type="number"
-                min={0}
-                value={state.maxGroupPoints}
-                onChange={(event) => update({ maxGroupPoints: event.target.value })}
-                placeholder="leave blank to skip"
-              />
-            </label>
-            <label className="field">
-              <span>Max group currency</span>
-              <input
-                type="number"
-                min={0}
-                value={state.maxGroupCurrency}
-                onChange={(event) => update({ maxGroupCurrency: event.target.value })}
-                placeholder="leave blank to skip"
-              />
-            </label>
-          </div>
-        )}
-
-        {state.mode === "set-balances" && (
-          <>
-            <p className="section-help">
-              Set every selected balance to a fixed value (default 0). Leaves untouched balances
-              that already match. Use 0 across the board to nuke the economy.
-            </p>
-            <div className="form-row">
-              <label className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={state.setParticipantCurrencyEnabled}
-                  onChange={(event) => update({ setParticipantCurrencyEnabled: event.target.checked })}
-                />
-                <span>Participant wallets to</span>
+          {state.mode === "set-balances" && (
+            <div className="reset-target-grid">
+              <label className="reset-target-card reset-target-card--stacked">
+                <span className="reset-target-card__heading">
+                  <input
+                    type="checkbox"
+                    checked={state.setParticipantCurrencyEnabled}
+                    onChange={(event) => update({ setParticipantCurrencyEnabled: event.target.checked })}
+                  />
+                  <strong>{ECONOMY_BUCKETS[0].label}</strong>
+                </span>
+                <small>{ECONOMY_BUCKETS[0].description}</small>
                 <input
                   type="number"
                   value={state.targetParticipantCurrency}
@@ -413,13 +556,16 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
                   disabled={!state.setParticipantCurrencyEnabled}
                 />
               </label>
-              <label className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={state.setGroupPointsEnabled}
-                  onChange={(event) => update({ setGroupPointsEnabled: event.target.checked })}
-                />
-                <span>Group points to</span>
+              <label className="reset-target-card reset-target-card--stacked">
+                <span className="reset-target-card__heading">
+                  <input
+                    type="checkbox"
+                    checked={state.setGroupPointsEnabled}
+                    onChange={(event) => update({ setGroupPointsEnabled: event.target.checked })}
+                  />
+                  <strong>{ECONOMY_BUCKETS[1].label}</strong>
+                </span>
+                <small>{ECONOMY_BUCKETS[1].description}</small>
                 <input
                   type="number"
                   value={state.targetGroupPoints}
@@ -427,13 +573,16 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
                   disabled={!state.setGroupPointsEnabled}
                 />
               </label>
-              <label className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={state.setGroupCurrencyEnabled}
-                  onChange={(event) => update({ setGroupCurrencyEnabled: event.target.checked })}
-                />
-                <span>Group currency to</span>
+              <label className="reset-target-card reset-target-card--stacked">
+                <span className="reset-target-card__heading">
+                  <input
+                    type="checkbox"
+                    checked={state.setGroupCurrencyEnabled}
+                    onChange={(event) => update({ setGroupCurrencyEnabled: event.target.checked })}
+                  />
+                  <strong>{ECONOMY_BUCKETS[2].label}</strong>
+                </span>
+                <small>{ECONOMY_BUCKETS[2].description}</small>
                 <input
                   type="number"
                   value={state.targetGroupCurrency}
@@ -442,11 +591,11 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
                 />
               </label>
             </div>
-          </>
-        )}
+          )}
+        </div>
 
         <div className="form-row">
-          <label className="field">
+          <label className="field reset-note-field">
             <span>Note (optional)</span>
             <input
               type="text"
@@ -689,7 +838,7 @@ function SanctionsSection({ participants }: { participants: Participant[] }) {
                     {participant ? describeParticipant(participant) : <code>{s.participantId}</code>}
                   </td>
                   <td>{FLAG_LABEL[s.flag]}</td>
-                  <td>{s.reason ?? "—"}</td>
+                  <td>{s.reason ?? "None"}</td>
                   <td>{s.expiresAt ? new Date(s.expiresAt).toLocaleString() : "indefinite"}</td>
                   <td>{new Date(s.createdAt).toLocaleString()}</td>
                   <td>
@@ -737,8 +886,8 @@ function ResetResultView({ result }: { result: EconomyResetResult }) {
         {!result.dryRun && (
           <p className="field-hint">
             CORRECTION entry IDs:{" "}
-            <code>{result.participantCorrectionEntryId ?? "—"}</code> (participant),{" "}
-            <code>{result.groupCorrectionEntryId ?? "—"}</code> (group)
+            <code>{result.participantCorrectionEntryId ?? "None"}</code> (participant),{" "}
+            <code>{result.groupCorrectionEntryId ?? "None"}</code> (group)
           </p>
         )}
       </header>
@@ -804,7 +953,7 @@ function ResetResultView({ result }: { result: EconomyResetResult }) {
       )}
 
       {result.participantImpact.length === 0 && result.groupImpact.length === 0 && (
-        <p className="section-help">Nothing to do — no balances or entries matched.</p>
+        <p className="section-help">Nothing to do. No balances or entries matched.</p>
       )}
     </section>
   );
