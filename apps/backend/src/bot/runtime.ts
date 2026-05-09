@@ -900,6 +900,10 @@ export class BotRuntime {
         .setLabel("Accept")
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
+        .setCustomId(`submission:outstanding:${submissionId}`)
+        .setLabel("Outstanding")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
         .setCustomId(`submission:reject:${submissionId}`)
         .setLabel("Reject")
         .setStyle(ButtonStyle.Danger),
@@ -970,7 +974,7 @@ export class BotRuntime {
       .setTitle("Submission Review Board")
       .setDescription("Newest submission ready for admin review.")
       .addFields(fields)
-      .setFooter({ text: "Accept awards the configured rewards. Reject lets the student resubmit." });
+      .setFooter({ text: "Accept awards base rewards. Outstanding adds bonus rewards. Reject lets the student resubmit." });
 
     const sent = await (channel as GuildTextBasedChannel)
       .send({
@@ -1449,21 +1453,23 @@ export class BotRuntime {
       return;
     }
 
-    if (action !== "approve" && action !== "reject") {
+    if (action !== "approve" && action !== "outstanding" && action !== "reject") {
       return;
     }
 
+    const isRewardAction = action === "approve" || action === "outstanding";
+
     // Defer immediately so slow auth/work stays inside Discord's 3s acknowledgement
-    // window. Approve uses deferUpdate (we'll edit the original feed message);
+    // window. Reward actions use deferUpdate (we'll edit the original feed message);
     // reject uses an ephemeral reply (we'll delete the original message separately).
-    if (action === "approve") {
+    if (isRewardAction) {
       await interaction.deferUpdate();
     } else {
       await interaction.deferReply({ ephemeral: true });
     }
 
     const respondWithError = async (message: string) => {
-      if (action === "approve") {
+      if (isRewardAction) {
         await interaction.followUp({ content: message, ephemeral: true }).catch(() => {});
       } else {
         await interaction.editReply({ content: message }).catch(() => {});
@@ -1488,18 +1494,19 @@ export class BotRuntime {
       return;
     }
 
-    if (action === "approve") {
+    if (isRewardAction) {
+      const status = action === "outstanding" ? "OUTSTANDING" : "APPROVED";
       let reviewed: Awaited<ReturnType<AppServices["submissionService"]["review"]>>;
       try {
         reviewed = await this.services.submissionService.review({
           guildId: this.env.GUILD_ID,
           submissionId,
-          status: "APPROVED",
+          status,
           reviewedByUserId: interaction.user.id,
           reviewedByUsername: interaction.user.username,
         });
       } catch (error) {
-        const message = error instanceof AppError ? error.message : "Failed to approve submission.";
+        const message = error instanceof AppError ? error.message : "Failed to review submission.";
         await respondWithError(message);
         return;
       }
@@ -1512,8 +1519,10 @@ export class BotRuntime {
       if (reviewed.currencyAwarded && reviewed.currencyAwarded > 0) {
         rewardParts.push(this.formatCurrencyAmount(reviewed.currencyAwarded, config));
       }
-      const rewardSuffix = rewardParts.length > 0 ? ` — +${rewardParts.join(" +")}` : "";
-      const approvalLine = `\n\n✅ Approved by <@${interaction.user.id}>${rewardSuffix}`;
+      const rewardSuffix = rewardParts.length > 0 ? ` — +${rewardParts.join(" + ")}` : "";
+      const reviewLabel = status === "OUTSTANDING" ? "Outstanding" : "Approved";
+      const reviewIcon = status === "OUTSTANDING" ? "⭐" : "✅";
+      const approvalLine = `\n\n${reviewIcon} ${reviewLabel} by <@${interaction.user.id}>${rewardSuffix}`;
       const rawOriginal = interaction.message?.content ?? "";
       const maxOriginalLen = Math.max(0, 1900 - approvalLine.length);
       const trimmedOriginal =
@@ -1527,7 +1536,7 @@ export class BotRuntime {
           allowedMentions: { parse: [] },
         });
       } catch (error) {
-        console.error("Failed to update submission feed message after approve", { submissionId, error });
+        console.error("Failed to update submission feed message after review", { submissionId, status, error });
       }
       return;
     }
