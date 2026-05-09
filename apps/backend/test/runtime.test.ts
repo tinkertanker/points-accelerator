@@ -19,6 +19,7 @@ function createRuntimeFixture() {
     groupPointsPerCurrencyDonation: {
       toNumber: () => 10,
     },
+    mentorRoleIds: [],
     passiveCooldownSeconds: 120,
     pointsName: "blorgshj",
     pointsSymbol: "🏅",
@@ -1354,6 +1355,56 @@ describe("bot runtime", () => {
     ).rejects.toThrow(/configured staff roles/i);
   });
 
+  it("lets configured mentor roles review submissions from Discord", async () => {
+    const { config, runtime, services } = createRuntimeFixture();
+    config.mentorRoleIds = ["mentor-role"];
+    services.roleCapabilityService.listForRoleIds.mockResolvedValue([]);
+    services.submissionService.resolveIdentifier.mockResolvedValue({
+      id: "submission-12345678",
+      assignment: { title: "Reflection 1" },
+      participant: { indexId: "S001", discordUsername: "student1" },
+    });
+    services.submissionService.review.mockResolvedValue({
+      id: "submission-12345678",
+      status: "APPROVED",
+      assignment: { title: "Reflection 1" },
+      participant: { indexId: "S001", discordUsername: "student1" },
+    });
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      commandName: "review_submission",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue({
+            roles: { cache: new Map([["mentor-role", { id: "mentor-role", rawPosition: 5 }]]) },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          }),
+        },
+      },
+      options: {
+        getString: vi.fn((name: string) => {
+          if (name === "submission_id") return "submissi";
+          if (name === "decision") return "APPROVED";
+          return null;
+        }),
+      },
+      reply,
+      user: {
+        id: "mentor-1",
+        username: "Mentor",
+      },
+    });
+
+    expect(services.submissionService.review).toHaveBeenCalledWith(
+      expect.objectContaining({
+        submissionId: "submission-12345678",
+        reviewedByUserId: "mentor-1",
+      }),
+    );
+    expect(reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining("APPROVED") }));
+  });
+
   it("reviews a submission from Discord using a short identifier", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.roleCapabilityService.listForRoleIds.mockResolvedValue([
@@ -1813,6 +1864,101 @@ describe("bot runtime", () => {
       allowedMentions: { parse: [], users: [studentUserId] },
     });
     expect(deleteReply).toHaveBeenCalledTimes(1);
+  });
+
+  it("posts submission feed media as a Discord attachment with tidy fallback link and review buttons", async () => {
+    const { runtime } = createRuntimeFixture();
+    const send = vi.fn().mockResolvedValue({ id: "message-1", channelId: "submissions-channel" });
+    (runtime as any).client = {
+      channels: {
+        fetch: vi.fn().mockResolvedValue({
+          isTextBased: () => true,
+          send,
+        }),
+      },
+    };
+
+    await (runtime as any).postSubmissionFeedEntry({
+      channelId: "submissions-channel",
+      submissionId: "submission-12345678",
+      studentUserId: "111111111111111111",
+      studentDisplay: "Alice",
+      assignmentTitle: "1a",
+      groupName: "7am",
+      text: "Here is my walkthrough.",
+      imageUrl: "https://pub-a465f2.r2.dev/submissions/guild-test/sample-video.mp4",
+    });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const payload = send.mock.calls[0][0];
+    expect(payload.content).toBeUndefined();
+    expect(payload.files).toEqual([
+      {
+        attachment: "https://pub-a465f2.r2.dev/submissions/guild-test/sample-video.mp4",
+        name: "sample-video.mp4",
+      },
+    ]);
+    const embed = payload.embeds[0].toJSON();
+    expect(embed.fields).toContainEqual(expect.objectContaining({
+      name: "Media",
+      value: "[Submission file](https://pub-a465f2.r2.dev/submissions/guild-test/sample-video.mp4)",
+    }));
+    const buttons = payload.components[0].components.map((button: { data: { custom_id: string; label: string } }) => button.data);
+    expect(buttons).toEqual([
+      expect.objectContaining({ custom_id: "submission:approve:submission-12345678", label: "Accept" }),
+      expect.objectContaining({ custom_id: "submission:outstanding:submission-12345678", label: "Outstanding" }),
+      expect.objectContaining({ custom_id: "submission:reject:submission-12345678", label: "Reject" }),
+    ]);
+  });
+
+  it("falls back to a link-only submission feed entry when Discord cannot attach media", async () => {
+    const { runtime } = createRuntimeFixture();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("R2 fetch failed"))
+      .mockResolvedValueOnce({ id: "message-1", channelId: "submissions-channel" });
+    (runtime as any).client = {
+      channels: {
+        fetch: vi.fn().mockResolvedValue({
+          isTextBased: () => true,
+          send,
+        }),
+      },
+    };
+
+    const posted = await (runtime as any).postSubmissionFeedEntry({
+      channelId: "submissions-channel",
+      submissionId: "submission-12345678",
+      studentUserId: "111111111111111111",
+      studentDisplay: "Alice",
+      assignmentTitle: "1a",
+      groupName: "7am",
+      text: "Here is my walkthrough.",
+      imageUrl: "https://pub-a465f2.r2.dev/submissions/guild-test/sample-video.mp4",
+    });
+
+    expect(posted).toEqual({ channelId: "submissions-channel", messageId: "message-1" });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0][0].files).toEqual([
+      {
+        attachment: "https://pub-a465f2.r2.dev/submissions/guild-test/sample-video.mp4",
+        name: "sample-video.mp4",
+      },
+    ]);
+    expect(send.mock.calls[1][0].files).toBeUndefined();
+    const fallbackEmbed = send.mock.calls[1][0].embeds[0].toJSON();
+    expect(fallbackEmbed.fields).toContainEqual(expect.objectContaining({
+      name: "Media",
+      value: "[Submission file](https://pub-a465f2.r2.dev/submissions/guild-test/sample-video.mp4)",
+    }));
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to attach submission media; posting link-only feed entry",
+      expect.objectContaining({
+        submissionId: "submission-12345678",
+        channelId: "submissions-channel",
+      }),
+    );
   });
 
   it("shows /assignments publicly as a newest-first paginated embed", async () => {

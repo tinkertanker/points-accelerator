@@ -954,7 +954,7 @@ export class BotRuntime {
     const safeTitle = escapeMarkdown(params.assignmentTitle);
     const safeGroupName = params.groupName ? escapeMarkdown(params.groupName) : "No group";
     const trimmedText = params.text.trim();
-    const mediaLabel = params.imageUrl ? `[Open media](${params.imageUrl})` : "No attachment";
+    const mediaLabel = params.imageUrl ? `[Submission file](${params.imageUrl})` : "No attachment";
     const fields: { name: string; value: string; inline: boolean }[] = [
       {
         name: "Awaiting review",
@@ -976,27 +976,62 @@ export class BotRuntime {
       .addFields(fields)
       .setFooter({ text: "Accept awards base rewards. Outstanding adds bonus rewards. Reject lets the student resubmit." });
 
-    const sent = await (channel as GuildTextBasedChannel)
-      .send({
-        content: params.imageUrl ?? undefined,
-        embeds: [embed],
-        components: [this.buildSubmissionActionRow(params.submissionId)],
-        allowedMentions: { users: validUserId ? [validUserId] : [] },
-      })
-      .catch((error: unknown) => {
-        console.error("Failed to post submission feed entry", {
-          submissionId: params.submissionId,
-          channelId: params.channelId,
-          error,
+    const messagePayload = {
+      embeds: [embed],
+      components: [this.buildSubmissionActionRow(params.submissionId)],
+      allowedMentions: { users: validUserId ? [validUserId] : [] },
+    };
+    const textChannel = channel as GuildTextBasedChannel;
+
+    const sent = params.imageUrl
+      ? await textChannel
+          .send({
+            ...messagePayload,
+            files: [{ attachment: params.imageUrl, name: this.buildSubmissionMediaFilename(params.imageUrl) }],
+          })
+          .catch(async (error: unknown) => {
+            console.error("Failed to attach submission media; posting link-only feed entry", {
+              submissionId: params.submissionId,
+              channelId: params.channelId,
+              error,
+            });
+            return textChannel.send(messagePayload).catch((fallbackError: unknown) => {
+              console.error("Failed to post submission feed entry", {
+                submissionId: params.submissionId,
+                channelId: params.channelId,
+                error: fallbackError,
+              });
+              return null;
+            });
+          })
+      : await textChannel.send(messagePayload).catch((error: unknown) => {
+          console.error("Failed to post submission feed entry", {
+            submissionId: params.submissionId,
+            channelId: params.channelId,
+            error,
+          });
+          return null;
         });
-        return null;
-      });
 
     if (!sent) {
       return null;
     }
 
     return { channelId: sent.channelId, messageId: sent.id };
+  }
+
+  private buildSubmissionMediaFilename(mediaUrl: string) {
+    try {
+      const pathname = new URL(mediaUrl).pathname;
+      const filename = pathname.split("/").filter(Boolean).at(-1);
+      if (filename) {
+        return filename.replace(/[^\w.-]/g, "_");
+      }
+    } catch {
+      // Fall through to the generic name below.
+    }
+
+    return "submission-file";
   }
 
   private async broadcastSubmissionToFeed(params: {
@@ -1703,6 +1738,11 @@ export class BotRuntime {
       member.permissions.has(PermissionFlagsBits.Administrator) ||
       member.permissions.has(PermissionFlagsBits.ManageGuild)
     ) {
+      return;
+    }
+
+    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    if (roleIds.some((roleId) => config.mentorRoleIds.includes(roleId))) {
       return;
     }
 
