@@ -1520,9 +1520,12 @@ export class BotRuntime {
         ? ((rawMember as { roles: string[] }).roles)
         : [];
     const roleIds = guildMember ? this.getOrderedRoleIds(guildMember) : apiRoleIds;
+    const reviewConfig = isRewardAction
+      ? await this.services.configService.getOrCreate(this.env.GUILD_ID)
+      : null;
 
     try {
-      await this.assertCanManageSubmissions(guildMember, roleIds);
+      await this.assertCanManageSubmissions(guildMember, roleIds, reviewConfig ?? undefined);
     } catch (error) {
       const message = error instanceof AppError ? error.message : "Only staff can review submissions.";
       await respondWithError(message);
@@ -1546,7 +1549,7 @@ export class BotRuntime {
         return;
       }
 
-      const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+      const config = reviewConfig ?? await this.services.configService.getOrCreate(this.env.GUILD_ID);
       const rewardParts: string[] = [];
       if (reviewed.pointsAwarded && reviewed.pointsAwarded > 0) {
         rewardParts.push(this.formatPointsAmount(reviewed.pointsAwarded, config));
@@ -1729,7 +1732,11 @@ export class BotRuntime {
     }
   }
 
-  private async assertCanManageSubmissions(member: GuildMember | null, roleIds: string[]) {
+  private async assertCanManageSubmissions(
+    member: GuildMember | null,
+    roleIds: string[],
+    config?: Pick<GuildConfig, "mentorRoleIds">,
+  ) {
     if (!member) {
       throw new AppError("This command is only available to configured reviewer roles.", 403);
     }
@@ -1741,8 +1748,8 @@ export class BotRuntime {
       return;
     }
 
-    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-    if (roleIds.some((roleId) => config.mentorRoleIds.includes(roleId))) {
+    const settings = config ?? await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    if (roleIds.some((roleId) => settings.mentorRoleIds.includes(roleId))) {
       return;
     }
 

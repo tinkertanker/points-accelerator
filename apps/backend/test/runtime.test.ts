@@ -1536,6 +1536,7 @@ describe("bot runtime", () => {
         content: expect.stringContaining("+13 blorgshj 🏅 + 7 bananas 💲"),
       }),
     );
+    expect(services.configService.getOrCreate).toHaveBeenCalledTimes(1);
   });
 
   it("rejects ambiguous /submit assignment titles and asks for an assignment id", async () => {
