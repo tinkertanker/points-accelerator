@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -64,6 +66,17 @@ type AssignmentLookupResult =
 type AwardSubcommand = "points" | "currency" | "currencygroup" | "currencybulk";
 type DeductSubcommand = "group" | "member" | "mixed";
 type AwardLikeCommandKey = `award:${AwardSubcommand}` | `deduct:${DeductSubcommand}`;
+type PendingSubmissionReplacement = {
+  createdAt: number;
+  userId: string;
+  guildId: string;
+  assignmentId: string;
+  participantId: string;
+  text: string;
+  imageUrl?: string;
+  imageKey?: string;
+  studentDisplay: string;
+};
 
 const CURRENCY_BULK_MAX_MEMBERS = 10;
 const USER_MENTION_PATTERN = /^<@!?(\d{17,20})>$/;
@@ -362,6 +375,7 @@ export class BotRuntime {
   private readonly actionCooldowns = new Map<string, CooldownEntry>();
   private readonly bettingCooldowns = new Map<string, BettingCooldownEntry>();
   private readonly luckyDrawTimers = new Map<string, NodeJS.Timeout>();
+  private readonly pendingSubmissionReplacements = new Map<string, PendingSubmissionReplacement>();
   private client: Client | null = null;
   private membersCache: { fetchedAt: number; value: Array<{ id: string; name: string }> } | null = null;
 
@@ -890,6 +904,19 @@ export class BotRuntime {
     );
   }
 
+  private buildSubmissionReplaceRow(token: string) {
+    return new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`submission:replace:${token}`)
+        .setLabel("Replace submission")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(`submission:keep:${token}`)
+        .setLabel("Keep current")
+        .setStyle(ButtonStyle.Secondary),
+    );
+  }
+
   private async postSubmissionFeedEntry(params: {
     channelId: string;
     submissionId: string;
@@ -921,21 +948,32 @@ export class BotRuntime {
     const safeTitle = escapeMarkdown(params.assignmentTitle);
     const safeGroupName = params.groupName ? escapeMarkdown(params.groupName) : "No group";
     const trimmedText = params.text.trim();
-    const lines = [
-      `📝 **${safeTitle}** · **${safeGroupName}**`,
-      `By ${studentMention} · ID \`${params.submissionId.slice(0, 8)}\``,
+    const mediaLabel = params.imageUrl ? `[Open media](${params.imageUrl})` : "No attachment";
+    const fields: { name: string; value: string; inline: boolean }[] = [
+      {
+        name: "Awaiting review",
+        value: `📝 **${safeTitle}**\n${safeGroupName} · ${studentMention ?? "Unknown"}`,
+        inline: false,
+      },
+      { name: "Group", value: safeGroupName, inline: true },
+      { name: "ID", value: `\`${params.submissionId.slice(0, 8)}\``, inline: true },
+      { name: "Media", value: mediaLabel, inline: true },
     ];
     if (trimmedText) {
-      const preview = trimmedText.length > 900 ? `${trimmedText.slice(0, 897)}...` : trimmedText;
-      lines.push("", preview);
+      const preview = trimmedText.length > 700 ? `${trimmedText.slice(0, 697)}...` : trimmedText;
+      fields.push({ name: "Note", value: preview, inline: false });
     }
-    if (params.imageUrl) {
-      lines.push("", params.imageUrl);
-    }
+    const embed = new EmbedBuilder()
+      .setColor(FORBES_EMBED_COLOUR)
+      .setTitle("Submission Review Board")
+      .setDescription("Newest submission ready for admin review.")
+      .addFields(fields)
+      .setFooter({ text: "Accept awards the configured rewards. Reject lets the student resubmit." });
 
     const sent = await (channel as GuildTextBasedChannel)
       .send({
-        content: lines.join("\n"),
+        content: params.imageUrl ?? undefined,
+        embeds: [embed],
         components: [this.buildSubmissionActionRow(params.submissionId)],
         allowedMentions: { users: validUserId ? [validUserId] : [] },
       })
@@ -1249,13 +1287,22 @@ export class BotRuntime {
   }
 
   private async buildAssignmentsView(params: { ownerId: string; page: number }) {
-    const [config, activeAssignments] = await Promise.all([
+    const participant = await this.services.participantService
+      .findByDiscordUser(this.env.GUILD_ID, params.ownerId)
+      .catch(() => null);
+    const [config, activeAssignments, submittedAssignmentIds] = await Promise.all([
       this.services.configService.getOrCreate(this.env.GUILD_ID),
       this.services.assignmentService.listActive(this.env.GUILD_ID),
+      participant
+        ? this.services.submissionService.listAssignmentIdsForParticipant({
+            guildId: this.env.GUILD_ID,
+            participantId: participant.id,
+          })
+        : Promise.resolve(new Set<string>()),
     ]);
     const assignments = this.sortAssignmentsRecentFirst(activeAssignments);
     const paged = paginateArray(assignments, params.page);
-    const embed = this.buildAssignmentsEmbed(assignments, config, paged);
+    const embed = this.buildAssignmentsEmbed(assignments, config, paged, submittedAssignmentIds);
     const row = this.buildPaginationRow(
       "assignments",
       "-",
@@ -1395,6 +1442,11 @@ export class BotRuntime {
     }
 
     const [, action, submissionId] = parts;
+    if (action === "replace" || action === "keep") {
+      await this.handleSubmissionReplacementButton(interaction, action, submissionId);
+      return;
+    }
+
     if (action !== "approve" && action !== "reject") {
       return;
     }
@@ -1508,6 +1560,118 @@ export class BotRuntime {
     await interaction.editReply({
       content: `Rejected submission \`${submissionId.slice(0, 8)}\`. The student can resubmit.`,
     });
+  }
+
+  private rememberPendingSubmissionReplacement(payload: Omit<PendingSubmissionReplacement, "createdAt">) {
+    const now = Date.now();
+    for (const [token, pending] of this.pendingSubmissionReplacements) {
+      if (now - pending.createdAt > 15 * 60 * 1000) {
+        this.pendingSubmissionReplacements.delete(token);
+      }
+    }
+
+    const token = randomUUID().replace(/-/g, "").slice(0, 18);
+    this.pendingSubmissionReplacements.set(token, { ...payload, createdAt: now });
+    return token;
+  }
+
+  private async promptSubmissionReplacement(
+    reply: (payload: {
+      content: string;
+      components: ActionRowBuilder<ButtonBuilder>[];
+    }) => Promise<unknown>,
+    payload: Omit<PendingSubmissionReplacement, "createdAt">,
+    assignmentTitle: string,
+  ) {
+    const token = this.rememberPendingSubmissionReplacement(payload);
+    await reply({
+      content: `You already have a pending submission for **${assignmentTitle}**. Replace your last submission? The old one will be lost.`,
+      components: [this.buildSubmissionReplaceRow(token)],
+    });
+  }
+
+  private async submitPreparedReplacement(payload: PendingSubmissionReplacement) {
+    const result = await this.services.submissionService.createOrReplace({
+      guildId: payload.guildId,
+      assignmentId: payload.assignmentId,
+      participantId: payload.participantId,
+      text: payload.text,
+      imageUrl: payload.imageUrl,
+      imageKey: payload.imageKey,
+    });
+
+    if (
+      result.replaced &&
+      result.previousImageKey &&
+      result.previousImageKey !== payload.imageKey &&
+      this.storageService.isConfigured
+    ) {
+      await this.storageService.delete(result.previousImageKey).catch(() => {});
+    }
+
+    if (result.replaced && result.previousFeedChannelId && result.previousFeedMessageId) {
+      await this.deleteSubmissionFeedMessage({
+        channelId: result.previousFeedChannelId,
+        messageId: result.previousFeedMessageId,
+      });
+    }
+
+    await this.broadcastSubmissionToFeed({
+      submissionId: result.submission.id,
+      studentUserId: payload.userId,
+      studentDisplay: payload.studentDisplay,
+      assignmentTitle: result.submission.assignment.title,
+      groupName: result.submission.group?.displayName ?? "",
+      text: payload.text,
+      imageUrl: result.submission.imageUrl,
+    });
+
+    return result;
+  }
+
+  private async handleSubmissionReplacementButton(
+    interaction: ButtonInteraction,
+    action: "replace" | "keep",
+    token: string,
+  ) {
+    const pending = this.pendingSubmissionReplacements.get(token);
+    if (!pending) {
+      await interaction.reply({
+        content: "That replacement confirmation has expired. Run /submit again.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (pending.userId !== interaction.user.id) {
+      await interaction.reply({
+        content: "Only the person who started this submission can confirm replacement.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    this.pendingSubmissionReplacements.delete(token);
+
+    if (action === "keep") {
+      await interaction.update({
+        content: "Kept your existing submission. Nothing was replaced.",
+        components: [],
+      });
+      return;
+    }
+
+    await interaction.deferUpdate();
+    try {
+      const result = await this.submitPreparedReplacement(pending);
+      await interaction.editReply({
+        content: `Submission updated for **${result.submission.assignment.title}** (${result.submission.group?.displayName ?? "your group"}). It will be reviewed by an admin.`,
+        components: [],
+      });
+    } catch (error) {
+      const message = error instanceof AppError ? error.message : "Something went wrong replacing your submission.";
+      await interaction.editReply({ content: message, components: [] }).catch(() => {});
+    }
   }
 
   private async assertCanManageSubmissions(member: GuildMember | null, roleIds: string[]) {
@@ -1740,8 +1904,15 @@ export class BotRuntime {
     return parts.length > 0 ? parts.join(" · ") : "No reward configured";
   }
 
-  private formatAssignmentLine(assignment: ActiveAssignment, config: GuildConfig) {
-    const meta = [this.formatAssignmentRewards(assignment, config)];
+  private formatAssignmentLine(
+    assignment: ActiveAssignment,
+    config: GuildConfig,
+    submittedAssignmentIds: Set<string>,
+  ) {
+    const meta = [
+      submittedAssignmentIds.has(assignment.id) ? "✅ Submitted" : "Not submitted",
+      this.formatAssignmentRewards(assignment, config),
+    ];
     if (assignment.deadline) {
       const deadlineSeconds = Math.floor(new Date(assignment.deadline).getTime() / 1000);
       meta.push(`Due <t:${deadlineSeconds}:R>`);
@@ -1957,10 +2128,11 @@ export class BotRuntime {
     assignments: ActiveAssignment[],
     config: GuildConfig,
     paged: ReturnType<typeof paginateArray<ActiveAssignment>>,
+    submittedAssignmentIds: Set<string>,
   ) {
     const fields = paged.slice.map((assignment) => ({
       name: escapeMarkdown(assignment.title),
-      value: this.formatAssignmentLine(assignment, config),
+      value: this.formatAssignmentLine(assignment, config, submittedAssignmentIds),
       inline: false,
     }));
     const footerParts = ["Use /submit with a note, link, image, or video"];
@@ -2514,7 +2686,39 @@ export class BotRuntime {
         }
       }
 
-      // --- 8. Create or replace submission ----------------------------------
+      // --- 8. Create or confirm replacement --------------------------------
+      const replacementPayload = {
+        userId: message.author.id,
+        guildId,
+        assignmentId: assignment.id,
+        participantId: participant.id,
+        text: submissionText,
+        imageUrl,
+        imageKey,
+        studentDisplay: participant.discordUsername ?? message.author.username,
+      };
+      const existing = await this.services.submissionService.findForParticipantAssignment({
+        guildId,
+        assignmentId: assignment.id,
+        participantId: participant.id,
+      });
+
+      if (existing) {
+        if (existing.status !== "PENDING") {
+          await message.reply(
+            `Your submission has already been reviewed (${existing.status}). Contact an admin if you need to resubmit.`,
+          );
+          return;
+        }
+
+        await this.promptSubmissionReplacement(
+          async (payload) => message.reply(payload),
+          replacementPayload,
+          assignment.title,
+        );
+        return;
+      }
+
       const result = await this.services.submissionService.createOrReplace({
         guildId,
         assignmentId: assignment.id,
@@ -2552,9 +2756,8 @@ export class BotRuntime {
         imageUrl: result.submission.imageUrl,
       });
 
-      const verb = result.replaced ? "updated" : "received";
       await message.reply(
-        `Submission ${verb} for **${result.submission.assignment.title}**! It will be reviewed by an admin.`,
+        `Submission received for **${result.submission.assignment.title}** (${result.submission.group?.displayName ?? "your group"}). It will be reviewed by an admin.`,
       );
     } catch (error) {
       const text = error instanceof AppError ? error.message : "Something went wrong with your submission.";
@@ -3752,6 +3955,38 @@ export class BotRuntime {
           } else {
             imageUrl = attachment.url;
           }
+        }
+
+        const replacementPayload = {
+          userId: interaction.user.id,
+          guildId: this.env.GUILD_ID,
+          assignmentId: assignment.id,
+          participantId: participant.id,
+          text,
+          imageUrl,
+          imageKey,
+          studentDisplay: participant.discordUsername ?? interaction.user.username,
+        };
+        const existing = await this.services.submissionService.findForParticipantAssignment({
+          guildId: this.env.GUILD_ID,
+          assignmentId: assignment.id,
+          participantId: participant.id,
+        });
+
+        if (existing) {
+          if (existing.status !== "PENDING") {
+            await interaction.editReply(
+              `Your submission has already been reviewed (${existing.status}). Contact an admin if you need to resubmit.`,
+            );
+            return;
+          }
+
+          await this.promptSubmissionReplacement(
+            async (payload) => interaction.editReply(payload),
+            replacementPayload,
+            assignment.title,
+          );
+          return;
         }
 
         const submission = await this.services.submissionService.create({

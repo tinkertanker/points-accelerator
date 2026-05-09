@@ -450,6 +450,44 @@ export class SubmissionService {
     }
   }
 
+  public async findForParticipantAssignment(params: {
+    guildId: string;
+    assignmentId: string;
+    participantId: string;
+  }) {
+    const submission = await this.prisma.submission.findFirst({
+      where: {
+        guildId: params.guildId,
+        assignmentId: params.assignmentId,
+        participantId: params.participantId,
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        assignment: { select: { id: true, title: true } },
+        group: { select: { id: true, displayName: true } },
+        participant: {
+          select: {
+            id: true,
+            indexId: true,
+            discordUserId: true,
+            discordUsername: true,
+          },
+        },
+      },
+    });
+
+    return submission ? this.toSubmissionResponse(submission) : null;
+  }
+
+  public async listAssignmentIdsForParticipant(params: { guildId: string; participantId: string }) {
+    const submissions = await this.prisma.submission.findMany({
+      where: { guildId: params.guildId, participantId: params.participantId },
+      select: { assignmentId: true },
+    });
+
+    return new Set(submissions.map((submission) => submission.assignmentId));
+  }
+
   /**
    * Stamp the feed channel and message id onto a submission so the
    * Accept/Reject buttons can later locate and edit/delete the message.

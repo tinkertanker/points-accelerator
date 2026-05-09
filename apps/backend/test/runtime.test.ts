@@ -99,6 +99,8 @@ function createRuntimeFixture() {
     submissionService: {
       create: vi.fn(),
       createOrReplace: vi.fn(),
+      findForParticipantAssignment: vi.fn().mockResolvedValue(null),
+      listAssignmentIdsForParticipant: vi.fn().mockResolvedValue(new Set<string>()),
       list: vi.fn().mockResolvedValue([]),
       getCompletionSummary: vi.fn().mockResolvedValue([]),
       resolveIdentifier: vi.fn(),
@@ -1547,6 +1549,12 @@ describe("bot runtime", () => {
 
   it("shows /assignments publicly as a newest-first paginated embed", async () => {
     const { runtime, services } = createRuntimeFixture();
+    services.participantService.findByDiscordUser.mockResolvedValue({
+      id: "participant-1",
+      discordUserId: "user-1",
+      discordUsername: "Alice",
+    });
+    services.submissionService.listAssignmentIdsForParticipant.mockResolvedValue(new Set(["assign-11"]));
     services.assignmentService.listActive.mockResolvedValue(
       Array.from({ length: 11 }, (_, index) => ({
         id: `assign-${index + 1}`,
@@ -1595,12 +1603,13 @@ describe("bot runtime", () => {
     expect(embed.title).toBe("Active Assignments");
     expect(embed.description).toContain("11 active assignments, newest first");
     expect(embed.fields?.[0]?.name).toBe("Task 11");
+    expect(embed.fields?.[0]?.value).toContain("✅ Submitted");
     expect(embed.fields?.[0]?.value).toContain("10 submitted");
     expect(embed.footer?.text).toContain("page 1/2");
     expect(components).toHaveLength(1);
   });
 
-  it("uses the original message as the submission payload and cleans up replaced images", async () => {
+  it("asks for confirmation before replacing a reply-based submission", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.participantService.ensureForGroup.mockResolvedValue({
       id: "participant-1",
@@ -1612,6 +1621,10 @@ describe("bot runtime", () => {
     services.assignmentService.listActive.mockResolvedValue([
       { id: "assign-1", title: "Reply Task" },
     ]);
+    services.submissionService.findForParticipantAssignment.mockResolvedValue({
+      id: "existing-submission",
+      status: "PENDING",
+    });
     services.submissionService.createOrReplace.mockResolvedValue({
       replaced: true,
       previousImageKey: "submissions/guild-test/old-image.png",
@@ -1658,17 +1671,87 @@ describe("bot runtime", () => {
       reply,
     });
 
+    expect(services.submissionService.createOrReplace).not.toHaveBeenCalled();
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("Replace your last submission?"),
+        components: expect.any(Array),
+      }),
+    );
+  });
+
+  it("replaces a pending submission after confirmation", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.submissionService.createOrReplace.mockResolvedValue({
+      replaced: true,
+      previousImageKey: "submissions/guild-test/old-image.png",
+      previousFeedChannelId: "submissions-channel",
+      previousFeedMessageId: "feed-message-1",
+      submission: {
+        id: "submission-2",
+        imageUrl: undefined,
+        assignment: { title: "Reply Task" },
+        group: { displayName: "Gryffindor" },
+      },
+    });
+    const deleteObject = vi.fn().mockResolvedValue(undefined);
+    (runtime as any).storageService = {
+      isConfigured: true,
+      upload: vi.fn(),
+      delete: deleteObject,
+    };
+    const deleteFeed = vi.spyOn(runtime as any, "deleteSubmissionFeedMessage").mockResolvedValue(undefined);
+    const broadcast = vi.spyOn(runtime as any, "broadcastSubmissionToFeed").mockResolvedValue(undefined);
+    (runtime as any).pendingSubmissionReplacements.set("token-1", {
+      createdAt: Date.now(),
+      userId: "user-1",
+      guildId: "guild-test",
+      assignmentId: "assign-1",
+      participantId: "participant-1",
+      text: "Latest notes",
+      imageUrl: undefined,
+      imageKey: undefined,
+      studentDisplay: "student1",
+    });
+
+    const deferUpdate = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleSubmissionReplacementButton(
+      {
+        user: { id: "user-1" },
+        deferUpdate,
+        editReply,
+      },
+      "replace",
+      "token-1",
+    );
+
     expect(services.submissionService.createOrReplace).toHaveBeenCalledWith({
       guildId: "guild-test",
       assignmentId: "assign-1",
       participantId: "participant-1",
-      text: "Original submission notes",
+      text: "Latest notes",
       imageUrl: undefined,
       imageKey: undefined,
     });
     expect(deleteObject).toHaveBeenCalledWith("submissions/guild-test/old-image.png");
-    expect(reply).toHaveBeenCalledWith(
-      "Submission updated for **Reply Task**! It will be reviewed by an admin.",
+    expect(deleteFeed).toHaveBeenCalledWith({
+      channelId: "submissions-channel",
+      messageId: "feed-message-1",
+    });
+    expect(broadcast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupName: "Gryffindor",
+        text: "Latest notes",
+      }),
+    );
+    expect(editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("Submission updated for **Reply Task**"),
+        components: [],
+      }),
     );
   });
 
