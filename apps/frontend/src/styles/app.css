@@ -2318,13 +2318,47 @@ button.reset-mode-card[aria-checked="true"] {
   font-style: italic;
 }
 
+.assignment-table {
+  min-width: 74rem;
+}
+
+.assignment-table .col-title {
+  width: 8rem;
+}
+
+.assignment-table .col-description {
+  min-width: 20rem;
+}
+
 .assignment-table .col-pts,
 .assignment-table .col-cur {
-  width: 70px;
+  width: 7.25rem;
+}
+
+.assignment-table .col-deadline {
+  width: 18rem;
 }
 
 .assignment-table .col-deadline input {
   font-size: 0.8rem;
+}
+
+.assignment-table .col-active {
+  text-align: center;
+  width: 4.5rem;
+}
+
+.assignment-table .col-title input,
+.assignment-table .col-pts input,
+.assignment-table .col-cur input {
+  min-width: 0;
+}
+
+.assignment-table .col-pts input,
+.assignment-table .col-cur input {
+  font-variant-numeric: tabular-nums;
+  padding-left: 0.65rem;
+  padding-right: 0.65rem;
 }
 
 /* --- Guide panel --- */

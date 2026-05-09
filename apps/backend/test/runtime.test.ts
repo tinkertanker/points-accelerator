@@ -1420,6 +1420,73 @@ describe("bot runtime", () => {
     );
   });
 
+  it("reviews a submission as outstanding from the feed channel button", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.roleCapabilityService.listForRoleIds.mockResolvedValue([
+      {
+        canManageDashboard: true,
+        canAward: false,
+        maxAward: null,
+        canDeduct: false,
+        canMultiAward: false,
+        canSell: false,
+      },
+    ]);
+    services.submissionService.review.mockResolvedValue({
+      id: "submission-12345678",
+      status: "OUTSTANDING",
+      pointsAwarded: 13,
+      currencyAwarded: 7,
+      assignment: { title: "Reflection 1" },
+      participant: { indexId: "S001", discordUsername: "student1" },
+    });
+
+    const deferUpdate = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const followUp = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleSubmissionButton({
+      customId: "submission:outstanding:submission-12345678",
+      deferUpdate,
+      editReply,
+      followUp,
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue({
+            roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 1 }]]) },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          }),
+        },
+      },
+      member: null,
+      message: { content: "Original submission card" },
+      user: {
+        id: "staff-1",
+        username: "Mentor",
+      },
+    });
+
+    expect(deferUpdate).toHaveBeenCalled();
+    expect(services.submissionService.review).toHaveBeenCalledWith({
+      guildId: "guild-test",
+      submissionId: "submission-12345678",
+      status: "OUTSTANDING",
+      reviewedByUserId: "staff-1",
+      reviewedByUsername: "Mentor",
+    });
+    expect(editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("Outstanding by <@staff-1>"),
+        components: [],
+      }),
+    );
+    expect(editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("+13 blorgshj 🏅 + 7 bananas 💲"),
+      }),
+    );
+  });
+
   it("rejects ambiguous /submit assignment titles and asks for an assignment id", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.participantService.ensureForGroup.mockResolvedValue({
