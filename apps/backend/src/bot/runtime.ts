@@ -1665,8 +1665,17 @@ export class BotRuntime {
     try {
       const result = await this.submitPreparedReplacement(pending);
       await interaction.editReply({
-        content: `Submission updated for **${result.submission.assignment.title}** (${result.submission.group?.displayName ?? "your group"}). It will be reviewed by an admin.`,
+        content: "Submission replacement confirmed.",
         components: [],
+      });
+      await interaction.followUp({
+        content: this.buildSubmissionReceiptContent({
+          action: "updated",
+          assignmentTitle: result.submission.assignment.title,
+          groupName: result.submission.group?.displayName,
+          studentUserId: interaction.user.id,
+        }),
+        allowedMentions: this.buildStudentAllowedMentions(interaction.user.id),
       });
     } catch (error) {
       const message = error instanceof AppError ? error.message : "Something went wrong replacing your submission.";
@@ -1990,6 +1999,20 @@ export class BotRuntime {
       participant.discordUserId,
       fallbackLabel ?? participant.discordUsername ?? participant.indexId,
     );
+  }
+
+  private buildSubmissionReceiptContent(params: {
+    action: "received" | "updated";
+    assignmentTitle: string;
+    groupName: string | null | undefined;
+    studentUserId: string;
+  }) {
+    const actionLabel = params.action === "updated" ? "Submission updated" : "Submission received";
+    return `<@${params.studentUserId}> ${actionLabel} for **${params.assignmentTitle}** (${params.groupName ?? "your group"}). It will be reviewed by an admin.`;
+  }
+
+  private buildStudentAllowedMentions(studentUserId: string) {
+    return { users: isDiscordSnowflake(studentUserId) ? [studentUserId] : [] };
   }
 
   private formatRankMarker(index: number) {
@@ -2756,9 +2779,15 @@ export class BotRuntime {
         imageUrl: result.submission.imageUrl,
       });
 
-      await message.reply(
-        `Submission received for **${result.submission.assignment.title}** (${result.submission.group?.displayName ?? "your group"}). It will be reviewed by an admin.`,
-      );
+      await message.reply({
+        content: this.buildSubmissionReceiptContent({
+          action: "received",
+          assignmentTitle: result.submission.assignment.title,
+          groupName: result.submission.group?.displayName,
+          studentUserId: message.author.id,
+        }),
+        allowedMentions: this.buildStudentAllowedMentions(message.author.id),
+      });
     } catch (error) {
       const text = error instanceof AppError ? error.message : "Something went wrong with your submission.";
       await message.reply(text).catch(() => {});
@@ -4008,9 +4037,16 @@ export class BotRuntime {
           imageUrl: submission.imageUrl,
         });
 
-        await interaction.editReply(
-          `Submission received for **${submission.assignment.title}** (${submission.group?.displayName ?? "your group"}). It will be reviewed by an admin.`,
-        );
+        await interaction.followUp({
+          content: this.buildSubmissionReceiptContent({
+            action: "received",
+            assignmentTitle: submission.assignment.title,
+            groupName: submission.group?.displayName,
+            studentUserId: interaction.user.id,
+          }),
+          allowedMentions: this.buildStudentAllowedMentions(interaction.user.id),
+        });
+        await interaction.deleteReply().catch(() => {});
         return;
       }
       case "submissions": {

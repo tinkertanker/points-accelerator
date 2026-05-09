@@ -1496,6 +1496,8 @@ describe("bot runtime", () => {
 
     const deferReply = vi.fn().mockResolvedValue(undefined);
     const editReply = vi.fn().mockResolvedValue(undefined);
+    const followUp = vi.fn().mockResolvedValue(undefined);
+    const deleteReply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
       commandName: "submit",
@@ -1523,6 +1525,8 @@ describe("bot runtime", () => {
       },
       deferReply,
       editReply,
+      followUp,
+      deleteReply,
       user: {
         id: "user-1",
         username: "Alice",
@@ -1542,9 +1546,11 @@ describe("bot runtime", () => {
         imageUrl: "https://cdn.example.test/sample-submission-video.mp4",
       }),
     );
-    expect(editReply).toHaveBeenCalledWith(
-      "Submission received for **Video Demo** (Gryffindor). It will be reviewed by an admin.",
-    );
+    expect(followUp).toHaveBeenCalledWith({
+      content: "<@user-1> Submission received for **Video Demo** (Gryffindor). It will be reviewed by an admin.",
+      allowedMentions: { users: [] },
+    });
+    expect(deleteReply).toHaveBeenCalledTimes(1);
   });
 
   it("shows /assignments publicly as a newest-first paginated embed", async () => {
@@ -1717,12 +1723,14 @@ describe("bot runtime", () => {
 
     const deferUpdate = vi.fn().mockResolvedValue(undefined);
     const editReply = vi.fn().mockResolvedValue(undefined);
+    const followUp = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleSubmissionReplacementButton(
       {
         user: { id: "user-1" },
         deferUpdate,
         editReply,
+        followUp,
       },
       "replace",
       "token-1",
@@ -1749,10 +1757,14 @@ describe("bot runtime", () => {
     );
     expect(editReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining("Submission updated for **Reply Task**"),
+        content: "Submission replacement confirmed.",
         components: [],
       }),
     );
+    expect(followUp).toHaveBeenCalledWith({
+      content: "<@user-1> Submission updated for **Reply Task** (Gryffindor). It will be reviewed by an admin.",
+      allowedMentions: { users: [] },
+    });
   });
 
   it("replies with a default message for direct bot mentions outside submission handling", async () => {
