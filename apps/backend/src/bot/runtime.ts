@@ -954,7 +954,7 @@ export class BotRuntime {
     const safeTitle = escapeMarkdown(params.assignmentTitle);
     const safeGroupName = params.groupName ? escapeMarkdown(params.groupName) : "No group";
     const trimmedText = params.text.trim();
-    const mediaLabel = params.imageUrl ? `[Open media](${params.imageUrl})` : "No attachment";
+    const mediaLabel = params.imageUrl ? `[Submission file](${params.imageUrl})` : "No attachment";
     const fields: { name: string; value: string; inline: boolean }[] = [
       {
         name: "Awaiting review",
@@ -976,27 +976,62 @@ export class BotRuntime {
       .addFields(fields)
       .setFooter({ text: "Accept awards base rewards. Outstanding adds bonus rewards. Reject lets the student resubmit." });
 
-    const sent = await (channel as GuildTextBasedChannel)
-      .send({
-        content: params.imageUrl ?? undefined,
-        embeds: [embed],
-        components: [this.buildSubmissionActionRow(params.submissionId)],
-        allowedMentions: { users: validUserId ? [validUserId] : [] },
-      })
-      .catch((error: unknown) => {
-        console.error("Failed to post submission feed entry", {
-          submissionId: params.submissionId,
-          channelId: params.channelId,
-          error,
+    const messagePayload = {
+      embeds: [embed],
+      components: [this.buildSubmissionActionRow(params.submissionId)],
+      allowedMentions: { parse: [], users: validUserId ? [validUserId] : [] },
+    };
+    const textChannel = channel as GuildTextBasedChannel;
+
+    const sent = params.imageUrl
+      ? await textChannel
+          .send({
+            ...messagePayload,
+            files: [{ attachment: params.imageUrl, name: this.buildSubmissionMediaFilename(params.imageUrl) }],
+          })
+          .catch(async (error: unknown) => {
+            console.error("Failed to attach submission media; posting link-only feed entry", {
+              submissionId: params.submissionId,
+              channelId: params.channelId,
+              error,
+            });
+            return textChannel.send(messagePayload).catch((fallbackError: unknown) => {
+              console.error("Failed to post submission feed entry", {
+                submissionId: params.submissionId,
+                channelId: params.channelId,
+                error: fallbackError,
+              });
+              return null;
+            });
+          })
+      : await textChannel.send(messagePayload).catch((error: unknown) => {
+          console.error("Failed to post submission feed entry", {
+            submissionId: params.submissionId,
+            channelId: params.channelId,
+            error,
+          });
+          return null;
         });
-        return null;
-      });
 
     if (!sent) {
       return null;
     }
 
     return { channelId: sent.channelId, messageId: sent.id };
+  }
+
+  private buildSubmissionMediaFilename(mediaUrl: string) {
+    try {
+      const pathname = new URL(mediaUrl).pathname;
+      const filename = pathname.split("/").filter(Boolean).at(-1);
+      if (filename) {
+        return filename.replace(/[^\w.-]/g, "_");
+      }
+    } catch {
+      // Fall through to the generic name below.
+    }
+
+    return "submission-file";
   }
 
   private async broadcastSubmissionToFeed(params: {
@@ -1485,9 +1520,12 @@ export class BotRuntime {
         ? ((rawMember as { roles: string[] }).roles)
         : [];
     const roleIds = guildMember ? this.getOrderedRoleIds(guildMember) : apiRoleIds;
+    const reviewConfig = isRewardAction
+      ? await this.services.configService.getOrCreate(this.env.GUILD_ID)
+      : null;
 
     try {
-      await this.assertCanManageSubmissions(guildMember, roleIds);
+      await this.assertCanManageSubmissions(guildMember, roleIds, reviewConfig ?? undefined);
     } catch (error) {
       const message = error instanceof AppError ? error.message : "Only staff can review submissions.";
       await respondWithError(message);
@@ -1511,7 +1549,7 @@ export class BotRuntime {
         return;
       }
 
-      const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+      const config = reviewConfig ?? await this.services.configService.getOrCreate(this.env.GUILD_ID);
       const rewardParts: string[] = [];
       if (reviewed.pointsAwarded && reviewed.pointsAwarded > 0) {
         rewardParts.push(this.formatPointsAmount(reviewed.pointsAwarded, config));
@@ -1694,9 +1732,13 @@ export class BotRuntime {
     }
   }
 
-  private async assertCanManageSubmissions(member: GuildMember | null, roleIds: string[]) {
+  private async assertCanManageSubmissions(
+    member: GuildMember | null,
+    roleIds: string[],
+    config?: Pick<GuildConfig, "mentorRoleIds">,
+  ) {
     if (!member) {
-      throw new AppError("This command is only available to configured staff roles.", 403);
+      throw new AppError("This command is only available to configured reviewer roles.", 403);
     }
 
     if (
@@ -1706,12 +1748,17 @@ export class BotRuntime {
       return;
     }
 
+    const settings = config ?? await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    if (roleIds.some((roleId) => settings.mentorRoleIds.includes(roleId))) {
+      return;
+    }
+
     const capabilities = await this.services.roleCapabilityService.listForRoleIds(this.env.GUILD_ID, roleIds);
     const resolved = resolveCapabilities(capabilities);
     const canManageSubmissions = resolved.canManageDashboard || resolved.canAward || resolved.canDeduct;
 
     if (!canManageSubmissions) {
-      throw new AppError("This command is only available to configured staff roles.", 403);
+      throw new AppError("This command is only available to configured reviewer roles.", 403);
     }
   }
 
