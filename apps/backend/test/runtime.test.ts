@@ -1498,9 +1498,14 @@ describe("bot runtime", () => {
     const editReply = vi.fn().mockResolvedValue(undefined);
     const followUp = vi.fn().mockResolvedValue(undefined);
     const deleteReply = vi.fn().mockResolvedValue(undefined);
+    const channelSend = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
       commandName: "submit",
+      channel: {
+        isTextBased: () => true,
+        send: channelSend,
+      },
       guild: {
         members: {
           fetch: vi.fn().mockResolvedValue(null),
@@ -1546,7 +1551,8 @@ describe("bot runtime", () => {
         imageUrl: "https://cdn.example.test/sample-submission-video.mp4",
       }),
     );
-    expect(followUp).toHaveBeenCalledWith({
+    expect(followUp).not.toHaveBeenCalled();
+    expect(channelSend).toHaveBeenCalledWith({
       content: "<@user-1> Submission received for **Video Demo** (Gryffindor). It will be reviewed by an admin.",
       allowedMentions: { users: [] },
     });

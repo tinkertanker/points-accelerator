@@ -2015,6 +2015,25 @@ export class BotRuntime {
     return { users: isDiscordSnowflake(studentUserId) ? [studentUserId] : [] };
   }
 
+  private async sendSubmissionReceiptToChannel(
+    channel: ChatInputCommandInteraction["channel"],
+    params: {
+      action: "received" | "updated";
+      assignmentTitle: string;
+      groupName: string | null | undefined;
+      studentUserId: string;
+    },
+  ) {
+    if (!channel?.isTextBased()) {
+      throw new AppError("Submission saved, but I could not post the public channel receipt.", 503);
+    }
+
+    await (channel as GuildTextBasedChannel).send({
+      content: this.buildSubmissionReceiptContent(params),
+      allowedMentions: this.buildStudentAllowedMentions(params.studentUserId),
+    });
+  }
+
   private formatRankMarker(index: number) {
     switch (index) {
       case 0:
@@ -4037,14 +4056,11 @@ export class BotRuntime {
           imageUrl: submission.imageUrl,
         });
 
-        await interaction.followUp({
-          content: this.buildSubmissionReceiptContent({
-            action: "received",
-            assignmentTitle: submission.assignment.title,
-            groupName: submission.group?.displayName,
-            studentUserId: interaction.user.id,
-          }),
-          allowedMentions: this.buildStudentAllowedMentions(interaction.user.id),
+        await this.sendSubmissionReceiptToChannel(interaction.channel, {
+          action: "received",
+          assignmentTitle: submission.assignment.title,
+          groupName: submission.group?.displayName,
+          studentUserId: interaction.user.id,
         });
         await interaction.deleteReply().catch(() => {});
         return;
