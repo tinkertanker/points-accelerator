@@ -566,6 +566,9 @@ export default function App() {
         setSessionUser(session.user);
         setAvailableGuilds(session.availableGuilds ?? []);
         setDiscordApplicationId(session.discordApplicationId ?? null);
+        if (!tabFromHash()) {
+          setActiveTab(getDefaultTab(session.user.dashboardAccessLevel));
+        }
       }
       const payload = await api.bootstrap();
       hydrateDashboard(payload);

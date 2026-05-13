@@ -380,6 +380,7 @@ export class BotRuntime {
   private readonly luckyDrawTimers = new Map<string, NodeJS.Timeout>();
   private readonly pendingSubmissionReplacements = new Map<string, PendingSubmissionReplacement>();
   private client: Client | null = null;
+  private isReady = false;
   private readonly membersCache: Map<string, { fetchedAt: number; value: Array<{ id: string; name: string }> }> = new Map();
   private readonly knownGuildIds = new Set<string>();
 
@@ -406,6 +407,7 @@ export class BotRuntime {
     });
 
     this.client.once("ready", async () => {
+      this.isReady = true;
       // Auto-provision GuildConfig rows for every guild the bot is currently in,
       // then register per-guild slash commands.
       if (this.client) {
@@ -617,6 +619,7 @@ export class BotRuntime {
     this.luckyDrawTimers.clear();
     this.client?.destroy();
     this.client = null;
+    this.isReady = false;
   }
 
   private getOrderedRoleIds(member: GuildMember | null): string[] {
@@ -654,8 +657,11 @@ export class BotRuntime {
   }
 
   public async listBotGuilds(): Promise<Array<{ id: string; name: string; iconUrl: string | null }>> {
-    if (!this.client) {
-      return [];
+    if (!this.client || !this.isReady) {
+      // Throw so callers can distinguish "bot is in zero guilds" from "bot isn't
+      // connected yet" — the dashboard falls back to GuildConfig rows in the
+      // latter case so sessions aren't invalidated during startup.
+      throw new AppError("Discord bot runtime is not connected.", 503);
     }
     return this.client.guilds.cache.map((g) => ({
       id: g.id,
@@ -3472,12 +3478,9 @@ export class BotRuntime {
   }
 
   private async resumeLuckyDraws() {
-    const configs = await this.services.configService.listAll();
-    for (const config of configs) {
-      const draws = await this.services.luckyDrawService.listResumable(config.guildId);
-      for (const draw of draws) {
-        this.scheduleLuckyDraw(draw);
-      }
+    const draws = await this.services.luckyDrawService.listResumable();
+    for (const draw of draws) {
+      this.scheduleLuckyDraw(draw);
     }
   }
 

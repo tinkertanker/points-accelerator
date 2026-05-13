@@ -589,4 +589,73 @@ describe("Discord dashboard auth", () => {
       },
     });
   });
+
+  describe("guild selection endpoints", () => {
+    it("lists accessible guilds for the signed-in user", async () => {
+      const sessionCookie = await startDashboardSession();
+      expect(sessionCookie).toMatch(/^dashboard_session=/);
+
+      const response = await ctx.app.inject({
+        method: "GET",
+        url: "/api/guilds",
+        headers: { cookie: sessionCookie ?? "" },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const payload = response.json() as { guilds: Array<{ guildId: string }>; activeGuildId: string | null };
+      expect(payload.guilds.map((guild) => guild.guildId)).toContain(TEST_GUILD_ID);
+      expect(payload.activeGuildId).toBe(TEST_GUILD_ID);
+    });
+
+    it("rejects /api/guilds when the caller has no dashboard session", async () => {
+      const response = await ctx.app.inject({
+        method: "GET",
+        url: "/api/guilds",
+      });
+
+      expect(response.statusCode).toBe(401);
+    });
+
+    it("rejects /api/guilds/select for guilds the user does not have access to", async () => {
+      const sessionCookie = await startDashboardSession();
+      const response = await ctx.app.inject({
+        method: "POST",
+        url: "/api/guilds/select",
+        headers: { cookie: sessionCookie ?? "", "content-type": "application/json" },
+        payload: { guildId: "guild-other" },
+      });
+
+      expect(response.statusCode).toBe(403);
+    });
+
+    it("clears the active guild via /api/guilds/leave so the picker reappears", async () => {
+      const sessionCookie = await startDashboardSession();
+
+      const leaveResponse = await ctx.app.inject({
+        method: "POST",
+        url: "/api/guilds/leave",
+        headers: { cookie: sessionCookie ?? "" },
+      });
+
+      expect(leaveResponse.statusCode).toBe(200);
+      expect(leaveResponse.json()).toEqual({ activeGuildId: null });
+
+      const sessionResponse = await ctx.app.inject({
+        method: "GET",
+        url: "/api/auth/session",
+        headers: { cookie: sessionCookie ?? "" },
+      });
+
+      expect(sessionResponse.statusCode).toBe(200);
+      const payload = sessionResponse.json() as {
+        authenticated: boolean;
+        user?: { activeGuildId: string | null };
+        availableGuilds?: Array<{ guildId: string }>;
+      };
+      expect(payload.authenticated).toBe(true);
+      // Because there's only one accessible guild, /api/auth/session auto-selects it again.
+      expect(payload.user?.activeGuildId).toBe(TEST_GUILD_ID);
+      expect(payload.availableGuilds?.map((guild) => guild.guildId)).toContain(TEST_GUILD_ID);
+    });
+  });
 });

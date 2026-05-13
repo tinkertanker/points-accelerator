@@ -563,11 +563,11 @@ export function createApp(params: {
   ): Promise<AccessibleGuild[]> => {
     const userGuildSet = new Set(userGuildIds);
 
-    // listBotGuilds() is the source of truth for "the bot is actually present in this guild
-    // right now". When the runtime can answer (returns an array, even empty), trust it.
-    // When it isn't available (no runtime attached, or it threw), fall back to GuildConfig
-    // rows so dashboard-only tooling and tests still function. Stale GuildConfig rows for
-    // guilds the bot has left must not appear in the picker once the bot is connected.
+    // listBotGuilds() is the source of truth for "the bot is actually present in this
+    // guild right now". When the runtime can answer, trust it. When it can't (runtime
+    // detached or not ready, e.g. during boot), fall back to GuildConfig rows so
+    // sessions aren't invalidated mid-startup; stale rows for guilds the bot has left
+    // are filtered out once the bot is ready.
     let botGuilds: Array<{ id: string; name: string; iconUrl: string | null }> | null = null;
     if (params.botRuntime) {
       try {
@@ -576,9 +576,6 @@ export function createApp(params: {
         botGuilds = null;
       }
     }
-
-    const knownConfigs = await services.configService.listAll();
-    const configsByGuildId = new Map(knownConfigs.map((config) => [config.guildId, config]));
 
     const candidates: AccessibleGuild[] = [];
     const seen = new Set<string>();
@@ -590,21 +587,23 @@ export function createApp(params: {
         candidates.push({ guildId: guild.id, name: guild.name, iconUrl: guild.iconUrl });
       }
     } else {
-      // Bot runtime unavailable — derive candidates from configured guilds.
+      // Bot runtime unavailable — derive candidates from configured guilds intersected
+      // with the user's guilds. Only this branch needs the full config list.
+      const knownConfigs = await services.configService.listByGuildIds(userGuildIds);
       for (const config of knownConfigs) {
-        if (!userGuildSet.has(config.guildId) || seen.has(config.guildId)) continue;
+        if (seen.has(config.guildId)) continue;
         seen.add(config.guildId);
         candidates.push({ guildId: config.guildId, name: config.appName, iconUrl: null });
       }
     }
 
-    // Test bridge: when test-admin auth is in play (or no bot runtime is connected),
-    // allow the env-provided guild to act as the active one as long as a config row exists.
-    if (params.env.NODE_ENV === "test" && params.env.GUILD_ID) {
-      const seeded = configsByGuildId.get(params.env.GUILD_ID);
-      if (seeded && !seen.has(params.env.GUILD_ID)) {
+    // Test bridge: when test-admin auth is in play, allow the env-provided guild to act
+    // as the active one as long as a config row exists.
+    if (params.env.NODE_ENV === "test" && params.env.GUILD_ID && !seen.has(params.env.GUILD_ID)) {
+      const seeded = await services.configService.listByGuildIds([params.env.GUILD_ID]);
+      if (seeded.length > 0) {
         seen.add(params.env.GUILD_ID);
-        candidates.push({ guildId: params.env.GUILD_ID, name: seeded.appName, iconUrl: null });
+        candidates.push({ guildId: params.env.GUILD_ID, name: seeded[0]!.appName, iconUrl: null });
       }
     }
 
