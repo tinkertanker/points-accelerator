@@ -8,6 +8,16 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.7.0] - 2026-05-13
+
+### Added
+- Sign-in now offers a server picker: pick which Discord guild to manage, with the existing guild pre-selected when you only belong to one.
+- New "Switch server" button in the topbar (when you can manage more than one guild) and an "Add the bot to another server" link that opens Discord's install URL for onboarding a second guild.
+
+### Changed
+- Discord sign-in now asks for permission to see your server list so the dashboard can show only the guilds the bot is installed in. Stale guild selections fall back to the picker instead of erroring.
+- Bot slash commands now register per-guild for every connected guild, and a new guild auto-provisions its config the moment the bot joins.
+
 ## [0.6.1] - 2026-05-09
 
 ### Added
