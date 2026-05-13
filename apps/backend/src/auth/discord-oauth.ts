@@ -7,9 +7,20 @@ export type DiscordIdentity = {
   avatarUrl: string | null;
 };
 
+export type DiscordUserGuild = {
+  id: string;
+  name: string;
+  iconUrl: string | null;
+};
+
+export type DiscordOAuthExchangeResult = {
+  identity: DiscordIdentity;
+  guilds: DiscordUserGuild[];
+};
+
 export interface DiscordOAuthClient {
   buildAuthorizeUrl(params: { state: string; redirectUri: string }): string;
-  exchangeCode(params: { code: string; redirectUri: string }): Promise<DiscordIdentity>;
+  exchangeCode(params: { code: string; redirectUri: string }): Promise<DiscordOAuthExchangeResult>;
 }
 
 type DiscordTokenResponse = {
@@ -22,6 +33,14 @@ type DiscordUserResponse = {
   global_name: string | null;
   avatar: string | null;
 };
+
+type DiscordUserGuildResponse = {
+  id: string;
+  name: string;
+  icon: string | null;
+};
+
+const OAUTH_SCOPES = ["identify", "guilds"].join(" ");
 
 export function createDiscordOAuthClient(params: {
   applicationId?: string;
@@ -38,7 +57,7 @@ export function createDiscordOAuthClient(params: {
       url.search = new URLSearchParams({
         client_id: applicationId,
         response_type: "code",
-        scope: "identify",
+        scope: OAUTH_SCOPES,
         state,
         redirect_uri: redirectUri,
         prompt: "consent",
@@ -81,11 +100,35 @@ export function createDiscordOAuthClient(params: {
       }
 
       const identity = (await identityResponse.json()) as DiscordUserResponse;
+
+      const guildsResponse = await fetch("https://discord.com/api/users/@me/guilds", {
+        headers: {
+          Authorization: `Bearer ${tokenPayload.access_token}`,
+        },
+      });
+
+      if (!guildsResponse.ok) {
+        throw new AppError("Discord login failed while listing your servers.", 502);
+      }
+
+      const guilds = (await guildsResponse.json()) as DiscordUserGuildResponse[];
+
       return {
-        id: identity.id,
-        username: identity.username,
-        globalName: identity.global_name,
-        avatarUrl: identity.avatar ? `https://cdn.discordapp.com/avatars/${identity.id}/${identity.avatar}.png?size=128` : null,
+        identity: {
+          id: identity.id,
+          username: identity.username,
+          globalName: identity.global_name,
+          avatarUrl: identity.avatar
+            ? `https://cdn.discordapp.com/avatars/${identity.id}/${identity.avatar}.png?size=128`
+            : null,
+        },
+        guilds: guilds.map((guild) => ({
+          id: guild.id,
+          name: guild.name,
+          iconUrl: guild.icon
+            ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128`
+            : null,
+        })),
       };
     },
   };

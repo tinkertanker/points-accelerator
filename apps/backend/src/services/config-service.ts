@@ -90,4 +90,19 @@ export class ConfigService {
       data: { lastAnnouncedVersion: version },
     });
   }
+
+  public async listAll() {
+    return this.prisma.guildConfig.findMany({ orderBy: { createdAt: "asc" } });
+  }
+
+  public async listByGuildIds(guildIds: string[]) {
+    if (guildIds.length === 0) {
+      return [];
+    }
+
+    return this.prisma.guildConfig.findMany({
+      where: { guildId: { in: guildIds } },
+      orderBy: { createdAt: "asc" },
+    });
+  }
 }
