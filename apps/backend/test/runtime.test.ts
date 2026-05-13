@@ -1398,6 +1398,7 @@ describe("bot runtime", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "review_submission",
       guild: {
         members: {
@@ -1523,6 +1524,7 @@ describe("bot runtime", () => {
     const followUp = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleSubmissionButton({
+      guildId: "guild-test",
       customId: "submission:outstanding:submission-12345678",
       deferUpdate,
       editReply,
