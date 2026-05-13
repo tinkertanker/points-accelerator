@@ -12,4 +12,6 @@ test-results/
 apps/backend/prisma/dev.db*
 apps/backend/.tmp/
 apps/frontend/.tmp/
+.claude/
+output/
 
