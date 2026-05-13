@@ -193,22 +193,36 @@ export type AuthUser = {
   username: string;
   displayName: string;
   avatarUrl: string | null;
-  roleIds: string[];
-  isGuildOwner: boolean;
-  hasAdministrator: boolean;
-  hasManageGuild: boolean;
-  dashboardAccessLevel: DashboardAccessLevel;
-  canManageDashboard: boolean;
-  canManageSettings: boolean;
-  canManageGroups: boolean;
-  canManageShop: boolean;
-  canManageAssignments: boolean;
-  canViewLeaderboard: boolean;
+  roleIds?: string[];
+  isGuildOwner?: boolean;
+  hasAdministrator?: boolean;
+  hasManageGuild?: boolean;
+  dashboardAccessLevel?: DashboardAccessLevel;
+  canManageDashboard?: boolean;
+  canManageSettings?: boolean;
+  canManageGroups?: boolean;
+  canManageShop?: boolean;
+  canManageAssignments?: boolean;
+  canViewLeaderboard?: boolean;
+  activeGuildId: string | null;
+};
+
+export type GuildSummary = {
+  guildId: string;
+  name: string;
+  iconUrl: string | null;
 };
 
 export type AuthSession = {
   authenticated: boolean;
   user?: AuthUser;
+  availableGuilds?: GuildSummary[];
+  discordApplicationId?: string | null;
+};
+
+export type GuildListResponse = {
+  guilds: GuildSummary[];
+  activeGuildId: string | null;
 };
 
 export type BootstrapPayload = {

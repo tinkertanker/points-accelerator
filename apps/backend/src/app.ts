@@ -285,6 +285,16 @@ const reactionRewardRuleSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
+type SessionRecord = {
+  userId: string;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  userGuildIds: string[];
+  activeGuildId: string | null;
+  expiresAt: number;
+};
+
 export function createApp(params: {
   env: AppEnv;
   services: AppServices;
@@ -294,7 +304,7 @@ export function createApp(params: {
 }) {
   const app = Fastify({ logger: true, trustProxy: true });
   const { services } = params;
-  const dashboardSessions = new Map<string, { userId: string; expiresAt: number }>();
+  const dashboardSessions = new Map<string, SessionRecord>();
 
   const buildAppUrl = (path = "/") => {
     const appUrl = params.env.APP_PUBLIC_URL ?? (params.env.APP_DOMAIN ? `https://${params.env.APP_DOMAIN}` : undefined);
@@ -361,16 +371,28 @@ export function createApp(params: {
     reply.clearCookie(SESSION_COOKIE_NAME, { path: "/" });
   };
 
-  const createDashboardSession = (userId: string) => {
+  const createDashboardSession = (input: {
+    userId: string;
+    username: string | null;
+    displayName: string | null;
+    avatarUrl: string | null;
+    userGuildIds: string[];
+    activeGuildId: string | null;
+  }) => {
     const sessionId = randomBytes(24).toString("hex");
     dashboardSessions.set(sessionId, {
-      userId,
+      userId: input.userId,
+      username: input.username,
+      displayName: input.displayName,
+      avatarUrl: input.avatarUrl,
+      userGuildIds: input.userGuildIds,
+      activeGuildId: input.activeGuildId,
       expiresAt: Date.now() + SESSION_TTL_MS,
     });
     return sessionId;
   };
 
-  const getSessionRecord = (sessionId?: string) => {
+  const getSessionRecord = (sessionId?: string): SessionRecord | null => {
     if (!sessionId) {
       return null;
     }
@@ -386,6 +408,13 @@ export function createApp(params: {
     }
 
     return session;
+  };
+
+  const touchSession = (sessionId: string, record: SessionRecord) => {
+    dashboardSessions.set(sessionId, {
+      ...record,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    });
   };
 
   const buildDashboardAccess = (params: {
@@ -416,6 +445,7 @@ export function createApp(params: {
     if (params.env.NODE_ENV === "test") {
       const headerToken = typeof request.headers["x-admin-token"] === "string" ? request.headers["x-admin-token"] : undefined;
       if (headerToken && params.env.ADMIN_TOKEN && headerToken === params.env.ADMIN_TOKEN) {
+        const testGuildId = params.env.GUILD_ID ?? "guild-test";
         return {
           userId: "test-admin",
           username: "Test Admin",
@@ -425,6 +455,7 @@ export function createApp(params: {
           isGuildOwner: false,
           hasAdministrator: true,
           hasManageGuild: true,
+          activeGuildId: testGuildId,
           ...buildDashboardAccess({
             isGuildOwner: false,
             hasAdministrator: true,
@@ -443,14 +474,18 @@ export function createApp(params: {
       throw new AppError("Unauthorized", 401);
     }
 
-    const member = await params.botRuntime?.getDashboardMember(session.userId);
-    if (!member) {
-      destroyDashboardSession(sessionId);
-      throw new AppError("You must be a member of the configured Discord server to use the dashboard.", 401);
+    if (!session.activeGuildId) {
+      throw new AppError("No guild selected.", 409);
     }
 
-    const settings = await services.configService.getOrCreate(params.env.GUILD_ID);
-    const capabilities = await services.roleCapabilityService.listForRoleIds(params.env.GUILD_ID, member.roleIds);
+    const member = await params.botRuntime?.getDashboardMember(session.activeGuildId, session.userId);
+    if (!member) {
+      destroyDashboardSession(sessionId);
+      throw new AppError("You must be a member of the selected Discord server to use the dashboard.", 401);
+    }
+
+    const settings = await services.configService.getOrCreate(session.activeGuildId);
+    const capabilities = await services.roleCapabilityService.listForRoleIds(session.activeGuildId, member.roleIds);
     const resolved = resolveCapabilities(capabilities);
     const access = buildDashboardAccess({
       isGuildOwner: member.isGuildOwner,
@@ -461,33 +496,118 @@ export function createApp(params: {
       mentorRoleIds: settings.mentorRoleIds,
     });
 
-    dashboardSessions.set(sessionId!, {
-      userId: session.userId,
-      expiresAt: Date.now() + SESSION_TTL_MS,
-    });
+    touchSession(sessionId!, session);
 
     return {
       ...member,
       ...access,
+      activeGuildId: session.activeGuildId,
     };
   };
 
+  type ResolvedSession = Awaited<ReturnType<typeof resolveDashboardSession>>;
+  const sessionAttachKey = Symbol("dashboardSession");
+
+  const attachSession = async (request: FastifyRequest): Promise<ResolvedSession> => {
+    const requestWithSession = request as FastifyRequest & {
+      [sessionAttachKey]?: ResolvedSession;
+    };
+    if (requestWithSession[sessionAttachKey]) {
+      return requestWithSession[sessionAttachKey];
+    }
+    const session = await resolveDashboardSession(request);
+    requestWithSession[sessionAttachKey] = session;
+    return session;
+  };
+
+  const sessionFor = (request: FastifyRequest): ResolvedSession => {
+    const requestWithSession = request as FastifyRequest & {
+      [sessionAttachKey]?: ResolvedSession;
+    };
+    const session = requestWithSession[sessionAttachKey];
+    if (!session) {
+      throw new AppError("Session was not attached to this request. This is a server bug.", 500);
+    }
+    return session;
+  };
+
+  const guildIdOf = (request: FastifyRequest): string => sessionFor(request).activeGuildId;
+
   const requireDashboardMember = async (request: FastifyRequest) => {
-    await resolveDashboardSession(request);
+    await attachSession(request);
   };
 
   const requireAdmin = async (request: FastifyRequest) => {
-    const session = await resolveDashboardSession(request);
+    const session = await attachSession(request);
     if (!session.canManageSettings) {
       throw new AppError("Only dashboard admins can manage settings and groups.", 403);
     }
   };
 
   const requireMentor = async (request: FastifyRequest) => {
-    const session = await resolveDashboardSession(request);
+    const session = await attachSession(request);
     if (!session.canManageShop || !session.canManageAssignments) {
       throw new AppError("Only mentors and dashboard admins can manage the shop and assignments.", 403);
     }
+  };
+
+  type AccessibleGuild = {
+    guildId: string;
+    name: string;
+    iconUrl: string | null;
+  };
+
+  const resolveAccessibleGuilds = async (
+    userGuildIds: string[],
+    _userId: string,
+  ): Promise<AccessibleGuild[]> => {
+    const userGuildSet = new Set(userGuildIds);
+
+    // listBotGuilds() is the source of truth for "the bot is actually present in this
+    // guild right now". When the runtime can answer, trust it. When it can't (runtime
+    // detached or not ready, e.g. during boot), fall back to GuildConfig rows so
+    // sessions aren't invalidated mid-startup; stale rows for guilds the bot has left
+    // are filtered out once the bot is ready.
+    let botGuilds: Array<{ id: string; name: string; iconUrl: string | null }> | null = null;
+    if (params.botRuntime) {
+      try {
+        botGuilds = await params.botRuntime.listBotGuilds();
+      } catch {
+        botGuilds = null;
+      }
+    }
+
+    const candidates: AccessibleGuild[] = [];
+    const seen = new Set<string>();
+
+    if (botGuilds !== null) {
+      for (const guild of botGuilds) {
+        if (!userGuildSet.has(guild.id) || seen.has(guild.id)) continue;
+        seen.add(guild.id);
+        candidates.push({ guildId: guild.id, name: guild.name, iconUrl: guild.iconUrl });
+      }
+    } else {
+      // Bot runtime unavailable — derive candidates from configured guilds intersected
+      // with the user's guilds. Only this branch needs the full config list.
+      const knownConfigs = await services.configService.listByGuildIds(userGuildIds);
+      for (const config of knownConfigs) {
+        if (seen.has(config.guildId)) continue;
+        seen.add(config.guildId);
+        candidates.push({ guildId: config.guildId, name: config.appName, iconUrl: null });
+      }
+    }
+
+    // Test bridge: when test-admin auth is in play, allow the env-provided guild to act
+    // as the active one as long as a config row exists.
+    if (params.env.NODE_ENV === "test" && params.env.GUILD_ID && !seen.has(params.env.GUILD_ID)) {
+      const seeded = await services.configService.listByGuildIds([params.env.GUILD_ID]);
+      if (seeded.length > 0) {
+        seen.add(params.env.GUILD_ID);
+        candidates.push({ guildId: params.env.GUILD_ID, name: seeded[0]!.appName, iconUrl: null });
+      }
+    }
+
+    return candidates;
   };
 
   const serialiseSettings = (settings: Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>) => ({
@@ -662,18 +782,48 @@ export function createApp(params: {
     const secureCookies = shouldUseSecureCookies(request);
 
     try {
-      const identity = await params.discordOAuthClient.exchangeCode({
+      const { identity, guilds } = await params.discordOAuthClient.exchangeCode({
         code: query.code,
         redirectUri,
       });
 
-      const member = await params.botRuntime?.getDashboardMember(identity.id);
-      if (!member) {
+      const userGuildIds = guilds.map((guild) => guild.id);
+      const accessibleGuilds = await resolveAccessibleGuilds(userGuildIds, identity.id);
+      if (accessibleGuilds.length === 0) {
         clearDashboardSession(request, reply);
-        return reply.redirect(buildAuthRedirectUrl("Join the configured Discord server before signing in."));
+        return reply.redirect(
+          buildAuthRedirectUrl(
+            "You aren't a member of any Discord server where this bot is installed. Ask an admin to invite the bot, or join a configured server first.",
+          ),
+        );
       }
 
-      const sessionId = createDashboardSession(identity.id);
+      let activeGuildId: string | null = null;
+      if (accessibleGuilds.length === 1) {
+        const candidateGuildId = accessibleGuilds[0]!.guildId;
+        // Verify the bot can see the user as a member of that guild before
+        // auto-selecting. A null result is a definitive "not a member" — clear any
+        // existing session and surface auth_error. A thrown error is transient
+        // (e.g. Discord outage) — fall through to the outer catch which keeps the
+        // existing session intact and shows a generic retry message.
+        const member = await params.botRuntime?.getDashboardMember(candidateGuildId, identity.id);
+        if (member === null) {
+          clearDashboardSession(request, reply);
+          return reply.redirect(
+            buildAuthRedirectUrl("Join the configured Discord server before signing in."),
+          );
+        }
+        activeGuildId = candidateGuildId;
+      }
+
+      const sessionId = createDashboardSession({
+        userId: identity.id,
+        username: identity.username,
+        displayName: identity.globalName ?? identity.username,
+        avatarUrl: identity.avatarUrl,
+        userGuildIds,
+        activeGuildId,
+      });
       reply.setCookie(SESSION_COOKIE_NAME, sessionId, {
         path: "/",
         httpOnly: true,
@@ -695,47 +845,157 @@ export function createApp(params: {
   });
 
   app.get("/api/auth/session", async (request, reply) => {
-    try {
-      const session = await resolveDashboardSession(request);
-      return {
-        authenticated: true,
-        user: session,
-      };
-    } catch (error) {
-      if (error instanceof AppError && (error.statusCode === 401 || error.statusCode === 403)) {
-        clearDashboardSession(request, reply);
-        return { authenticated: false };
-      }
+    const sessionId = request.cookies[SESSION_COOKIE_NAME];
+    const stored = getSessionRecord(sessionId);
+    const discordApplicationId = params.env.DISCORD_APPLICATION_ID ?? null;
 
-      throw error;
+    if (params.env.NODE_ENV === "test") {
+      const headerToken = typeof request.headers["x-admin-token"] === "string" ? request.headers["x-admin-token"] : undefined;
+      if (headerToken && params.env.ADMIN_TOKEN && headerToken === params.env.ADMIN_TOKEN) {
+        try {
+          const session = await resolveDashboardSession(request);
+          return {
+            authenticated: true,
+            user: session,
+            availableGuilds: params.env.GUILD_ID
+              ? [{ guildId: params.env.GUILD_ID, name: "test", iconUrl: null }]
+              : [],
+            discordApplicationId,
+          };
+        } catch (error) {
+          if (error instanceof AppError) {
+            return { authenticated: false };
+          }
+          throw error;
+        }
+      }
     }
+
+    if (!stored) {
+      return { authenticated: false };
+    }
+
+    const availableGuilds = await resolveAccessibleGuilds(stored.userGuildIds, stored.userId);
+    if (availableGuilds.length === 0) {
+      clearDashboardSession(request, reply);
+      return { authenticated: false };
+    }
+
+    // If the previously selected guild is no longer accessible (e.g. bot was removed from it),
+    // clear the selection so the dashboard falls back to the picker instead of trying to
+    // resolve a stale guild and surfacing a 503.
+    const accessibleGuildIds = new Set(availableGuilds.map((guild) => guild.guildId));
+    if (stored.activeGuildId && !accessibleGuildIds.has(stored.activeGuildId)) {
+      touchSession(sessionId!, { ...stored, activeGuildId: null });
+    }
+
+    // Auto-select if exactly one guild matches and none is selected.
+    const refreshed = getSessionRecord(sessionId);
+    if (refreshed && !refreshed.activeGuildId && availableGuilds.length === 1) {
+      touchSession(sessionId!, { ...refreshed, activeGuildId: availableGuilds[0]!.guildId });
+    }
+
+    const current = getSessionRecord(sessionId);
+    if (current?.activeGuildId) {
+      try {
+        const session = await resolveDashboardSession(request);
+        return {
+          authenticated: true,
+          user: session,
+          availableGuilds,
+          discordApplicationId,
+        };
+      } catch (error) {
+        if (error instanceof AppError && (error.statusCode === 401 || error.statusCode === 403)) {
+          clearDashboardSession(request, reply);
+          return { authenticated: false };
+        }
+        throw error;
+      }
+    }
+
+    return {
+      authenticated: true,
+      user: {
+        userId: stored.userId,
+        username: stored.username ?? "",
+        displayName: stored.displayName ?? stored.username ?? "",
+        avatarUrl: stored.avatarUrl,
+        activeGuildId: null,
+      },
+      availableGuilds,
+      discordApplicationId,
+    };
+  });
+
+  const guildSelectSchema = z.object({
+    guildId: z.string().min(1),
+  });
+
+  app.get("/api/guilds", async (request, reply) => {
+    const sessionId = request.cookies[SESSION_COOKIE_NAME];
+    const stored = getSessionRecord(sessionId);
+    if (!stored) {
+      throw new AppError("Unauthorized", 401);
+    }
+
+    const guilds = await resolveAccessibleGuilds(stored.userGuildIds, stored.userId);
+    return { guilds, activeGuildId: stored.activeGuildId };
+  });
+
+  app.post("/api/guilds/select", async (request, reply) => {
+    const sessionId = request.cookies[SESSION_COOKIE_NAME];
+    const stored = getSessionRecord(sessionId);
+    if (!stored) {
+      throw new AppError("Unauthorized", 401);
+    }
+
+    const payload = guildSelectSchema.parse(request.body);
+    const accessible = await resolveAccessibleGuilds(stored.userGuildIds, stored.userId);
+    if (!accessible.some((guild) => guild.guildId === payload.guildId)) {
+      throw new AppError("You don't have access to that server.", 403);
+    }
+
+    touchSession(sessionId!, { ...stored, activeGuildId: payload.guildId });
+    return { activeGuildId: payload.guildId };
+  });
+
+  app.post("/api/guilds/leave", async (request, reply) => {
+    const sessionId = request.cookies[SESSION_COOKIE_NAME];
+    const stored = getSessionRecord(sessionId);
+    if (!stored) {
+      return { activeGuildId: null };
+    }
+
+    touchSession(sessionId!, { ...stored, activeGuildId: null });
+    return { activeGuildId: null };
   });
 
   app.get("/api/bootstrap", { preHandler: requireDashboardMember }, async (request) => {
-    const session = await resolveDashboardSession(request);
+    const session = sessionFor(request);
     const canManageAdminPages = session.canManageSettings || session.canManageGroups;
     const canManageMentorPages = session.canManageShop || session.canManageAssignments;
 
     const [settings, leaderboard, capabilities, groups, shopItems, listings, ledger, roles, channels, members, assignments, participants, submissions, reactionRules] =
       await Promise.all([
-        services.configService.getOrCreate(params.env.GUILD_ID),
-        services.economyService.getLeaderboard(params.env.GUILD_ID),
-        canManageAdminPages ? services.roleCapabilityService.list(params.env.GUILD_ID) : Promise.resolve([]),
-        canManageAdminPages ? services.groupService.list(params.env.GUILD_ID, { includeInactive: true }) : Promise.resolve([]),
-        canManageMentorPages ? services.shopService.list(params.env.GUILD_ID) : Promise.resolve([]),
-        canManageAdminPages ? services.listingService.list(params.env.GUILD_ID) : Promise.resolve([]),
-        canManageAdminPages ? services.economyService.getLedger(params.env.GUILD_ID, 25) : Promise.resolve([]),
+        services.configService.getOrCreate(guildIdOf(request)),
+        services.economyService.getLeaderboard(guildIdOf(request)),
+        canManageAdminPages ? services.roleCapabilityService.list(guildIdOf(request)) : Promise.resolve([]),
+        canManageAdminPages ? services.groupService.list(guildIdOf(request), { includeInactive: true }) : Promise.resolve([]),
+        canManageMentorPages ? services.shopService.list(guildIdOf(request)) : Promise.resolve([]),
+        canManageAdminPages ? services.listingService.list(guildIdOf(request)) : Promise.resolve([]),
+        canManageAdminPages ? services.economyService.getLedger(guildIdOf(request), 25) : Promise.resolve([]),
         canManageAdminPages || canManageMentorPages
-          ? params.botRuntime?.getRoles() ?? []
+          ? params.botRuntime?.getRoles(guildIdOf(request)) ?? []
           : Promise.resolve([]),
-        canManageAdminPages ? params.botRuntime?.getTextChannels() ?? [] : Promise.resolve([]),
-        canManageMentorPages ? params.botRuntime?.getMembers() ?? [] : Promise.resolve([]),
-        canManageMentorPages ? services.assignmentService.list(params.env.GUILD_ID) : Promise.resolve([]),
+        canManageAdminPages ? params.botRuntime?.getTextChannels(guildIdOf(request)) ?? [] : Promise.resolve([]),
+        canManageMentorPages ? params.botRuntime?.getMembers(guildIdOf(request)) ?? [] : Promise.resolve([]),
+        canManageMentorPages ? services.assignmentService.list(guildIdOf(request)) : Promise.resolve([]),
         canManageAdminPages || canManageMentorPages
-          ? services.participantService.list(params.env.GUILD_ID)
+          ? services.participantService.list(guildIdOf(request))
           : Promise.resolve([]),
-        canManageMentorPages ? services.submissionService.list(params.env.GUILD_ID) : Promise.resolve([]),
-        canManageAdminPages ? services.reactionRewardService.list(params.env.GUILD_ID) : Promise.resolve([]),
+        canManageMentorPages ? services.submissionService.list(guildIdOf(request)) : Promise.resolve([]),
+        canManageAdminPages ? services.reactionRewardService.list(guildIdOf(request)) : Promise.resolve([]),
       ]);
 
     return {
@@ -769,19 +1029,19 @@ export function createApp(params: {
     };
   });
 
-  app.get("/api/settings", { preHandler: requireAdmin }, async () => {
-    const settings = await services.configService.getOrCreate(params.env.GUILD_ID);
+  app.get("/api/settings", { preHandler: requireAdmin }, async (request) => {
+    const settings = await services.configService.getOrCreate(guildIdOf(request));
     return serialiseSettings(settings);
   });
 
   app.put("/api/settings", { preHandler: requireAdmin }, async (request) => {
     const input = settingsSchema.parse(request.body);
-    const settings = await services.configService.update(params.env.GUILD_ID, input);
+    const settings = await services.configService.update(guildIdOf(request), input);
     return serialiseSettings(settings);
   });
 
-  app.get("/api/capabilities", { preHandler: requireAdmin }, async () => {
-    const capabilities = await services.roleCapabilityService.list(params.env.GUILD_ID);
+  app.get("/api/capabilities", { preHandler: requireAdmin }, async (request) => {
+    const capabilities = await services.roleCapabilityService.list(guildIdOf(request));
     return capabilities.map((capability) => ({
       ...capability,
       maxAward: capability.maxAward ? decimalToNumber(capability.maxAward) : null,
@@ -791,7 +1051,7 @@ export function createApp(params: {
 
   app.put("/api/capabilities", { preHandler: requireAdmin }, async (request) => {
     const payload = z.array(roleCapabilitySchema).parse(request.body);
-    const capabilities = await services.roleCapabilityService.replaceAll(params.env.GUILD_ID, payload);
+    const capabilities = await services.roleCapabilityService.replaceAll(guildIdOf(request), payload);
     return capabilities.map((capability) => ({
       ...capability,
       maxAward: capability.maxAward ? decimalToNumber(capability.maxAward) : null,
@@ -799,13 +1059,13 @@ export function createApp(params: {
     }));
   });
 
-  app.get("/api/groups", { preHandler: requireAdmin }, async () => {
-    const groups = await services.groupService.list(params.env.GUILD_ID, { includeInactive: true });
+  app.get("/api/groups", { preHandler: requireAdmin }, async (request) => {
+    const groups = await services.groupService.list(guildIdOf(request), { includeInactive: true });
     return groups.map((group) => serialiseGroup(group));
   });
 
   app.post("/api/groups", { preHandler: requireAdmin }, async (request) => {
-    const group = await services.groupService.upsert(params.env.GUILD_ID, groupSchema.parse(request.body));
+    const group = await services.groupService.upsert(guildIdOf(request), groupSchema.parse(request.body));
     return group;
   });
 
@@ -817,16 +1077,16 @@ export function createApp(params: {
     updatedAt: rule.updatedAt.toISOString(),
   });
 
-  app.get("/api/reaction-rules", { preHandler: requireAdmin }, async () => {
-    const rules = await services.reactionRewardService.list(params.env.GUILD_ID);
+  app.get("/api/reaction-rules", { preHandler: requireAdmin }, async (request) => {
+    const rules = await services.reactionRewardService.list(guildIdOf(request));
     return rules.map(serialiseReactionRule);
   });
 
   app.post("/api/reaction-rules", { preHandler: requireAdmin }, async (request) => {
-    const session = await resolveDashboardSession(request);
+    const session = sessionFor(request);
     const input = reactionRewardRuleSchema.parse(request.body);
     const rule = await services.reactionRewardService.create({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       actorUserId: session.userId,
       actorUsername: session.username,
       input,
@@ -835,11 +1095,11 @@ export function createApp(params: {
   });
 
   app.put("/api/reaction-rules/:id", { preHandler: requireAdmin }, async (request) => {
-    const session = await resolveDashboardSession(request);
+    const session = sessionFor(request);
     const { id } = request.params as { id: string };
     const input = reactionRewardRuleSchema.parse(request.body);
     const rule = await services.reactionRewardService.update({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       actorUserId: session.userId,
       actorUsername: session.username,
       id,
@@ -849,10 +1109,10 @@ export function createApp(params: {
   });
 
   app.delete("/api/reaction-rules/:id", { preHandler: requireAdmin }, async (request, reply) => {
-    const session = await resolveDashboardSession(request);
+    const session = sessionFor(request);
     const { id } = request.params as { id: string };
     await services.reactionRewardService.remove({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       actorUserId: session.userId,
       actorUsername: session.username,
       id,
@@ -860,18 +1120,18 @@ export function createApp(params: {
     reply.status(204).send();
   });
 
-  app.get("/api/leaderboard", { preHandler: requireDashboardMember }, async () => {
-    const leaderboard = await services.economyService.getLeaderboard(params.env.GUILD_ID);
+  app.get("/api/leaderboard", { preHandler: requireDashboardMember }, async (request) => {
+    const leaderboard = await services.economyService.getLeaderboard(guildIdOf(request));
     return leaderboard.map((entry) => serialiseLeaderboardEntry(entry));
   });
 
   app.get("/api/ledger", { preHandler: requireAdmin }, async (request) => {
     const limit = z.coerce.number().int().positive().max(100).default(25).parse((request.query as { limit?: string }).limit);
-    return services.economyService.getLedger(params.env.GUILD_ID, limit);
+    return services.economyService.getLedger(guildIdOf(request), limit);
   });
 
-  app.get("/api/shop-items", { preHandler: requireMentor }, async () => {
-    const items = await services.shopService.list(params.env.GUILD_ID);
+  app.get("/api/shop-items", { preHandler: requireMentor }, async (request) => {
+    const items = await services.shopService.list(guildIdOf(request));
     return items.map((item) => ({
       ...item,
       cost: decimalToNumber(item.cost),
@@ -879,24 +1139,24 @@ export function createApp(params: {
   });
 
   app.post("/api/shop-items", { preHandler: requireMentor }, async (request) => {
-    const item = await services.shopService.upsert(params.env.GUILD_ID, shopItemSchema.parse(request.body));
+    const item = await services.shopService.upsert(guildIdOf(request), shopItemSchema.parse(request.body));
     return {
       ...item,
       cost: decimalToNumber(item.cost),
     };
   });
 
-  app.get("/api/shop-redemptions", { preHandler: requireMentor }, async () => {
-    const redemptions = await services.shopService.listRedemptions(params.env.GUILD_ID);
+  app.get("/api/shop-redemptions", { preHandler: requireMentor }, async (request) => {
+    const redemptions = await services.shopService.listRedemptions(guildIdOf(request));
     return redemptions.map((redemption) => serialiseShopRedemption(redemption));
   });
 
   app.post("/api/shop-redemptions/:id/status", { preHandler: requireMentor }, async (request) => {
     const payload = redemptionStatusUpdateSchema.parse(request.body);
-    const session = await resolveDashboardSession(request);
+    const session = sessionFor(request);
     const { id } = request.params as { id: string };
     const { redemption, changed } = await services.shopService.updateRedemptionStatus({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       redemptionId: id,
       status: payload.status,
       actorUserId: session.userId,
@@ -919,11 +1179,11 @@ export function createApp(params: {
     return serialiseShopRedemption(redemption);
   });
 
-  app.get("/api/listings", { preHandler: requireAdmin }, async () => services.listingService.list(params.env.GUILD_ID));
+  app.get("/api/listings", { preHandler: requireAdmin }, async (request) => services.listingService.list(guildIdOf(request)));
 
   app.post("/api/listings", { preHandler: requireAdmin }, async (request) => {
     const payload = listingSchema.parse(request.body);
-    const config = await services.configService.getOrCreate(params.env.GUILD_ID);
+    const config = await services.configService.getOrCreate(guildIdOf(request));
     const posted = config.listingChannelId
       ? await params.botRuntime?.postListing(
           config.listingChannelId,
@@ -934,7 +1194,7 @@ export function createApp(params: {
       : null;
 
     return services.listingService.create({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       actor: {
         userId: payload.actorUserId,
         username: payload.actorUsername,
@@ -971,7 +1231,7 @@ export function createApp(params: {
     await services.prisma.$transaction(async (tx) => {
       if (payload.pointsDelta !== 0) {
         await services.economyService.awardGroups({
-          guildId: params.env.GUILD_ID,
+          guildId: guildIdOf(request),
           actor,
           targetGroupIds: payload.targetGroupIds,
           pointsDelta: payload.pointsDelta,
@@ -983,7 +1243,7 @@ export function createApp(params: {
 
       if (payload.currencyDelta !== 0 && payload.targetParticipantId) {
         await services.participantCurrencyService.awardParticipants({
-          guildId: params.env.GUILD_ID,
+          guildId: guildIdOf(request),
           actor,
           targetParticipantIds: [payload.targetParticipantId],
           currencyDelta: payload.currencyDelta,
@@ -1005,7 +1265,7 @@ export function createApp(params: {
   app.post("/api/actions/pay", { preHandler: requireAdmin }, async (request) => {
     const payload = paySchema.parse(request.body);
     return services.participantCurrencyService.transferCurrency({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       actor: {
         userId: payload.actorUserId,
         username: payload.actorUsername,
@@ -1020,9 +1280,9 @@ export function createApp(params: {
 
   app.post("/api/actions/donate", { preHandler: requireAdmin }, async (request) => {
     const payload = donateSchema.parse(request.body);
-    const settings = await services.configService.getOrCreate(params.env.GUILD_ID);
+    const settings = await services.configService.getOrCreate(guildIdOf(request));
     return services.economyService.donateParticipantCurrencyToGroupPoints({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       actor: {
         userId: payload.actorUserId,
         username: payload.actorUsername,
@@ -1040,24 +1300,24 @@ export function createApp(params: {
     const payload = redeemSchema.parse(request.body);
     let groupMemberCount: number | undefined;
     if ((payload.purchaseMode ?? "INDIVIDUAL") === "GROUP") {
-      const participant = await services.participantService.findById(params.env.GUILD_ID, payload.participantId);
+      const participant = await services.participantService.findById(guildIdOf(request), payload.participantId);
       if (!participant) {
         throw new AppError("Participant not found.", 404);
       }
 
-      const group = await services.groupService.findById(params.env.GUILD_ID, participant.groupId);
+      const group = await services.groupService.findById(guildIdOf(request), participant.groupId);
       if (!group) {
         throw new AppError("Group not found.", 404);
       }
 
-      groupMemberCount = (await params.botRuntime?.getGroupMemberCount(group.roleId)) ?? undefined;
+      groupMemberCount = (await params.botRuntime?.getGroupMemberCount(guildIdOf(request), group.roleId)) ?? undefined;
       if (!groupMemberCount || groupMemberCount <= 0) {
         throw new AppError("Live Discord group membership is unavailable for this group purchase.", 503);
       }
     }
 
     return services.shopService.redeem({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       participantId: payload.participantId,
       shopItemId: payload.shopItemId,
       requestedByUserId: payload.requestedByUserId,
@@ -1070,7 +1330,7 @@ export function createApp(params: {
 
   app.post("/api/actions/approve-group-purchase", { preHandler: requireAdmin }, async (request) => {
     const payload = approveGroupPurchaseSchema.parse(request.body);
-    const redemption = await services.shopService.getRedemption(params.env.GUILD_ID, payload.redemptionId);
+    const redemption = await services.shopService.getRedemption(guildIdOf(request), payload.redemptionId);
     if (!redemption) {
       throw new AppError("Group purchase request not found.", 404);
     }
@@ -1078,15 +1338,15 @@ export function createApp(params: {
     let currentGroupMemberCount: number | undefined;
     let currentGroupMemberDiscordUserIds: string[] | undefined;
     if (redemption.purchaseMode === "GROUP") {
-      currentGroupMemberCount = (await params.botRuntime?.getGroupMemberCount(redemption.group.roleId)) ?? undefined;
-      currentGroupMemberDiscordUserIds = (await params.botRuntime?.getGroupMemberDiscordUserIds(redemption.group.roleId)) ?? undefined;
+      currentGroupMemberCount = (await params.botRuntime?.getGroupMemberCount(guildIdOf(request), redemption.group.roleId)) ?? undefined;
+      currentGroupMemberDiscordUserIds = (await params.botRuntime?.getGroupMemberDiscordUserIds(guildIdOf(request), redemption.group.roleId)) ?? undefined;
       if (!currentGroupMemberCount || currentGroupMemberCount <= 0) {
         throw new AppError("Live Discord group membership is unavailable for this group purchase.", 503);
       }
     }
 
     return services.shopService.approveGroupPurchase({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       redemptionId: payload.redemptionId,
       participantId: payload.participantId,
       approvedByUserId: payload.approvedByUserId,
@@ -1100,7 +1360,7 @@ export function createApp(params: {
 
   app.post("/api/admin/economy/reset", { preHandler: requireAdmin }, async (request) => {
     const payload = economyResetSchema.parse(request.body);
-    const session = await resolveDashboardSession(request);
+    const session = sessionFor(request);
     const actor = { userId: session.userId, username: session.username ?? "admin" };
 
     if (payload.mode === "reverse-entries-since") {
@@ -1109,7 +1369,7 @@ export function createApp(params: {
         throw new AppError("`since` must be a valid ISO date.", 400);
       }
       return services.economyResetService.reverseEntriesByTypeSince({
-        guildId: params.env.GUILD_ID,
+        guildId: guildIdOf(request),
         actor,
         participantTypes: payload.participantTypes,
         groupTypes: payload.groupTypes,
@@ -1121,7 +1381,7 @@ export function createApp(params: {
 
     if (payload.mode === "cap-balances") {
       return services.economyResetService.capBalances({
-        guildId: params.env.GUILD_ID,
+        guildId: guildIdOf(request),
         actor,
         maxParticipantCurrency: payload.maxParticipantCurrency,
         maxGroupPoints: payload.maxGroupPoints,
@@ -1133,7 +1393,7 @@ export function createApp(params: {
 
     if (payload.mode === "modulo-balance") {
       return services.economyResetService.moduloBalances({
-        guildId: params.env.GUILD_ID,
+        guildId: guildIdOf(request),
         actor,
         modulus: payload.modulus,
         applyToParticipantCurrency: payload.applyToParticipantCurrency,
@@ -1145,7 +1405,7 @@ export function createApp(params: {
     }
 
     return services.economyResetService.setBalances({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       actor,
       targetParticipantCurrency: payload.targetParticipantCurrency,
       targetGroupPoints: payload.targetGroupPoints,
@@ -1157,8 +1417,8 @@ export function createApp(params: {
 
   // --- Sanctions (admin tools) ---
 
-  app.get("/api/sanctions", { preHandler: requireAdmin }, async () => {
-    return services.sanctionService.listForGuild(params.env.GUILD_ID);
+  app.get("/api/sanctions", { preHandler: requireAdmin }, async (request) => {
+    return services.sanctionService.listForGuild(guildIdOf(request));
   });
 
   app.get(
@@ -1166,7 +1426,7 @@ export function createApp(params: {
     { preHandler: requireAdmin },
     async (request) => {
       const { id } = request.params as { id: string };
-      return services.sanctionService.listForParticipant(params.env.GUILD_ID, id);
+      return services.sanctionService.listForParticipant(guildIdOf(request), id);
     },
   );
 
@@ -1176,9 +1436,9 @@ export function createApp(params: {
     async (request) => {
       const { id } = request.params as { id: string };
       const payload = sanctionApplySchema.parse(request.body);
-      const session = await resolveDashboardSession(request);
+      const session = sessionFor(request);
       return services.sanctionService.apply({
-        guildId: params.env.GUILD_ID,
+        guildId: guildIdOf(request),
         participantId: id,
         flag: payload.flag,
         reason: payload.reason ?? null,
@@ -1190,9 +1450,9 @@ export function createApp(params: {
 
   app.post("/api/sanctions/:id/revoke", { preHandler: requireAdmin }, async (request) => {
     const { id } = request.params as { id: string };
-    const session = await resolveDashboardSession(request);
+    const session = sessionFor(request);
     return services.sanctionService.revoke({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       sanctionId: id,
       actor: { userId: session.userId, username: session.username ?? "admin" },
     });
@@ -1200,32 +1460,32 @@ export function createApp(params: {
 
   // --- Participants ---
 
-  app.get("/api/participants", { preHandler: requireAdmin }, async () => {
-    return services.participantService.list(params.env.GUILD_ID);
+  app.get("/api/participants", { preHandler: requireAdmin }, async (request) => {
+    return services.participantService.list(guildIdOf(request));
   });
 
   app.post("/api/participants", { preHandler: requireAdmin }, async (request) => {
     const payload = participantRegisterSchema.parse(request.body);
     return services.participantService.register({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       ...payload,
     });
   });
 
   app.delete("/api/participants/:id", { preHandler: requireAdmin }, async (request) => {
     const { id } = request.params as { id: string };
-    return services.participantService.delete(params.env.GUILD_ID, id);
+    return services.participantService.delete(guildIdOf(request), id);
   });
 
   // --- Assignments ---
 
-  app.get("/api/assignments", { preHandler: requireMentor }, async () => {
-    return services.assignmentService.list(params.env.GUILD_ID);
+  app.get("/api/assignments", { preHandler: requireMentor }, async (request) => {
+    return services.assignmentService.list(guildIdOf(request));
   });
 
   app.post("/api/assignments", { preHandler: requireMentor }, async (request) => {
     const payload = assignmentSchema.parse(request.body);
-    return services.assignmentService.upsert(params.env.GUILD_ID, payload);
+    return services.assignmentService.upsert(guildIdOf(request), payload);
   });
 
   // --- Submissions ---
@@ -1233,7 +1493,7 @@ export function createApp(params: {
   app.get("/api/submissions", { preHandler: requireMentor }, async (request) => {
     const query = request.query as { assignmentId?: string; status?: string; participantId?: string };
     const status = query.status as "PENDING" | "APPROVED" | "OUTSTANDING" | "REJECTED" | undefined;
-    return services.submissionService.list(params.env.GUILD_ID, {
+    return services.submissionService.list(guildIdOf(request), {
       assignmentId: query.assignmentId,
       status,
       participantId: query.participantId,
@@ -1243,9 +1503,9 @@ export function createApp(params: {
   app.post("/api/submissions/:id/review", { preHandler: requireMentor }, async (request) => {
     const { id } = request.params as { id: string };
     const payload = submissionReviewSchema.parse(request.body);
-    const session = await resolveDashboardSession(request);
+    const session = sessionFor(request);
     return services.submissionService.review({
-      guildId: params.env.GUILD_ID,
+      guildId: guildIdOf(request),
       submissionId: id,
       status: payload.status,
       reviewNote: payload.reviewNote,
@@ -1254,8 +1514,8 @@ export function createApp(params: {
     });
   });
 
-  app.get("/api/submissions/completion", { preHandler: requireMentor }, async () => {
-    return services.submissionService.getCompletionSummary(params.env.GUILD_ID);
+  app.get("/api/submissions/completion", { preHandler: requireMentor }, async (request) => {
+    return services.submissionService.getCompletionSummary(guildIdOf(request));
   });
 
   // --- Image upload (for submissions via the dashboard) ---
@@ -1278,7 +1538,7 @@ export function createApp(params: {
     const result = await params.storageService.upload({
       buffer,
       contentType: file.mimetype,
-      folder: `submissions/${params.env.GUILD_ID}`,
+      folder: `submissions/${guildIdOf(request)}`,
       originalFilename: file.filename,
     });
 

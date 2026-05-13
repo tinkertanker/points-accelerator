@@ -34,7 +34,9 @@ const authenticatedSession = {
     canManageShop: true,
     canManageAssignments: true,
     canViewLeaderboard: true,
+    activeGuildId: "guild-test",
   },
+  availableGuilds: [{ guildId: "guild-test", name: "Test Guild", iconUrl: null }],
 };
 
 const mentorSession = {
@@ -55,7 +57,9 @@ const mentorSession = {
     canManageShop: true,
     canManageAssignments: true,
     canViewLeaderboard: true,
+    activeGuildId: "guild-test",
   },
+  availableGuilds: [{ guildId: "guild-test", name: "Test Guild", iconUrl: null }],
 };
 
 const viewerSession = {
@@ -76,7 +80,9 @@ const viewerSession = {
     canManageShop: false,
     canManageAssignments: false,
     canViewLeaderboard: true,
+    activeGuildId: "guild-test",
   },
+  availableGuilds: [{ guildId: "guild-test", name: "Test Guild", iconUrl: null }],
 };
 
 const bootstrapPayload = {
@@ -237,6 +243,75 @@ describe("App", () => {
     );
 
     expect(await screen.findByRole("button", { name: /sign in with discord/i })).toBeInTheDocument();
+  });
+
+  it("renders the guild picker when the session has no active guild and selecting one fetches bootstrap", async () => {
+    const pendingPickerSession = {
+      authenticated: true,
+      user: {
+        userId: "user-1",
+        username: "admin",
+        displayName: "Admin",
+        avatarUrl: null,
+        activeGuildId: null,
+      },
+      availableGuilds: [
+        { guildId: "guild-a", name: "Alpha Server", iconUrl: null },
+        { guildId: "guild-b", name: "Bravo Server", iconUrl: null },
+      ],
+      discordApplicationId: "app-123",
+    };
+    const postSelectionSession = {
+      ...authenticatedSession,
+      availableGuilds: pendingPickerSession.availableGuilds,
+      discordApplicationId: "app-123",
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(pendingPickerSession), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ activeGuildId: "guild-a" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(postSelectionSession), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(bootstrapPayload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /pick a server/i })).toBeInTheDocument();
+    expect(screen.getByText(/alpha server/i)).toBeInTheDocument();
+    expect(screen.getByText(/bravo server/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/alpha server/i));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/\/api\/guilds\/select$/),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ guildId: "guild-a" }),
+        }),
+      ),
+    );
+
+    expect(await screen.findByRole("tab", { name: /overview/i, selected: true })).toBeInTheDocument();
   });
 
   it("shows admin tabs and swaps panels for an authenticated admin", async () => {

@@ -14,7 +14,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3001),
   DATABASE_URL: z.string().min(1),
-  GUILD_ID: z.string().min(1),
+  GUILD_ID: optionalNonEmptyString(),
   APP_PUBLIC_URL: optionalUrlString(),
   APP_DOMAIN: optionalNonEmptyString(),
   DISCORD_BOT_TOKEN: optionalNonEmptyString(),

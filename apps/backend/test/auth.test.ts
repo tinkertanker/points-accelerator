@@ -22,23 +22,31 @@ const defaultDashboardMember = {
 let currentDashboardMember = { ...defaultDashboardMember };
 
 const botRuntime: BotRuntimeApi = {
+  listBotGuilds: vi.fn().mockResolvedValue([{ id: "guild-test", name: "Test Guild", iconUrl: null }]),
   getRoles: vi.fn().mockResolvedValue([]),
   getTextChannels: vi.fn().mockResolvedValue([]),
   getMembers: vi.fn().mockResolvedValue([]),
-  getDashboardMember: vi.fn(async (userId: string) => (userId === currentDashboardMember.userId ? currentDashboardMember : null)),
+  getDashboardMember: vi.fn(async (_guildId: string, userId: string) =>
+    userId === currentDashboardMember.userId ? currentDashboardMember : null,
+  ),
   getGroupMemberCount: vi.fn().mockResolvedValue(null),
   getGroupMemberDiscordUserIds: vi.fn().mockResolvedValue(null),
   postListing: vi.fn().mockResolvedValue(null),
   clearRedemptionButtons: vi.fn().mockResolvedValue(undefined),
 };
 
+const TEST_GUILD_ID = "guild-test";
+
 const discordOAuthClient: DiscordOAuthClient = {
   buildAuthorizeUrl: vi.fn(({ state, redirectUri }) => `https://discord.com/oauth2/authorize?state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}`),
   exchangeCode: vi.fn(async () => ({
-    id: currentDashboardMember.userId,
-    username: currentDashboardMember.username,
-    globalName: currentDashboardMember.displayName,
-    avatarUrl: currentDashboardMember.avatarUrl,
+    identity: {
+      id: currentDashboardMember.userId,
+      username: currentDashboardMember.username,
+      globalName: currentDashboardMember.displayName,
+      avatarUrl: currentDashboardMember.avatarUrl,
+    },
+    guilds: [{ id: TEST_GUILD_ID, name: "Test Guild", iconUrl: null }],
   })),
 };
 
@@ -448,10 +456,13 @@ describe("Discord dashboard auth", () => {
     expect(sessionCookie).toMatch(/^dashboard_session=/);
 
     vi.mocked(discordOAuthClient.exchangeCode).mockResolvedValueOnce({
-      id: "discord-user-2",
-      username: "outsider",
-      globalName: "Outsider",
-      avatarUrl: null,
+      identity: {
+        id: "discord-user-2",
+        username: "outsider",
+        globalName: "Outsider",
+        avatarUrl: null,
+      },
+      guilds: [{ id: TEST_GUILD_ID, name: "Test Guild", iconUrl: null }],
     });
     vi.mocked(botRuntime.getDashboardMember).mockImplementationOnce(async () => null);
 
@@ -493,10 +504,13 @@ describe("Discord dashboard auth", () => {
     expect(sessionCookie).toMatch(/^dashboard_session=/);
 
     vi.mocked(discordOAuthClient.exchangeCode).mockResolvedValueOnce({
-      id: "discord-user-2",
-      username: "outsider",
-      globalName: "Outsider",
-      avatarUrl: null,
+      identity: {
+        id: "discord-user-2",
+        username: "outsider",
+        globalName: "Outsider",
+        avatarUrl: null,
+      },
+      guilds: [{ id: TEST_GUILD_ID, name: "Test Guild", iconUrl: null }],
     });
     vi.mocked(botRuntime.getDashboardMember).mockImplementationOnce(async () => {
       throw new Error("discord outage");
@@ -573,6 +587,75 @@ describe("Discord dashboard auth", () => {
       user: {
         userId: currentDashboardMember.userId,
       },
+    });
+  });
+
+  describe("guild selection endpoints", () => {
+    it("lists accessible guilds for the signed-in user", async () => {
+      const sessionCookie = await startDashboardSession();
+      expect(sessionCookie).toMatch(/^dashboard_session=/);
+
+      const response = await ctx.app.inject({
+        method: "GET",
+        url: "/api/guilds",
+        headers: { cookie: sessionCookie ?? "" },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const payload = response.json() as { guilds: Array<{ guildId: string }>; activeGuildId: string | null };
+      expect(payload.guilds.map((guild) => guild.guildId)).toContain(TEST_GUILD_ID);
+      expect(payload.activeGuildId).toBe(TEST_GUILD_ID);
+    });
+
+    it("rejects /api/guilds when the caller has no dashboard session", async () => {
+      const response = await ctx.app.inject({
+        method: "GET",
+        url: "/api/guilds",
+      });
+
+      expect(response.statusCode).toBe(401);
+    });
+
+    it("rejects /api/guilds/select for guilds the user does not have access to", async () => {
+      const sessionCookie = await startDashboardSession();
+      const response = await ctx.app.inject({
+        method: "POST",
+        url: "/api/guilds/select",
+        headers: { cookie: sessionCookie ?? "", "content-type": "application/json" },
+        payload: { guildId: "guild-other" },
+      });
+
+      expect(response.statusCode).toBe(403);
+    });
+
+    it("clears the active guild via /api/guilds/leave so the picker reappears", async () => {
+      const sessionCookie = await startDashboardSession();
+
+      const leaveResponse = await ctx.app.inject({
+        method: "POST",
+        url: "/api/guilds/leave",
+        headers: { cookie: sessionCookie ?? "" },
+      });
+
+      expect(leaveResponse.statusCode).toBe(200);
+      expect(leaveResponse.json()).toEqual({ activeGuildId: null });
+
+      const sessionResponse = await ctx.app.inject({
+        method: "GET",
+        url: "/api/auth/session",
+        headers: { cookie: sessionCookie ?? "" },
+      });
+
+      expect(sessionResponse.statusCode).toBe(200);
+      const payload = sessionResponse.json() as {
+        authenticated: boolean;
+        user?: { activeGuildId: string | null };
+        availableGuilds?: Array<{ guildId: string }>;
+      };
+      expect(payload.authenticated).toBe(true);
+      // Because there's only one accessible guild, /api/auth/session auto-selects it again.
+      expect(payload.user?.activeGuildId).toBe(TEST_GUILD_ID);
+      expect(payload.availableGuilds?.map((guild) => guild.guildId)).toContain(TEST_GUILD_ID);
     });
   });
 });

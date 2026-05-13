@@ -15,6 +15,7 @@ import type {
   BootstrapPayload,
   EconomyResetRequest,
   EconomyResetResult,
+  GuildListResponse,
   ParticipantSanction,
   SanctionApplyRequest,
   GroupDraft,
@@ -105,6 +106,29 @@ export const api = {
       return Promise.resolve(getDesignPreviewBootstrap());
     }
     return request<BootstrapPayload>("/api/bootstrap");
+  },
+  listGuilds() {
+    if (isDesignPreview()) {
+      return Promise.resolve({ guilds: [], activeGuildId: null });
+    }
+    return request<GuildListResponse>("/api/guilds");
+  },
+  selectGuild(guildId: string) {
+    if (isDesignPreview()) {
+      return Promise.resolve({ activeGuildId: guildId });
+    }
+    return request<{ activeGuildId: string }>("/api/guilds/select", {
+      method: "POST",
+      body: { guildId },
+    });
+  },
+  leaveGuild() {
+    if (isDesignPreview()) {
+      return Promise.resolve({ activeGuildId: null });
+    }
+    return request<{ activeGuildId: null }>("/api/guilds/leave", {
+      method: "POST",
+    });
   },
   saveSettings(payload: Settings) {
     if (isDesignPreview()) {

@@ -351,14 +351,15 @@ export type DashboardMember = {
 };
 
 export interface BotRuntimeApi {
-  getRoles(): Promise<Array<{ id: string; name: string }>>;
-  getTextChannels(): Promise<Array<{ id: string; name: string }>>;
-  getMembers(): Promise<Array<{ id: string; name: string }>>;
-  getDashboardMember(userId: string): Promise<DashboardMember | null>;
-  getGroupMemberCount(roleId: string): Promise<number | null>;
-  getGroupMemberDiscordUserIds(roleId: string): Promise<string[] | null>;
+  getRoles(guildId: string): Promise<Array<{ id: string; name: string }>>;
+  getTextChannels(guildId: string): Promise<Array<{ id: string; name: string }>>;
+  getMembers(guildId: string): Promise<Array<{ id: string; name: string }>>;
+  getDashboardMember(guildId: string, userId: string): Promise<DashboardMember | null>;
+  getGroupMemberCount(guildId: string, roleId: string): Promise<number | null>;
+  getGroupMemberDiscordUserIds(guildId: string, roleId: string): Promise<string[] | null>;
   postListing(channelId: string, content: string): Promise<{ channelId: string; messageId: string } | null>;
   clearRedemptionButtons(channelId: string, messageId: string, statusLine: string): Promise<void>;
+  listBotGuilds(): Promise<Array<{ id: string; name: string; iconUrl: string | null }>>;
 }
 
 function isDiscordUnknownMemberError(error: unknown): boolean {
@@ -379,7 +380,9 @@ export class BotRuntime {
   private readonly luckyDrawTimers = new Map<string, NodeJS.Timeout>();
   private readonly pendingSubmissionReplacements = new Map<string, PendingSubmissionReplacement>();
   private client: Client | null = null;
-  private membersCache: { fetchedAt: number; value: Array<{ id: string; name: string }> } | null = null;
+  private isReady = false;
+  private readonly membersCache: Map<string, { fetchedAt: number; value: Array<{ id: string; name: string }> }> = new Map();
+  private readonly knownGuildIds = new Set<string>();
 
   public constructor(
     private readonly env: AppEnv,
@@ -404,6 +407,23 @@ export class BotRuntime {
     });
 
     this.client.once("ready", async () => {
+      this.isReady = true;
+      // Auto-provision GuildConfig rows for every guild the bot is currently in,
+      // then register per-guild slash commands.
+      if (this.client) {
+        for (const guild of this.client.guilds.cache.values()) {
+          await this.ensureKnownGuild(guild.id).catch((error) => {
+            console.error("Failed to ensure guild config on ready", { guildId: guild.id, error });
+          });
+        }
+      }
+      // Back-compat: seed a config row for env.GUILD_ID even if the bot is not
+      // (yet) in that guild — this preserves the existing single-guild deploy.
+      if (this.env.GUILD_ID) {
+        await this.ensureKnownGuild(this.env.GUILD_ID).catch((error) => {
+          console.error("Failed to seed env GUILD_ID config", { guildId: this.env.GUILD_ID, error });
+        });
+      }
       await this.registerCommands();
       await this.announceDeploymentIfNew().catch((error) => {
         console.error("Failed to post deploy announcement", error);
@@ -413,8 +433,23 @@ export class BotRuntime {
       });
     });
 
+    this.client.on("guildCreate", async (guild) => {
+      try {
+        await this.ensureKnownGuild(guild.id);
+        await this.registerCommandsForGuild(guild.id);
+      } catch (error) {
+        console.error("Failed to onboard new guild", { guildId: guild.id, error });
+      }
+    });
+
     this.client.on("messageCreate", async (message) => {
-      if (!message.guild || message.author.bot || message.guild.id !== this.env.GUILD_ID) {
+      if (!message.guild || message.author.bot) {
+        return;
+      }
+
+      // Only handle messages from guilds the bot has a config row for.
+      const guildKnown = await this.ensureKnownGuild(message.guild.id);
+      if (!guildKnown) {
         return;
       }
 
@@ -428,6 +463,7 @@ export class BotRuntime {
       }
 
       await this.handlePassiveMessage({
+        guildId: message.guild.id,
         memberId: member.id,
         roleIds: this.getOrderedRoleIds(member),
         userId: message.author.id,
@@ -447,7 +483,9 @@ export class BotRuntime {
     });
 
     this.client.on("interactionCreate", async (interaction) => {
-      if (interaction.guildId !== this.env.GUILD_ID) {
+      // Discord won't deliver interactions for guilds the bot isn't in, so we
+      // just require *some* guild context (DM commands are not supported).
+      if (!interaction.guildId) {
         return;
       }
 
@@ -581,6 +619,7 @@ export class BotRuntime {
     this.luckyDrawTimers.clear();
     this.client?.destroy();
     this.client = null;
+    this.isReady = false;
   }
 
   private getOrderedRoleIds(member: GuildMember | null): string[] {
@@ -597,12 +636,46 @@ export class BotRuntime {
       .map((role) => role.roleId);
   }
 
-  public async getRoles() {
+  /**
+   * Idempotently ensures a GuildConfig row exists for `guildId` and remembers
+   * the guild as "known" for cheap subsequent checks. Returns true on success.
+   * Used by the message handler to gate passive earning, and by the ready/
+   * guildCreate handlers to auto-provision new guilds.
+   */
+  private async ensureKnownGuild(guildId: string): Promise<boolean> {
+    if (this.knownGuildIds.has(guildId)) {
+      return true;
+    }
+    try {
+      await this.services.configService.getOrCreate(guildId);
+      this.knownGuildIds.add(guildId);
+      return true;
+    } catch (error) {
+      console.error("ensureKnownGuild failed", { guildId, error });
+      return false;
+    }
+  }
+
+  public async listBotGuilds(): Promise<Array<{ id: string; name: string; iconUrl: string | null }>> {
+    if (!this.client || !this.isReady) {
+      // Throw so callers can distinguish "bot is in zero guilds" from "bot isn't
+      // connected yet" — the dashboard falls back to GuildConfig rows in the
+      // latter case so sessions aren't invalidated during startup.
+      throw new AppError("Discord bot runtime is not connected.", 503);
+    }
+    return this.client.guilds.cache.map((g) => ({
+      id: g.id,
+      name: g.name,
+      iconUrl: g.iconURL({ size: 128 }),
+    }));
+  }
+
+  public async getRoles(guildId: string) {
     if (!this.client) {
       return [];
     }
 
-    const guild = await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null);
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
     if (!guild) {
       return [];
     }
@@ -617,12 +690,12 @@ export class BotRuntime {
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 
-  public async getTextChannels() {
+  public async getTextChannels(guildId: string) {
     if (!this.client) {
       return [];
     }
 
-    const guild = await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null);
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
     if (!guild) {
       return [];
     }
@@ -637,24 +710,25 @@ export class BotRuntime {
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 
-  public async getMembers() {
+  public async getMembers(guildId: string) {
     const now = Date.now();
-    if (this.membersCache && now - this.membersCache.fetchedAt < MEMBERS_CACHE_TTL_MS) {
-      return this.membersCache.value;
+    const cached = this.membersCache.get(guildId);
+    if (cached && now - cached.fetchedAt < MEMBERS_CACHE_TTL_MS) {
+      return cached.value;
     }
 
     if (!this.client) {
-      return this.membersCache?.value ?? [];
+      return cached?.value ?? [];
     }
 
-    const guild = await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null);
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
     if (!guild) {
-      return this.membersCache?.value ?? [];
+      return cached?.value ?? [];
     }
 
     const members = await guild.members.fetch().catch(() => null);
     if (!members) {
-      return this.membersCache?.value ?? [];
+      return cached?.value ?? [];
     }
 
     const value = Array.from(members.values())
@@ -665,17 +739,17 @@ export class BotRuntime {
       }))
       .sort((left, right) => left.name.localeCompare(right.name));
 
-    this.membersCache = { fetchedAt: now, value };
+    this.membersCache.set(guildId, { fetchedAt: now, value });
     return value;
   }
 
-  public async getDashboardMember(userId: string): Promise<DashboardMember | null> {
+  public async getDashboardMember(guildId: string, userId: string): Promise<DashboardMember | null> {
     if (!this.client) {
       throw new AppError("Discord member lookup is unavailable because the bot is not connected.", 503);
     }
 
     const guild = await this.client.guilds
-      .fetch(this.env.GUILD_ID)
+      .fetch(guildId)
       .catch((error: unknown) => {
         throw new AppError(
           `Discord guild lookup failed${error instanceof Error && error.message ? `: ${error.message}` : "."}`,
@@ -710,27 +784,28 @@ export class BotRuntime {
     };
   }
 
-  public async getGroupMemberCount(roleId: string): Promise<number | null> {
-    const memberIds = await this.getGroupMemberDiscordUserIds(roleId);
+  public async getGroupMemberCount(guildId: string, roleId: string): Promise<number | null> {
+    const memberIds = await this.getGroupMemberDiscordUserIds(guildId, roleId);
     return memberIds?.length ?? null;
   }
 
-  public async getGroupMemberDiscordUserIds(roleId: string): Promise<string[] | null> {
+  public async getGroupMemberDiscordUserIds(guildId: string, roleId: string): Promise<string[] | null> {
     if (!this.client) {
       return null;
     }
 
-    const guild = await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null);
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
     if (!guild) {
       return null;
     }
 
-    const group = await this.services.groupService.resolveGroupByIdentifier(this.env.GUILD_ID, roleId);
+    const group = await this.services.groupService.resolveGroupByIdentifier(guildId, roleId);
     if (!group) {
       return null;
     }
 
     const eligibleMembers = await this.getEligibleGroupMembers({
+      guildId,
       groupId: group.id,
       roleId,
       guild,
@@ -765,24 +840,34 @@ export class BotRuntime {
     const version = await readBackendVersion();
     if (!version) return;
 
-    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-    if (!config.announcementsChannelId) return;
-    if (config.lastAnnouncedVersion === version) return;
-
     const entry = await readChangelogEntry(version);
     if (!entry || entry.body.length === 0) return;
 
-    const channel = await this.client.channels.fetch(config.announcementsChannelId).catch(() => null);
-    if (!channel || !channel.isTextBased()) return;
+    const configs = await this.services.configService.listAll();
+    for (const config of configs) {
+      if (!config.announcementsChannelId) continue;
+      if (config.lastAnnouncedVersion === version) continue;
 
-    const appName = config.appName || this.env.PUBLIC_APP_NAME;
-    const embed = new EmbedBuilder()
-      .setColor(0x22c55e)
-      .setTitle(`${appName} — v${version}`)
-      .setDescription(entry.body.slice(0, 4000));
+      const channel = await this.client.channels.fetch(config.announcementsChannelId).catch(() => null);
+      if (!channel || !channel.isTextBased()) continue;
 
-    await (channel as GuildTextBasedChannel).send({ embeds: [embed] });
-    await this.services.configService.markAnnounced(this.env.GUILD_ID, version);
+      const appName = config.appName || this.env.PUBLIC_APP_NAME;
+      const embed = new EmbedBuilder()
+        .setColor(0x22c55e)
+        .setTitle(`${appName} — v${version}`)
+        .setDescription(entry.body.slice(0, 4000));
+
+      try {
+        await (channel as GuildTextBasedChannel).send({ embeds: [embed] });
+      } catch (error: unknown) {
+        console.error("Failed to post deploy announcement", { guildId: config.guildId, error });
+        // Leave lastAnnouncedVersion untouched so a future restart retries the announcement.
+        continue;
+      }
+      await this.services.configService.markAnnounced(config.guildId, version).catch((error: unknown) => {
+        console.error("Failed to mark deploy announced", { guildId: config.guildId, error });
+      });
+    }
   }
 
   public async clearRedemptionButtons(channelId: string, messageId: string, statusLine: string): Promise<void> {
@@ -1035,6 +1120,7 @@ export class BotRuntime {
   }
 
   private async broadcastSubmissionToFeed(params: {
+    guildId: string;
     submissionId: string;
     studentUserId: string | null;
     studentDisplay: string;
@@ -1043,7 +1129,7 @@ export class BotRuntime {
     text: string;
     imageUrl: string | null;
   }): Promise<void> {
-    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    const config = await this.services.configService.getOrCreate(params.guildId);
     if (!config.submissionFeedChannelId) {
       return;
     }
@@ -1062,7 +1148,7 @@ export class BotRuntime {
     if (posted) {
       const stamped = await this.services.submissionService
         .setFeedMessage({
-          guildId: this.env.GUILD_ID,
+          guildId: params.guildId,
           submissionId: params.submissionId,
           feedChannelId: posted.channelId,
           feedMessageId: posted.messageId,
@@ -1139,6 +1225,11 @@ export class BotRuntime {
       return;
     }
 
+    if (!interaction.guildId) {
+      return;
+    }
+    const guildId = interaction.guildId;
+
     // Acknowledge within Discord's 3-second window before running DB/guild fetches,
     // which for /forbes pagination can exceed the limit on cold caches.
     await interaction.deferUpdate();
@@ -1147,6 +1238,7 @@ export class BotRuntime {
       switch (parsed.kind) {
         case "inventory":
           return this.buildInventoryView({
+            guildId,
             ownerId: parsed.ownerId,
             audience: parsed.subkey === "group" ? "group" : "personal",
             page: parsed.page,
@@ -1154,22 +1246,24 @@ export class BotRuntime {
           });
         case "store":
           return this.buildStoreView({
+            guildId,
             ownerId: parsed.ownerId,
             audience: parsed.subkey === "group" ? "group" : "personal",
             page: parsed.page,
           });
         case "ledger":
-          return this.buildLedgerView({ ownerId: parsed.ownerId, page: parsed.page });
+          return this.buildLedgerView({ guildId, ownerId: parsed.ownerId, page: parsed.page });
         case "leaderboard":
-          return this.buildLeaderboardView({ ownerId: parsed.ownerId, page: parsed.page });
+          return this.buildLeaderboardView({ guildId, ownerId: parsed.ownerId, page: parsed.page });
         case "forbes":
           return this.buildForbesView({
+            guildId,
             ownerId: parsed.ownerId,
             page: parsed.page,
             guild: interaction.guild,
           });
         case "assignments":
-          return this.buildAssignmentsView({ ownerId: parsed.ownerId, page: parsed.page });
+          return this.buildAssignmentsView({ guildId, ownerId: parsed.ownerId, page: parsed.page });
       }
     })();
 
@@ -1177,13 +1271,14 @@ export class BotRuntime {
   }
 
   private async buildInventoryView(params: {
+    guildId: string;
     ownerId: string;
     audience: InventoryAudience;
     page: number;
     guild: ChatInputCommandInteraction["guild"] | null;
     displayName?: string;
   }) {
-    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    const config = await this.services.configService.getOrCreate(params.guildId);
     const redemptions = await this.fetchInventoryRedemptions(params);
     const paged = paginateArray(redemptions, params.page);
     const displayName = params.displayName ?? (await this.resolveOwnerDisplayName(params.guild, params.ownerId));
@@ -1206,22 +1301,23 @@ export class BotRuntime {
   }
 
   private async fetchInventoryRedemptions(params: {
+    guildId: string;
     ownerId: string;
     audience: InventoryAudience;
     guild: ChatInputCommandInteraction["guild"] | null;
   }): Promise<UserRedemption[]> {
     if (params.audience === "personal") {
-      return this.services.shopService.listPersonalRedemptionsByUser(this.env.GUILD_ID, params.ownerId);
+      return this.services.shopService.listPersonalRedemptionsByUser(params.guildId, params.ownerId);
     }
     const member = await params.guild?.members.fetch(params.ownerId).catch(() => null);
     const roleIds = member ? this.getOrderedRoleIds(member) : [];
     const group = await this.services.groupService
-      .resolveGroupFromRoleIds(this.env.GUILD_ID, roleIds)
+      .resolveGroupFromRoleIds(params.guildId, roleIds)
       .catch(() => null);
     if (!group) {
       return [];
     }
-    return this.services.shopService.listGroupRedemptionsByGroup(this.env.GUILD_ID, group.id);
+    return this.services.shopService.listGroupRedemptionsByGroup(params.guildId, group.id);
   }
 
   private async resolveOwnerDisplayName(
@@ -1233,13 +1329,14 @@ export class BotRuntime {
   }
 
   private async buildStoreView(params: {
+    guildId: string;
     ownerId: string;
     audience: StoreAudience;
     page: number;
   }) {
     const [config, items] = await Promise.all([
-      this.services.configService.getOrCreate(this.env.GUILD_ID),
-      this.services.shopService.list(this.env.GUILD_ID),
+      this.services.configService.getOrCreate(params.guildId),
+      this.services.shopService.list(params.guildId),
     ]);
     const wantedAudience = params.audience === "group" ? "GROUP" : "INDIVIDUAL";
     const filtered = items.filter((item) => item.enabled && item.audience === wantedAudience);
@@ -1261,11 +1358,11 @@ export class BotRuntime {
     return { embed, row, totalItems: filtered.length };
   }
 
-  private async buildLedgerView(params: { ownerId: string; page: number }) {
-    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+  private async buildLedgerView(params: { guildId: string; ownerId: string; page: number }) {
+    const config = await this.services.configService.getOrCreate(params.guildId);
     let page = Math.max(1, params.page);
     let offset = (page - 1) * PAGINATION_PAGE_SIZE;
-    let entries = await this.services.economyService.getLedger(this.env.GUILD_ID, {
+    let entries = await this.services.economyService.getLedger(params.guildId, {
       limit: PAGINATION_PAGE_SIZE + 1,
       offset,
     });
@@ -1274,7 +1371,7 @@ export class BotRuntime {
     if (entries.length === 0 && page > 1) {
       page = 1;
       offset = 0;
-      entries = await this.services.economyService.getLedger(this.env.GUILD_ID, {
+      entries = await this.services.economyService.getLedger(params.guildId, {
         limit: PAGINATION_PAGE_SIZE + 1,
         offset,
       });
@@ -1286,10 +1383,10 @@ export class BotRuntime {
     return { embed, row, entryCount: visible.length };
   }
 
-  private async buildLeaderboardView(params: { ownerId: string; page: number }) {
+  private async buildLeaderboardView(params: { guildId: string; ownerId: string; page: number }) {
     const [leaderboard, config] = await Promise.all([
-      this.services.economyService.getLeaderboard(this.env.GUILD_ID),
-      this.services.configService.getOrCreate(this.env.GUILD_ID),
+      this.services.economyService.getLeaderboard(params.guildId),
+      this.services.configService.getOrCreate(params.guildId),
     ]);
     const paged = paginateArray(leaderboard, params.page);
     const embed = this.buildGroupLeaderboardEmbed(leaderboard, config, paged);
@@ -1305,13 +1402,14 @@ export class BotRuntime {
   }
 
   private async buildForbesView(params: {
+    guildId: string;
     ownerId: string;
     page: number;
     guild: ChatInputCommandInteraction["guild"] | null;
   }) {
     const [leaderboard, config] = await Promise.all([
-      this.services.participantService.getCurrencyLeaderboard(this.env.GUILD_ID),
-      this.services.configService.getOrCreate(this.env.GUILD_ID),
+      this.services.participantService.getCurrencyLeaderboard(params.guildId),
+      this.services.configService.getOrCreate(params.guildId),
     ]);
     const paged = paginateArray(leaderboard, params.page);
     const displayNames = await this.resolveParticipantDisplayNames(params.guild, paged.slice);
@@ -1327,16 +1425,16 @@ export class BotRuntime {
     return { embed, row, totalEntries: leaderboard.length };
   }
 
-  private async buildAssignmentsView(params: { ownerId: string; page: number }) {
+  private async buildAssignmentsView(params: { guildId: string; ownerId: string; page: number }) {
     const participant = await this.services.participantService
-      .findByDiscordUser(this.env.GUILD_ID, params.ownerId)
+      .findByDiscordUser(params.guildId, params.ownerId)
       .catch(() => null);
     const [config, activeAssignments, submittedAssignmentIds] = await Promise.all([
-      this.services.configService.getOrCreate(this.env.GUILD_ID),
-      this.services.assignmentService.listActive(this.env.GUILD_ID),
+      this.services.configService.getOrCreate(params.guildId),
+      this.services.assignmentService.listActive(params.guildId),
       participant
         ? this.services.submissionService.listAssignmentIdsForParticipant({
-            guildId: this.env.GUILD_ID,
+            guildId: params.guildId,
             participantId: participant.id,
           })
         : Promise.resolve(new Set<string>()),
@@ -1356,6 +1454,7 @@ export class BotRuntime {
   }
 
   private async checkRedemptionActorPermissions(params: {
+    guildId: string;
     redemption: NonNullable<Awaited<ReturnType<AppServices["shopService"]["getRedemption"]>>>;
     actorUserId: string;
     memberPermissions: ChatInputCommandInteraction["memberPermissions"];
@@ -1382,7 +1481,7 @@ export class BotRuntime {
     let isStaff = hasStaffPerms;
     if (!isStaff) {
       const capabilities = await this.services.roleCapabilityService.listForRoleIds(
-        this.env.GUILD_ID,
+        params.guildId,
         params.roleIds,
       );
       const resolved = resolveCapabilities(capabilities);
@@ -1402,12 +1501,17 @@ export class BotRuntime {
       return;
     }
 
+    if (!interaction.guildId) {
+      return;
+    }
+    const guildId = interaction.guildId;
+
     const [, action, redemptionId] = parts;
     if (action !== "fulfil" && action !== "cancel") {
       return;
     }
 
-    const redemption = await this.services.shopService.getRedemption(this.env.GUILD_ID, redemptionId);
+    const redemption = await this.services.shopService.getRedemption(guildId, redemptionId);
     if (!redemption) {
       await interaction.reply({ content: "Redemption not found.", ephemeral: true });
       return;
@@ -1424,6 +1528,7 @@ export class BotRuntime {
     const roleIds = guildMember ? this.getOrderedRoleIds(guildMember) : apiRoleIds;
     const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
     const { isOwner, isStaff, isFulfiller } = await this.checkRedemptionActorPermissions({
+      guildId,
       redemption,
       actorUserId: interaction.user.id,
       memberPermissions,
@@ -1444,7 +1549,7 @@ export class BotRuntime {
 
     try {
       const { redemption: updated, changed } = await this.services.shopService.updateRedemptionStatus({
-        guildId: this.env.GUILD_ID,
+        guildId,
         redemptionId,
         status: nextStatus,
         actorUserId: interaction.user.id,
@@ -1481,6 +1586,11 @@ export class BotRuntime {
     if (parts.length !== 3 || parts[0] !== "submission") {
       return;
     }
+
+    if (!interaction.guildId) {
+      return;
+    }
+    const guildId = interaction.guildId;
 
     const [, action, submissionId] = parts;
     if (action === "replace" || action === "keep") {
@@ -1521,11 +1631,11 @@ export class BotRuntime {
         : [];
     const roleIds = guildMember ? this.getOrderedRoleIds(guildMember) : apiRoleIds;
     const reviewConfig = isRewardAction
-      ? await this.services.configService.getOrCreate(this.env.GUILD_ID)
+      ? await this.services.configService.getOrCreate(guildId)
       : null;
 
     try {
-      await this.assertCanManageSubmissions(guildMember, roleIds, reviewConfig ?? undefined);
+      await this.assertCanManageSubmissions(guildId, guildMember, roleIds, reviewConfig ?? undefined);
     } catch (error) {
       const message = error instanceof AppError ? error.message : "Only staff can review submissions.";
       await respondWithError(message);
@@ -1537,7 +1647,7 @@ export class BotRuntime {
       let reviewed: Awaited<ReturnType<AppServices["submissionService"]["review"]>>;
       try {
         reviewed = await this.services.submissionService.review({
-          guildId: this.env.GUILD_ID,
+          guildId,
           submissionId,
           status,
           reviewedByUserId: interaction.user.id,
@@ -1549,7 +1659,7 @@ export class BotRuntime {
         return;
       }
 
-      const config = reviewConfig ?? await this.services.configService.getOrCreate(this.env.GUILD_ID);
+      const config = reviewConfig ?? await this.services.configService.getOrCreate(guildId);
       const rewardParts: string[] = [];
       if (reviewed.pointsAwarded && reviewed.pointsAwarded > 0) {
         rewardParts.push(this.formatPointsAmount(reviewed.pointsAwarded, config));
@@ -1583,7 +1693,7 @@ export class BotRuntime {
     let deleted: Awaited<ReturnType<AppServices["submissionService"]["deletePending"]>>;
     try {
       deleted = await this.services.submissionService.deletePending({
-        guildId: this.env.GUILD_ID,
+        guildId,
         submissionId,
       });
     } catch (error) {
@@ -1666,6 +1776,7 @@ export class BotRuntime {
     }
 
     await this.broadcastSubmissionToFeed({
+      guildId: payload.guildId,
       submissionId: result.submission.id,
       studentUserId: payload.userId,
       studentDisplay: payload.studentDisplay,
@@ -1733,6 +1844,7 @@ export class BotRuntime {
   }
 
   private async assertCanManageSubmissions(
+    guildId: string,
     member: GuildMember | null,
     roleIds: string[],
     config?: Pick<GuildConfig, "mentorRoleIds">,
@@ -1748,12 +1860,12 @@ export class BotRuntime {
       return;
     }
 
-    const settings = config ?? await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    const settings = config ?? await this.services.configService.getOrCreate(guildId);
     if (roleIds.some((roleId) => settings.mentorRoleIds.includes(roleId))) {
       return;
     }
 
-    const capabilities = await this.services.roleCapabilityService.listForRoleIds(this.env.GUILD_ID, roleIds);
+    const capabilities = await this.services.roleCapabilityService.listForRoleIds(guildId, roleIds);
     const resolved = resolveCapabilities(capabilities);
     const canManageSubmissions = resolved.canManageDashboard || resolved.canAward || resolved.canDeduct;
 
@@ -1762,7 +1874,7 @@ export class BotRuntime {
     }
   }
 
-  private async canBypassActionCooldown(member: GuildMember | null, roleIds: string[]) {
+  private async canBypassActionCooldown(guildId: string, member: GuildMember | null, roleIds: string[]) {
     if (!member) {
       return false;
     }
@@ -1776,7 +1888,7 @@ export class BotRuntime {
       return true;
     }
 
-    const capabilities = await this.services.roleCapabilityService.listForRoleIds(this.env.GUILD_ID, roleIds);
+    const capabilities = await this.services.roleCapabilityService.listForRoleIds(guildId, roleIds);
     const resolved = resolveCapabilities(capabilities);
     return resolved.canManageDashboard;
   }
@@ -1798,17 +1910,18 @@ export class BotRuntime {
 
   private async enforceAwardCommandCooldown(
     params: {
+      guildId: string;
       member: GuildMember | null;
       roleIds: string[];
       userId: string;
       isDeduction: boolean;
     },
   ) {
-    if (await this.canBypassActionCooldown(params.member, params.roleIds)) {
+    if (await this.canBypassActionCooldown(params.guildId, params.member, params.roleIds)) {
       return null;
     }
 
-    const capabilities = await this.services.roleCapabilityService.listForRoleIds(this.env.GUILD_ID, params.roleIds);
+    const capabilities = await this.services.roleCapabilityService.listForRoleIds(params.guildId, params.roleIds);
     const cooldownSeconds = this.resolveRoleActionCooldownSeconds({
       capabilities,
       isDeduction: params.isDeduction,
@@ -1818,7 +1931,7 @@ export class BotRuntime {
     }
 
     const actionKind = params.isDeduction ? "deduct" : "award";
-    const cooldownKey = `${this.env.GUILD_ID}:${params.userId}:${actionKind}`;
+    const cooldownKey = `${params.guildId}:${params.userId}:${actionKind}`;
     const now = Date.now();
     const previous = this.actionCooldowns.get(cooldownKey);
     const cooldownMs = cooldownSeconds * 1000;
@@ -1840,6 +1953,7 @@ export class BotRuntime {
   }
 
   private checkBettingCooldown(
+    guildId: string,
     userId: string,
     cooldownSeconds: number,
   ): string | null {
@@ -1847,7 +1961,7 @@ export class BotRuntime {
       return null;
     }
 
-    const key = `${this.env.GUILD_ID}:${userId}:bet`;
+    const key = `${guildId}:${userId}:bet`;
     const entry = this.bettingCooldowns.get(key);
     if (!entry) {
       return null;
@@ -1867,11 +1981,11 @@ export class BotRuntime {
     return this.buildBettingRebuke(offenses, remaining);
   }
 
-  private recordBetPlaced(userId: string, cooldownSeconds: number) {
+  private recordBetPlaced(guildId: string, userId: string, cooldownSeconds: number) {
     if (cooldownSeconds <= 0) {
       return;
     }
-    const key = `${this.env.GUILD_ID}:${userId}:bet`;
+    const key = `${guildId}:${userId}:bet`;
     this.bettingCooldowns.set(key, { lastBetAt: Date.now(), offenses: 0 });
   }
 
@@ -2424,13 +2538,14 @@ export class BotRuntime {
   }
 
   private async enforceChannelGuard(params: {
+    guildId: string;
     interaction: ChatInputCommandInteraction;
     activity: GuardedActivity;
     participantId: string | null;
     config: GuildConfig;
   }): Promise<boolean> {
     const result = await this.services.channelGuardService.check({
-      guildId: this.env.GUILD_ID,
+      guildId: params.guildId,
       config: params.config,
       activity: params.activity,
       channelId: params.interaction.channelId ?? null,
@@ -2456,13 +2571,14 @@ export class BotRuntime {
   }
 
   private async resolveActiveParticipant(params: {
+    guildId: string;
     discordUserId: string;
     discordUsername?: string;
     roleIds: string[];
   }) {
-    const group = await this.services.groupService.resolveGroupFromRoleIds(this.env.GUILD_ID, params.roleIds);
+    const group = await this.services.groupService.resolveGroupFromRoleIds(params.guildId, params.roleIds);
     const participant = await this.services.participantService.ensureForGroup({
-      guildId: this.env.GUILD_ID,
+      guildId: params.guildId,
       discordUserId: params.discordUserId,
       discordUsername: params.discordUsername,
       groupId: group.id,
@@ -2475,6 +2591,7 @@ export class BotRuntime {
   }
 
   private async getEligibleGroupMembers(params: {
+    guildId?: string;
     groupId: string;
     roleId: string;
     guild: ChatInputCommandInteraction["guild"];
@@ -2484,6 +2601,7 @@ export class BotRuntime {
     if (!guild) {
       return [];
     }
+    const guildId = params.guildId ?? guild.id;
 
     const members = params.prefetchedMembers ?? (await guild.members.fetch());
     const candidates = Array.from(members.values()).filter(
@@ -2493,7 +2611,7 @@ export class BotRuntime {
     const eligibleMembers = await Promise.all(
       candidates.map(async (candidate) => {
         const resolvedGroup = await this.services.groupService
-          .resolveGroupFromRoleIds(this.env.GUILD_ID, this.getOrderedRoleIds(candidate))
+          .resolveGroupFromRoleIds(guildId, this.getOrderedRoleIds(candidate))
           .catch(() => null);
 
         return resolvedGroup?.id === params.groupId ? candidate : null;
@@ -2504,6 +2622,7 @@ export class BotRuntime {
   }
 
   private async syncGroupParticipantsFromGuild(params: {
+    guildId: string;
     groupId: string;
     roleId: string;
     guild: ChatInputCommandInteraction["guild"];
@@ -2523,7 +2642,7 @@ export class BotRuntime {
     const participants = await Promise.all(
       eligibleMembers.map((candidate) =>
         this.services.participantService.ensureForGroup({
-          guildId: this.env.GUILD_ID,
+          guildId: params.guildId,
           discordUserId: candidate.user.id,
           discordUsername: candidate.user.username,
           groupId: params.groupId,
@@ -2538,14 +2657,14 @@ export class BotRuntime {
     };
   }
 
-  private async resolveTargetGroups(targets: string) {
+  private async resolveTargetGroups(guildId: string, targets: string) {
     const resolvedGroups = await Promise.all(
       targets
         .split(",")
         .map((segment) => segment.trim())
         .filter(Boolean)
         .map(async (segment) => {
-          const group = await this.services.groupService.resolveGroupByIdentifier(this.env.GUILD_ID, segment);
+          const group = await this.services.groupService.resolveGroupByIdentifier(guildId, segment);
           if (!group) {
             throw new AppError(`Could not resolve group: ${segment}`, 404);
           }
@@ -2557,6 +2676,7 @@ export class BotRuntime {
   }
 
   private async handlePassiveMessage(params: {
+    guildId: string;
     memberId: string;
     roleIds: string[];
     userId: string;
@@ -2566,6 +2686,7 @@ export class BotRuntime {
     channelId: string;
   }) {
     const resolved = await this.resolveActiveParticipant({
+      guildId: params.guildId,
       discordUserId: params.userId,
       discordUsername: params.username,
       roleIds: params.roleIds,
@@ -2574,8 +2695,8 @@ export class BotRuntime {
       return;
     }
 
-    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
-    const cooldownKey = `${params.memberId}:${resolved.group.id}`;
+    const config = await this.services.configService.getOrCreate(params.guildId);
+    const cooldownKey = `${params.guildId}:${params.memberId}:${resolved.group.id}`;
     const now = Date.now();
     const previous = this.passiveCooldowns.get(cooldownKey);
     if (previous && now - previous.seenAt < config.passiveCooldownSeconds * 1000) {
@@ -2588,7 +2709,7 @@ export class BotRuntime {
     }
 
     const entry = await this.services.economyService.rewardPassiveMessage({
-      guildId: this.env.GUILD_ID,
+      guildId: params.guildId,
       groupId: resolved.group.id,
       participantId: resolved.participant.id,
       userId: params.userId,
@@ -2621,7 +2742,11 @@ export class BotRuntime {
 
     const message = resolvedReaction.message;
     const guildId = message.guildId ?? message.guild?.id;
-    if (!guildId || guildId !== this.env.GUILD_ID) {
+    if (!guildId) {
+      return;
+    }
+    const guildKnown = await this.ensureKnownGuild(guildId);
+    if (!guildKnown) {
       return;
     }
 
@@ -2662,6 +2787,7 @@ export class BotRuntime {
     }
 
     const resolved = await this.resolveActiveParticipant({
+      guildId,
       discordUserId: author.id,
       discordUsername: author.username,
       roleIds: this.getOrderedRoleIds(member),
@@ -2695,7 +2821,10 @@ export class BotRuntime {
    * identifier, for example `@Bot submit reflection-1`.
    */
   private async handleReplySubmission(message: Message) {
-    const guildId = this.env.GUILD_ID;
+    if (!message.guild) {
+      return;
+    }
+    const guildId = message.guild.id;
 
     try {
       // --- 1. Fetch the referenced (original) message -----------------------
@@ -2766,6 +2895,7 @@ export class BotRuntime {
       }
 
       const { participant } = await this.resolveActiveParticipant({
+        guildId,
         discordUserId: message.author.id,
         discordUsername: message.author.username,
         roleIds: this.getOrderedRoleIds(member),
@@ -2897,6 +3027,7 @@ export class BotRuntime {
       }
 
       await this.broadcastSubmissionToFeed({
+        guildId,
         submissionId: result.submission.id,
         studentUserId: message.author.id,
         studentDisplay: result.submission.participant?.discordUsername ?? message.author.username,
@@ -2922,13 +3053,19 @@ export class BotRuntime {
   }
 
   private async handleAutocomplete(interaction: AutocompleteInteraction) {
+    if (!interaction.guildId) {
+      await interaction.respond([]);
+      return;
+    }
+    const guildId = interaction.guildId;
+
     if (interaction.commandName === "submit") {
       const focused = interaction.options.getFocused(true);
       if (focused.name !== "assignment") {
         await interaction.respond([]);
         return;
       }
-      const assignments = await this.services.assignmentService.listActive(this.env.GUILD_ID);
+      const assignments = await this.services.assignmentService.listActive(guildId);
       const query = focused.value.trim().toLowerCase();
       const matches = assignments
         .filter((assignment) => (query.length === 0 ? true : assignment.title.toLowerCase().includes(query)))
@@ -2958,8 +3095,8 @@ export class BotRuntime {
     }
     const audience = subcommand === "group" ? "GROUP" : "INDIVIDUAL";
     const [config, items] = await Promise.all([
-      this.services.configService.getOrCreate(this.env.GUILD_ID),
-      this.services.shopService.list(this.env.GUILD_ID),
+      this.services.configService.getOrCreate(guildId),
+      this.services.shopService.list(guildId),
     ]);
     const query = focused.value.trim().toLowerCase();
     const matches = items
@@ -2982,17 +3119,19 @@ export class BotRuntime {
   }
 
   private async handleLuckyDrawStart(params: {
+    guildId: string;
     interaction: ChatInputCommandInteraction;
     member: GuildMember | null;
     roleIds: string[];
   }) {
-    const { interaction } = params;
+    const { interaction, guildId } = params;
     if (!interaction.guild || !interaction.channel || !interaction.channel.isTextBased()) {
       throw new AppError("Lucky draws can only be started in a server text channel.", 400);
     }
 
-    const luckyDrawConfig = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    const luckyDrawConfig = await this.services.configService.getOrCreate(guildId);
     const luckyDrawGuardOk = await this.enforceChannelGuard({
+      guildId,
       interaction,
       activity: "luckyDraw",
       participantId: null,
@@ -3000,11 +3139,11 @@ export class BotRuntime {
     });
     if (!luckyDrawGuardOk) return;
 
-    const isAdmin = await this.canBypassActionCooldown(params.member, params.roleIds);
+    const isAdmin = await this.canBypassActionCooldown(guildId, params.member, params.roleIds);
     let resolvedCapabilities: ResolvedCapabilities | null = null;
     if (!isAdmin) {
       const capabilities = await this.services.roleCapabilityService.listForRoleIds(
-        this.env.GUILD_ID,
+        guildId,
         params.roleIds,
       );
       resolvedCapabilities = resolveCapabilities(capabilities);
@@ -3014,6 +3153,7 @@ export class BotRuntime {
     }
 
     const rollbackCooldown = await this.enforceAwardCommandCooldown({
+      guildId,
       member: params.member,
       roleIds: params.roleIds,
       userId: interaction.user.id,
@@ -3038,7 +3178,7 @@ export class BotRuntime {
       }
 
       const draw = await this.services.luckyDrawService.create({
-        guildId: this.env.GUILD_ID,
+        guildId,
         channelId: interaction.channelId!,
         createdByUserId: interaction.user.id,
         createdByUsername: interaction.user.username,
@@ -3048,7 +3188,7 @@ export class BotRuntime {
         durationMs,
       });
 
-      const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+      const config = await this.services.configService.getOrCreate(guildId);
       const embed = this.buildLuckyDrawEmbed({
         draw,
         config,
@@ -3110,7 +3250,7 @@ export class BotRuntime {
     ]);
 
     if (draw) {
-      const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+      const config = await this.services.configService.getOrCreate(draw.guildId);
       await this.refreshLuckyDrawAnnouncement(draw, entrantCount, config, "active");
     }
 
@@ -3237,7 +3377,8 @@ export class BotRuntime {
   private async runLuckyDrawSettlement(drawId: string) {
     const result = await this.services.luckyDrawService.settle(drawId);
     const draw = result.draw;
-    const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+    const guildId = draw.guildId;
+    const config = await this.services.configService.getOrCreate(guildId);
     const totalEntrants = await this.services.luckyDrawService.countEntries(drawId);
 
     if (result.winners.length === 0) {
@@ -3251,7 +3392,7 @@ export class BotRuntime {
       return;
     }
 
-    const guild = this.client ? await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null) : null;
+    const guild = this.client ? await this.client.guilds.fetch(guildId).catch(() => null) : null;
     const resolvedParticipantIds: string[] = [];
     const resolvedWinnerUserIds: string[] = [];
     const skippedWinnerUserIds: string[] = [];
@@ -3259,6 +3400,7 @@ export class BotRuntime {
       try {
         const guildMember = guild ? await guild.members.fetch(winner.userId).catch(() => null) : null;
         const { participant } = await this.resolveActiveParticipant({
+          guildId,
           discordUserId: winner.userId,
           discordUsername: winner.username ?? guildMember?.user?.username,
           roleIds: this.getOrderedRoleIds(guildMember ?? null),
@@ -3284,7 +3426,7 @@ export class BotRuntime {
       } else {
         await this.services.prisma.$transaction(async (tx) => {
           await this.services.participantCurrencyService.awardParticipants({
-            guildId: this.env.GUILD_ID,
+            guildId,
             actor: {
               userId: draw.createdByUserId,
               username: draw.createdByUsername ?? undefined,
@@ -3336,16 +3478,21 @@ export class BotRuntime {
   }
 
   private async resumeLuckyDraws() {
-    const draws = await this.services.luckyDrawService.listResumable(this.env.GUILD_ID);
+    const draws = await this.services.luckyDrawService.listResumable();
     for (const draw of draws) {
       this.scheduleLuckyDraw(draw);
     }
   }
 
   private async handleCommand(interaction: ChatInputCommandInteraction) {
+    if (!interaction.guildId) {
+      return;
+    }
+    const guildId = interaction.guildId;
+
     if (interaction.commandName === "leaderboard") {
       await interaction.deferReply();
-      const view = await this.buildLeaderboardView({ ownerId: interaction.user.id, page: 1 });
+      const view = await this.buildLeaderboardView({ guildId, ownerId: interaction.user.id, page: 1 });
       if (view.totalEntries === 0) {
         await interaction.editReply({ content: "No groups yet." });
         return;
@@ -3357,6 +3504,7 @@ export class BotRuntime {
     if (interaction.commandName === "forbes") {
       await interaction.deferReply();
       const view = await this.buildForbesView({
+        guildId,
         ownerId: interaction.user.id,
         page: 1,
         guild: interaction.guild,
@@ -3380,16 +3528,17 @@ export class BotRuntime {
     switch (interaction.commandName) {
       case "balance": {
         const { group, participant } = await this.resolveActiveParticipant({
+          guildId,
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
           roleIds,
         });
         const [config, balance, walletBalance, groupLeaderboard, currencyLeaderboard] = await Promise.all([
-          this.services.configService.getOrCreate(this.env.GUILD_ID),
+          this.services.configService.getOrCreate(guildId),
           this.services.economyService.getGroupBalance(group.id),
           this.services.participantCurrencyService.getParticipantBalance(participant.id),
-          this.services.economyService.getLeaderboard(this.env.GUILD_ID),
-          this.services.participantService.getCurrencyLeaderboard(this.env.GUILD_ID),
+          this.services.economyService.getLeaderboard(guildId),
+          this.services.participantService.getCurrencyLeaderboard(guildId),
         ]);
 
         const groupRankIndex = groupLeaderboard.findIndex((entry) => entry.id === group.id);
@@ -3442,7 +3591,7 @@ export class BotRuntime {
         return;
       }
       case "ledger": {
-        const view = await this.buildLedgerView({ ownerId: interaction.user.id, page: 1 });
+        const view = await this.buildLedgerView({ guildId, ownerId: interaction.user.id, page: 1 });
         if (view.entryCount === 0) {
           await interaction.reply({ content: "No ledger entries yet." });
           return;
@@ -3453,14 +3602,16 @@ export class BotRuntime {
       case "transfer": {
         const targetUser = interaction.options.getUser("member", true);
         const amount = interaction.options.getNumber("amount", true);
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const config = await this.services.configService.getOrCreate(guildId);
         const sourceLabel = this.formatUserReference(interaction.user.id, member?.displayName ?? interaction.user.username);
         const { participant: sourceParticipant } = await this.resolveActiveParticipant({
+          guildId,
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
           roleIds,
         });
         const transferGuardOk = await this.enforceChannelGuard({
+          guildId,
           interaction,
           activity: "points",
           participantId: sourceParticipant.id,
@@ -3481,12 +3632,13 @@ export class BotRuntime {
           targetMember.displayName || targetUser.globalName || targetUser.username,
         );
         const { participant: targetParticipant } = await this.resolveActiveParticipant({
+          guildId,
           discordUserId: targetUser.id,
           discordUsername: targetUser.username,
           roleIds: this.getOrderedRoleIds(targetMember),
         });
         await this.services.participantCurrencyService.transferCurrency({
-          guildId: this.env.GUILD_ID,
+          guildId,
           actor,
           sourceParticipantId: sourceParticipant.id,
           targetParticipantId: targetParticipant.id,
@@ -3499,12 +3651,14 @@ export class BotRuntime {
       case "donate": {
         const amount = interaction.options.getNumber("amount", true);
         const { group, participant: sourceParticipant } = await this.resolveActiveParticipant({
+          guildId,
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
           roleIds,
         });
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const config = await this.services.configService.getOrCreate(guildId);
         const donateGuardOk = await this.enforceChannelGuard({
+          guildId,
           interaction,
           activity: "points",
           participantId: sourceParticipant.id,
@@ -3512,7 +3666,7 @@ export class BotRuntime {
         });
         if (!donateGuardOk) return;
         const donation = await this.services.economyService.donateParticipantCurrencyToGroupPoints({
-          guildId: this.env.GUILD_ID,
+          guildId,
           actor,
           participantId: sourceParticipant.id,
           groupId: group.id,
@@ -3529,8 +3683,9 @@ export class BotRuntime {
       }
       case "award":
       case "deduct": {
-        const awardConfig = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const awardConfig = await this.services.configService.getOrCreate(guildId);
         const awardGuardOk = await this.enforceChannelGuard({
+          guildId,
           interaction,
           activity: "points",
           participantId: null,
@@ -3541,6 +3696,7 @@ export class BotRuntime {
         const commandKey = `${interaction.commandName}:${subcommand}` as AwardLikeCommandKey;
         const commandConfig = getAwardCommandConfig(commandKey);
         const rollbackCooldown = await this.enforceAwardCommandCooldown({
+          guildId,
           member: member ?? null,
           roleIds,
           userId: interaction.user.id,
@@ -3566,7 +3722,7 @@ export class BotRuntime {
             interaction.options.getString("reason") ??
             (commandConfig.isDeduction ? "Manual deduction via Discord command" : "Manual award via Discord command");
           const sign = commandConfig.isDeduction ? -1 : 1;
-          const targetGroups = commandConfig.includesGroupTargets ? await this.resolveTargetGroups(targets ?? "") : [];
+          const targetGroups = commandConfig.includesGroupTargets ? await this.resolveTargetGroups(guildId, targets ?? "") : [];
 
           if (commandConfig.includesGroupTargets && targetGroups.length === 0) {
             throw new AppError("Choose at least one target group.", 400);
@@ -3597,6 +3753,7 @@ export class BotRuntime {
               currencyMemberLabel = memberRecord.displayName || targetMember.globalName || targetMember.username;
 
               ({ participant: currencyParticipant } = await this.resolveActiveParticipant({
+                guildId,
                 discordUserId: targetMember.id,
                 discordUsername: targetMember.username,
                 roleIds: this.getOrderedRoleIds(memberRecord),
@@ -3641,6 +3798,7 @@ export class BotRuntime {
                 const guildMember = member!;
                 const label = guildMember.displayName || guildMember.user.globalName || guildMember.user.username;
                 const { participant } = await this.resolveActiveParticipant({
+                  guildId,
                   discordUserId: guildMember.user.id,
                   discordUsername: guildMember.user.username,
                   roleIds: this.getOrderedRoleIds(guildMember),
@@ -3670,6 +3828,7 @@ export class BotRuntime {
             const syncedTargetGroups = await Promise.all(
               targetGroups.map((group) =>
                 this.syncGroupParticipantsFromGuild({
+                  guildId,
                   groupId: group.id,
                   roleId: group.roleId,
                   guild: interaction.guild,
@@ -3699,7 +3858,7 @@ export class BotRuntime {
             await this.services.prisma.$transaction(async (tx) => {
               if (commandConfig.includesGroupPoints) {
                 await this.services.economyService.awardGroups({
-                  guildId: this.env.GUILD_ID,
+                  guildId,
                   actor,
                   targetGroupIds: targetGroups.map((group) => group.id),
                   pointsDelta: points * sign,
@@ -3711,7 +3870,7 @@ export class BotRuntime {
 
               if (currencyParticipant && currency !== 0) {
                 await this.services.participantCurrencyService.awardParticipants({
-                  guildId: this.env.GUILD_ID,
+                  guildId,
                   actor,
                   targetParticipantIds: [currencyParticipant.id],
                   currencyDelta: currency * sign,
@@ -3722,7 +3881,7 @@ export class BotRuntime {
 
               if (bulkCurrencyParticipantIds.length > 0 && currency !== 0) {
                 await this.services.participantCurrencyService.awardParticipants({
-                  guildId: this.env.GUILD_ID,
+                  guildId,
                   actor,
                   targetParticipantIds: bulkCurrencyParticipantIds,
                   currencyDelta: currency * sign,
@@ -3734,7 +3893,7 @@ export class BotRuntime {
           } else if (currency !== 0) {
             if (currencyParticipant) {
               await this.services.participantCurrencyService.awardParticipants({
-                guildId: this.env.GUILD_ID,
+                guildId,
                 actor,
                 targetParticipantIds: [currencyParticipant.id],
                 currencyDelta: currency * sign,
@@ -3742,7 +3901,7 @@ export class BotRuntime {
               });
             } else if (listedCurrencyParticipantIds.length > 0) {
               await this.services.participantCurrencyService.awardParticipants({
-                guildId: this.env.GUILD_ID,
+                guildId,
                 actor,
                 targetParticipantIds: listedCurrencyParticipantIds,
                 currencyDelta: currency * sign,
@@ -3751,7 +3910,7 @@ export class BotRuntime {
             }
           }
 
-          const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+          const config = await this.services.configService.getOrCreate(guildId);
           const direction = commandConfig.isDeduction ? "from" : "to";
           const summaries = [
             commandConfig.includesGroupPoints && targetGroups.length > 0
@@ -3783,12 +3942,12 @@ export class BotRuntime {
         }
       }
       case "sell": {
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const config = await this.services.configService.getOrCreate(guildId);
         const title = interaction.options.getString("title", true);
         const description = interaction.options.getString("description", true);
         const quantity = interaction.options.getInteger("quantity");
         const listing = await this.services.listingService.create({
-          guildId: this.env.GUILD_ID,
+          guildId,
           actor,
           title,
           description,
@@ -3811,7 +3970,7 @@ export class BotRuntime {
       }
       case "store": {
         const audience: StoreAudience = interaction.options.getSubcommand() === "group" ? "group" : "personal";
-        const view = await this.buildStoreView({ ownerId: interaction.user.id, audience, page: 1 });
+        const view = await this.buildStoreView({ guildId, ownerId: interaction.user.id, audience, page: 1 });
         if (view.totalItems === 0) {
           await interaction.reply({
             content:
@@ -3832,6 +3991,7 @@ export class BotRuntime {
       case "inventory": {
         const audience: InventoryAudience = interaction.options.getSubcommand() === "group" ? "group" : "personal";
         const view = await this.buildInventoryView({
+          guildId,
           ownerId: interaction.user.id,
           audience,
           page: 1,
@@ -3850,16 +4010,18 @@ export class BotRuntime {
         if (subcommand !== "personal" && subcommand !== "group") {
           throw new AppError("Unknown /buy subcommand.", 400);
         }
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const config = await this.services.configService.getOrCreate(guildId);
         const itemId = interaction.options.getString("item_id", true);
         const quantity = interaction.options.getInteger("quantity") ?? 1;
         const purchaseMode = subcommand === "group" ? "GROUP" : "INDIVIDUAL";
         const { group, participant } = await this.resolveActiveParticipant({
+          guildId,
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
           roleIds,
         });
         const buyGuardOk = await this.enforceChannelGuard({
+          guildId,
           interaction,
           activity: "shop",
           participantId: participant.id,
@@ -3872,6 +4034,7 @@ export class BotRuntime {
         let groupMemberCount: number | undefined;
         if (purchaseMode === "GROUP") {
           const syncedGroupMembers = await this.syncGroupParticipantsFromGuild({
+            guildId,
             groupId: group.id,
             roleId: group.roleId,
             guild: interaction.guild,
@@ -3879,7 +4042,7 @@ export class BotRuntime {
           groupMemberCount = syncedGroupMembers.count;
         }
         const redemption = await this.services.shopService.redeem({
-          guildId: this.env.GUILD_ID,
+          guildId,
           participantId: participant.id,
           shopItemId: itemId,
           requestedByUserId: interaction.user.id,
@@ -3901,7 +4064,7 @@ export class BotRuntime {
             : null;
           if (posted) {
             await this.services.shopService.setApprovalMessage({
-              guildId: this.env.GUILD_ID,
+              guildId,
               redemptionId: redemption.id,
               channelId: posted.channelId,
               messageId: posted.messageId,
@@ -3929,7 +4092,7 @@ export class BotRuntime {
             });
             if (posted) {
               await this.services.shopService.setFulfilmentMessage({
-                guildId: this.env.GUILD_ID,
+                guildId,
                 redemptionId: redemption.id,
                 channelId: posted.channelId,
                 messageId: posted.messageId,
@@ -3957,21 +4120,23 @@ export class BotRuntime {
         return;
       }
       case "approve_purchase": {
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const config = await this.services.configService.getOrCreate(guildId);
         const purchaseId = interaction.options.getString("purchase_id", true);
         const { group, participant } = await this.resolveActiveParticipant({
+          guildId,
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
           roleIds,
         });
         const syncedGroupMembers = await this.syncGroupParticipantsFromGuild({
+          guildId,
           groupId: group.id,
           roleId: group.roleId,
           guild: interaction.guild,
         });
         const currentGroupMemberCount = syncedGroupMembers.count;
         const result = await this.services.shopService.approveGroupPurchase({
-          guildId: this.env.GUILD_ID,
+          guildId,
           redemptionId: purchaseId,
           participantId: participant.id,
           approvedByUserId: interaction.user.id,
@@ -3987,7 +4152,7 @@ export class BotRuntime {
             : "";
 
         const fullRedemption = result.justExecuted
-          ? await this.services.shopService.getRedemption(this.env.GUILD_ID, result.redemption.id)
+          ? await this.services.shopService.getRedemption(guildId, result.redemption.id)
           : null;
 
         if (fullRedemption && fullRedemption.status === "PENDING") {
@@ -4010,7 +4175,7 @@ export class BotRuntime {
             });
             if (posted) {
               await this.services.shopService.setFulfilmentMessage({
-                guildId: this.env.GUILD_ID,
+                guildId,
                 redemptionId: fullRedemption.id,
                 channelId: posted.channelId,
                 messageId: posted.messageId,
@@ -4037,7 +4202,7 @@ export class BotRuntime {
       }
       case "assignments": {
         await interaction.deferReply();
-        const view = await this.buildAssignmentsView({ ownerId: interaction.user.id, page: 1 });
+        const view = await this.buildAssignmentsView({ guildId, ownerId: interaction.user.id, page: 1 });
         if (view.totalEntries === 0) {
           await interaction.editReply({ content: "There are no active assignments right now." });
           return;
@@ -4049,6 +4214,7 @@ export class BotRuntime {
         await interaction.deferReply({ ephemeral: true });
 
         const { participant } = await this.resolveActiveParticipant({
+          guildId,
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
           roleIds,
@@ -4060,7 +4226,7 @@ export class BotRuntime {
         const text = this.buildSubmissionText(note, link);
         const attachment = interaction.options.getAttachment("media") ?? interaction.options.getAttachment("image");
 
-        const activeAssignments = await this.services.assignmentService.listActive(this.env.GUILD_ID);
+        const activeAssignments = await this.services.assignmentService.listActive(guildId);
         const assignmentLookup = this.resolveActiveAssignment(activeAssignments, assignmentIdentifier);
 
         if (assignmentLookup.kind === "missing") {
@@ -4099,7 +4265,7 @@ export class BotRuntime {
               const result = await this.storageService.upload({
                 buffer,
                 contentType: attachment.contentType ?? "image/png",
-                folder: `submissions/${this.env.GUILD_ID}`,
+                folder: `submissions/${guildId}`,
                 originalFilename: attachment.name ?? undefined,
               });
               imageUrl = result.url;
@@ -4115,7 +4281,7 @@ export class BotRuntime {
 
         const replacementPayload = {
           userId: interaction.user.id,
-          guildId: this.env.GUILD_ID,
+          guildId,
           assignmentId: assignment.id,
           participantId: participant.id,
           text,
@@ -4124,7 +4290,7 @@ export class BotRuntime {
           studentDisplay: participant.discordUsername ?? interaction.user.username,
         };
         const existing = await this.services.submissionService.findForParticipantAssignment({
-          guildId: this.env.GUILD_ID,
+          guildId,
           assignmentId: assignment.id,
           participantId: participant.id,
         });
@@ -4146,7 +4312,7 @@ export class BotRuntime {
         }
 
         const submission = await this.services.submissionService.create({
-          guildId: this.env.GUILD_ID,
+          guildId,
           assignmentId: assignment.id,
           participantId: participant.id,
           text,
@@ -4155,6 +4321,7 @@ export class BotRuntime {
         });
 
         await this.broadcastSubmissionToFeed({
+          guildId,
           submissionId: submission.id,
           studentUserId: interaction.user.id,
           studentDisplay: submission.participant?.discordUsername ?? interaction.user.username,
@@ -4174,10 +4341,10 @@ export class BotRuntime {
         return;
       }
       case "submissions": {
-        await this.assertCanManageSubmissions(member ?? null, roleIds);
+        await this.assertCanManageSubmissions(guildId, member ?? null, roleIds);
 
         const assignmentFilter = interaction.options.getString("assignment");
-        const activeAssignments = await this.services.assignmentService.listActive(this.env.GUILD_ID);
+        const activeAssignments = await this.services.assignmentService.listActive(guildId);
 
         let assignmentId: string | undefined;
         if (assignmentFilter) {
@@ -4194,7 +4361,7 @@ export class BotRuntime {
           }
         }
 
-        const submissions = await this.services.submissionService.list(this.env.GUILD_ID, { assignmentId });
+        const submissions = await this.services.submissionService.list(guildId, { assignmentId });
         const recent = submissions.slice(0, 15);
 
         if (recent.length === 0) {
@@ -4220,14 +4387,14 @@ export class BotRuntime {
         return;
       }
       case "review_submission": {
-        await this.assertCanManageSubmissions(member ?? null, roleIds);
+        await this.assertCanManageSubmissions(guildId, member ?? null, roleIds);
 
         const identifier = interaction.options.getString("submission_id", true);
         const status = interaction.options.getString("decision", true) as "APPROVED" | "OUTSTANDING" | "REJECTED";
         const note = interaction.options.getString("note") ?? undefined;
-        const target = await this.services.submissionService.resolveIdentifier(this.env.GUILD_ID, identifier);
+        const target = await this.services.submissionService.resolveIdentifier(guildId, identifier);
         const reviewed = await this.services.submissionService.review({
-          guildId: this.env.GUILD_ID,
+          guildId,
           submissionId: target.id,
           status,
           reviewNote: note,
@@ -4243,9 +4410,9 @@ export class BotRuntime {
         return;
       }
       case "missing": {
-        await this.assertCanManageSubmissions(member ?? null, roleIds);
+        await this.assertCanManageSubmissions(guildId, member ?? null, roleIds);
 
-        const summary = await this.services.submissionService.getCompletionSummary(this.env.GUILD_ID);
+        const summary = await this.services.submissionService.getCompletionSummary(guildId);
 
         if (summary.length === 0) {
           await interaction.reply({ content: "No active assignments.", ephemeral: true });
@@ -4274,9 +4441,10 @@ export class BotRuntime {
       }
       case "bet": {
         const amount = interaction.options.getNumber("amount", true);
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const config = await this.services.configService.getOrCreate(guildId);
 
         const rebuke = this.checkBettingCooldown(
+          guildId,
           interaction.user.id,
           config.bettingCooldownSeconds,
         );
@@ -4286,11 +4454,13 @@ export class BotRuntime {
         }
 
         const { participant } = await this.resolveActiveParticipant({
+          guildId,
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
           roleIds,
         });
         const betGuardOk = await this.enforceChannelGuard({
+          guildId,
           interaction,
           activity: "betting",
           participantId: participant.id,
@@ -4301,12 +4471,12 @@ export class BotRuntime {
           message: "🚫 You are sanctioned and cannot place bets right now.",
         });
         const result = await this.services.bettingService.placeBet({
-          guildId: this.env.GUILD_ID,
+          guildId,
           actor,
           participantId: participant.id,
           amount,
         });
-        this.recordBetPlaced(interaction.user.id, config.bettingCooldownSeconds);
+        this.recordBetPlaced(guildId, interaction.user.id, config.bettingCooldownSeconds);
 
         if (result.won) {
           await interaction.reply(
@@ -4320,13 +4490,15 @@ export class BotRuntime {
         return;
       }
       case "betstats": {
-        const config = await this.services.configService.getOrCreate(this.env.GUILD_ID);
+        const config = await this.services.configService.getOrCreate(guildId);
         const { participant: invokerParticipant } = await this.resolveActiveParticipant({
+          guildId,
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
           roleIds,
         }).catch(() => ({ participant: null as null | { id: string } }));
         const betstatsGuardOk = await this.enforceChannelGuard({
+          guildId,
           interaction,
           activity: "betting",
           participantId: invokerParticipant?.id ?? null,
@@ -4334,7 +4506,7 @@ export class BotRuntime {
         });
         if (!betstatsGuardOk) return;
         const targetUser = interaction.options.getUser("user") ?? interaction.user;
-        const stats = await this.services.bettingService.getStats(this.env.GUILD_ID, targetUser.id);
+        const stats = await this.services.bettingService.getStats(guildId, targetUser.id);
 
         if (stats.totalBets === 0) {
           await interaction.reply(
@@ -4360,12 +4532,13 @@ export class BotRuntime {
         return;
       }
       case "luckydraw": {
-        await this.handleLuckyDrawStart({ interaction, member: member ?? null, roleIds });
+        await this.handleLuckyDrawStart({ guildId, interaction, member: member ?? null, roleIds });
         return;
       }
       case "fulfil":
       case "cancel_redemption": {
         await this.handleRedemptionSlashAction({
+          guildId,
           interaction,
           action: interaction.commandName === "fulfil" ? "fulfil" : "cancel",
           guildMember: member ?? null,
@@ -4379,14 +4552,15 @@ export class BotRuntime {
   }
 
   private async handleRedemptionSlashAction(params: {
+    guildId: string;
     interaction: ChatInputCommandInteraction;
     action: "fulfil" | "cancel";
     guildMember: GuildMember | null;
     roleIds: string[];
   }) {
-    const { interaction, action } = params;
+    const { guildId, interaction, action } = params;
     const redemptionId = interaction.options.getString("redemption_id", true).trim();
-    const redemption = await this.services.shopService.getRedemption(this.env.GUILD_ID, redemptionId);
+    const redemption = await this.services.shopService.getRedemption(guildId, redemptionId);
     if (!redemption) {
       await interaction.reply({ content: "Redemption not found.", ephemeral: true });
       return;
@@ -4397,7 +4571,7 @@ export class BotRuntime {
     let guildMember = params.guildMember;
     let roleIds = params.roleIds;
     if (!guildMember && this.client) {
-      const guild = await this.client.guilds.fetch(this.env.GUILD_ID).catch(() => null);
+      const guild = await this.client.guilds.fetch(guildId).catch(() => null);
       const fetched = guild
         ? await guild.members.fetch(interaction.user.id).catch(() => null)
         : null;
@@ -4409,6 +4583,7 @@ export class BotRuntime {
 
     const memberPermissions = interaction.memberPermissions ?? guildMember?.permissions ?? null;
     const { isOwner, isStaff, isFulfiller } = await this.checkRedemptionActorPermissions({
+      guildId,
       redemption,
       actorUserId: interaction.user.id,
       memberPermissions,
@@ -4427,7 +4602,7 @@ export class BotRuntime {
 
     try {
       const { redemption: updated, changed } = await this.services.shopService.updateRedemptionStatus({
-        guildId: this.env.GUILD_ID,
+        guildId,
         redemptionId,
         status: nextStatus,
         actorUserId: interaction.user.id,
@@ -4577,13 +4752,8 @@ export class BotRuntime {
     return `${value.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
   }
 
-  private async registerCommands() {
-    if (!this.env.DISCORD_APPLICATION_ID || !this.env.DISCORD_BOT_TOKEN || !this.env.DISCORD_GUILD_ID) {
-      return;
-    }
-
-    const rest = new REST({ version: "10" }).setToken(this.env.DISCORD_BOT_TOKEN);
-    const commands = [
+  private buildSlashCommandPayload() {
+    return [
       new SlashCommandBuilder().setName("leaderboard").setDescription("Show the group leaderboard."),
       new SlashCommandBuilder().setName("forbes").setDescription("Show the individual wallet leaderboard."),
       new SlashCommandBuilder().setName("balance").setDescription("Show your group points and personal wallet."),
@@ -4800,8 +4970,43 @@ export class BotRuntime {
             .setRequired(false),
         ),
     ].map((command) => command.toJSON());
+  }
 
-    await rest.put(Routes.applicationGuildCommands(this.env.DISCORD_APPLICATION_ID, this.env.DISCORD_GUILD_ID), {
+  private async registerCommands() {
+    if (!this.env.DISCORD_APPLICATION_ID || !this.env.DISCORD_BOT_TOKEN) {
+      return;
+    }
+
+    const guildIds = new Set<string>();
+    if (this.env.DISCORD_GUILD_ID) {
+      guildIds.add(this.env.DISCORD_GUILD_ID);
+    }
+    if (this.client) {
+      for (const guildId of this.client.guilds.cache.keys()) {
+        guildIds.add(guildId);
+      }
+    }
+
+    if (guildIds.size === 0) {
+      return;
+    }
+
+    for (const guildId of guildIds) {
+      await this.registerCommandsForGuild(guildId).catch((error) => {
+        console.error("Failed to register slash commands for guild", { guildId, error });
+      });
+    }
+  }
+
+  private async registerCommandsForGuild(guildId: string) {
+    if (!this.env.DISCORD_APPLICATION_ID || !this.env.DISCORD_BOT_TOKEN) {
+      return;
+    }
+
+    const rest = new REST({ version: "10" }).setToken(this.env.DISCORD_BOT_TOKEN);
+    const commands = this.buildSlashCommandPayload();
+
+    await rest.put(Routes.applicationGuildCommands(this.env.DISCORD_APPLICATION_ID, guildId), {
       body: commands,
     });
   }

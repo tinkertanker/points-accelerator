@@ -105,10 +105,10 @@ export class LuckyDrawService {
     }
   }
 
-  public async listResumable(guildId: string) {
+  public async listResumable(guildId?: string) {
     return this.prisma.luckyDraw.findMany({
       where: {
-        guildId,
+        ...(guildId ? { guildId } : {}),
         OR: [
           { status: LuckyDrawStatus.ACTIVE },
           { status: LuckyDrawStatus.COMPLETED, paidOutAt: null },

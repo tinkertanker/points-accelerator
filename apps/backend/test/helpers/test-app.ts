@@ -24,7 +24,9 @@ export async function createTestApp(
 
   process.env.NODE_ENV = env.NODE_ENV;
   process.env.DATABASE_URL = databaseUrl;
-  process.env.GUILD_ID = env.GUILD_ID;
+  if (env.GUILD_ID) {
+    process.env.GUILD_ID = env.GUILD_ID;
+  }
   process.env.ADMIN_TOKEN = env.ADMIN_TOKEN ?? "";
 
   const prisma = createPrismaClient();

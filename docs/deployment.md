@@ -6,14 +6,24 @@ Set these in your `.env` file before deploying:
 
 - `DATABASE_URL`
 - `APP_PUBLIC_URL`
-- `GUILD_ID`
 - `DISCORD_BOT_TOKEN`
 - `DISCORD_APPLICATION_ID`
 - `DISCORD_CLIENT_SECRET`
-- `DISCORD_GUILD_ID`
 - `APP_DOMAIN`
 - `DISCORD_OAUTH_REDIRECT_URI` if your OAuth callback does not live at `${APP_PUBLIC_URL}/api/auth/discord/callback`
 - `POSTGRES_VOLUME_NAME` if you need to keep using a legacy Docker volume name during a rename cutover
+
+Optional / single-guild legacy:
+
+- `GUILD_ID` — when set, the bot seeds a GuildConfig row for this ID on boot. Safe to leave unset on multi-guild deployments.
+- `DISCORD_GUILD_ID` — when set, slash commands are also registered for this guild explicitly. Either way, the bot registers commands per-guild for every guild it is in.
+
+## Multi-guild operation
+
+- The bot supports any number of Discord guilds simultaneously. Each guild has its own `GuildConfig` row, economy, shop, assignments, and submissions; nothing is shared across guilds.
+- To add the bot to another server, use the standard Discord application install URL: `https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=0`.
+- When the bot joins a new guild, it auto-creates a `GuildConfig` row and registers slash commands for that guild. The new guild becomes selectable in the dashboard as soon as a member of that guild signs in.
+- Dashboard sign-in is a two-step flow: log in with Discord, then pick which guild to manage from the picker. The bot only shows guilds where (a) the bot is installed and (b) the signed-in user is a member.
 
 ## Local verification
 

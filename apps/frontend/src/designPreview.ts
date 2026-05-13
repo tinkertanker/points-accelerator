@@ -71,6 +71,7 @@ function createPreviewUser(accessLevel: DashboardAccessLevel): AuthSession["user
       canManageShop: true,
       canManageAssignments: true,
       canViewLeaderboard: true,
+      activeGuildId: "preview-guild",
     };
   }
 
@@ -91,6 +92,7 @@ function createPreviewUser(accessLevel: DashboardAccessLevel): AuthSession["user
       canManageShop: true,
       canManageAssignments: true,
       canViewLeaderboard: true,
+      activeGuildId: "preview-guild",
     };
   }
 
@@ -110,6 +112,7 @@ function createPreviewUser(accessLevel: DashboardAccessLevel): AuthSession["user
     canManageShop: false,
     canManageAssignments: false,
     canViewLeaderboard: true,
+    activeGuildId: "preview-guild",
   };
 }
 

@@ -6,6 +6,7 @@ import AssignmentsPanel from "./components/AssignmentsPanel";
 import FulfilmentPanel from "./components/FulfilmentPanel";
 import GroupsPanel from "./components/GroupsPanel";
 import GuidePanel from "./components/GuidePanel";
+import GuildPicker from "./components/GuildPicker";
 import OverviewPanel from "./components/OverviewPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import ShopPanel from "./components/ShopPanel";
@@ -21,6 +22,7 @@ import type {
   DashboardAccessLevel,
   Group,
   GroupDraft,
+  GuildSummary,
   ReactionRewardRuleDraft,
   ShopRedemption,
   RoleCapability,
@@ -225,6 +227,8 @@ function getPreviewAccessLabel(accessLevel?: DashboardAccessLevel): string {
 
 export default function App() {
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(null);
+  const [availableGuilds, setAvailableGuilds] = useState<GuildSummary[]>([]);
+  const [discordApplicationId, setDiscordApplicationId] = useState<string | null>(null);
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
   const [redemptions, setRedemptions] = useState<ShopRedemption[]>([]);
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(null);
@@ -333,6 +337,7 @@ export default function App() {
         if (!session.authenticated || !session.user) {
           if (!cancelled) {
             setSessionUser(null);
+            setAvailableGuilds([]);
             clearDashboardData();
           }
           return;
@@ -340,9 +345,16 @@ export default function App() {
 
         if (!cancelled) {
           setSessionUser(session.user);
-          if (!tabFromHash()) {
+          setAvailableGuilds(session.availableGuilds ?? []);
+          setDiscordApplicationId(session.discordApplicationId ?? null);
+          if (session.user.activeGuildId && !tabFromHash()) {
             setActiveTab(getDefaultTab(session.user.dashboardAccessLevel));
           }
+        }
+
+        if (!session.user.activeGuildId) {
+          // Show guild picker; do not fetch bootstrap until a guild is selected.
+          return;
         }
 
         const payload = await api.bootstrap();
@@ -522,7 +534,7 @@ export default function App() {
         return (
           <ActivityPanel
             bootstrap={bootstrap}
-            canViewLedger={sessionUser.canManageSettings}
+            canViewLedger={!!sessionUser.canManageSettings}
           />
         );
       case "admin":
@@ -540,8 +552,69 @@ export default function App() {
   const handleLogout = async () => {
     await api.logout().catch(() => undefined);
     setSessionUser(null);
+    setAvailableGuilds([]);
     clearDashboardData();
     setStatus("Signed out.");
+  };
+
+  const handleSelectGuild = async (guildId: string) => {
+    setIsMutating(true);
+    try {
+      await api.selectGuild(guildId);
+      const session = await api.session();
+      if (session.authenticated && session.user) {
+        setSessionUser(session.user);
+        setAvailableGuilds(session.availableGuilds ?? []);
+        setDiscordApplicationId(session.discordApplicationId ?? null);
+        if (!tabFromHash()) {
+          setActiveTab(getDefaultTab(session.user.dashboardAccessLevel));
+        }
+      }
+      const payload = await api.bootstrap();
+      hydrateDashboard(payload);
+      setStatus("Server selected.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to select that server.");
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
+  const handleSwitchGuild = async () => {
+    setIsMutating(true);
+    try {
+      await api.leaveGuild();
+      clearDashboardData();
+      const session = await api.session();
+      if (session.authenticated && session.user) {
+        setSessionUser(session.user);
+        setAvailableGuilds(session.availableGuilds ?? []);
+        setDiscordApplicationId(session.discordApplicationId ?? null);
+      } else {
+        setSessionUser(null);
+        setAvailableGuilds([]);
+        setDiscordApplicationId(null);
+      }
+      setStatus("Pick a different server.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to switch servers.");
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
+  const handleAddAnotherGuild = () => {
+    if (!discordApplicationId) {
+      setStatus("Discord install URL isn't configured on the server.");
+      return;
+    }
+    const installUrl = new URL("https://discord.com/oauth2/authorize");
+    installUrl.search = new URLSearchParams({
+      client_id: discordApplicationId,
+      scope: "bot applications.commands",
+      permissions: "0",
+    }).toString();
+    window.open(installUrl.toString(), "_blank", "noopener");
   };
 
   const handleSaveSettings = async () => {
@@ -653,7 +726,9 @@ export default function App() {
   const activePanel = renderActivePanel();
 
   const showLoadingScreen = isInitialising && !bootstrap;
-  const showLoginScreen = !showLoadingScreen && !bootstrap;
+  const showGuildPicker =
+    !showLoadingScreen && !bootstrap && !!sessionUser && !sessionUser.activeGuildId;
+  const showLoginScreen = !showLoadingScreen && !showGuildPicker && !bootstrap;
   const showDashboard = !showLoadingScreen && !!bootstrap;
   const isDashboardBusy = isInitialising || isMutating;
   const appName = settingsDraft?.appName.trim() || bootstrap?.settings.appName || "points accelerator";
@@ -672,6 +747,14 @@ export default function App() {
             <p className="app-loading__copy">Checking your Discord session and syncing the latest dashboard data.</p>
           </div>
         </section>
+      ) : showGuildPicker ? (
+        <GuildPicker
+          guilds={availableGuilds}
+          isBusy={isMutating}
+          onSelect={(guildId) => void handleSelectGuild(guildId)}
+          onAddAnother={discordApplicationId ? handleAddAnotherGuild : undefined}
+          onLogout={() => void handleLogout()}
+        />
       ) : showLoginScreen ? (
         <section className="login-page">
           <header className="login-hero">
@@ -741,6 +824,11 @@ export default function App() {
               <button onClick={() => void loadBootstrap().catch(() => undefined)} disabled={isDashboardBusy}>
                 Refresh
               </button>
+              {isDesignPreview() ? null : availableGuilds.length > 1 ? (
+                <button onClick={() => void handleSwitchGuild()} disabled={isDashboardBusy}>
+                  Switch server
+                </button>
+              ) : null}
               {isDesignPreview() ? null : (
                 <button onClick={() => void handleLogout()} disabled={isDashboardBusy}>
                   Sign Out
