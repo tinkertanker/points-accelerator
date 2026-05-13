@@ -34,7 +34,9 @@ const authenticatedSession = {
     canManageShop: true,
     canManageAssignments: true,
     canViewLeaderboard: true,
+    activeGuildId: "guild-test",
   },
+  availableGuilds: [{ guildId: "guild-test", name: "Test Guild", iconUrl: null }],
 };
 
 const mentorSession = {
@@ -55,7 +57,9 @@ const mentorSession = {
     canManageShop: true,
     canManageAssignments: true,
     canViewLeaderboard: true,
+    activeGuildId: "guild-test",
   },
+  availableGuilds: [{ guildId: "guild-test", name: "Test Guild", iconUrl: null }],
 };
 
 const viewerSession = {
@@ -76,7 +80,9 @@ const viewerSession = {
     canManageShop: false,
     canManageAssignments: false,
     canViewLeaderboard: true,
+    activeGuildId: "guild-test",
   },
+  availableGuilds: [{ guildId: "guild-test", name: "Test Guild", iconUrl: null }],
 };
 
 const bootstrapPayload = {

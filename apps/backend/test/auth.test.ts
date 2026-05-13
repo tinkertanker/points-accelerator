@@ -22,23 +22,31 @@ const defaultDashboardMember = {
 let currentDashboardMember = { ...defaultDashboardMember };
 
 const botRuntime: BotRuntimeApi = {
+  listBotGuilds: vi.fn().mockResolvedValue([{ id: "guild-test", name: "Test Guild", iconUrl: null }]),
   getRoles: vi.fn().mockResolvedValue([]),
   getTextChannels: vi.fn().mockResolvedValue([]),
   getMembers: vi.fn().mockResolvedValue([]),
-  getDashboardMember: vi.fn(async (userId: string) => (userId === currentDashboardMember.userId ? currentDashboardMember : null)),
+  getDashboardMember: vi.fn(async (_guildId: string, userId: string) =>
+    userId === currentDashboardMember.userId ? currentDashboardMember : null,
+  ),
   getGroupMemberCount: vi.fn().mockResolvedValue(null),
   getGroupMemberDiscordUserIds: vi.fn().mockResolvedValue(null),
   postListing: vi.fn().mockResolvedValue(null),
   clearRedemptionButtons: vi.fn().mockResolvedValue(undefined),
 };
 
+const TEST_GUILD_ID = "guild-test";
+
 const discordOAuthClient: DiscordOAuthClient = {
   buildAuthorizeUrl: vi.fn(({ state, redirectUri }) => `https://discord.com/oauth2/authorize?state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}`),
   exchangeCode: vi.fn(async () => ({
-    id: currentDashboardMember.userId,
-    username: currentDashboardMember.username,
-    globalName: currentDashboardMember.displayName,
-    avatarUrl: currentDashboardMember.avatarUrl,
+    identity: {
+      id: currentDashboardMember.userId,
+      username: currentDashboardMember.username,
+      globalName: currentDashboardMember.displayName,
+      avatarUrl: currentDashboardMember.avatarUrl,
+    },
+    guilds: [{ id: TEST_GUILD_ID, name: "Test Guild", iconUrl: null }],
   })),
 };
 
@@ -448,10 +456,13 @@ describe("Discord dashboard auth", () => {
     expect(sessionCookie).toMatch(/^dashboard_session=/);
 
     vi.mocked(discordOAuthClient.exchangeCode).mockResolvedValueOnce({
-      id: "discord-user-2",
-      username: "outsider",
-      globalName: "Outsider",
-      avatarUrl: null,
+      identity: {
+        id: "discord-user-2",
+        username: "outsider",
+        globalName: "Outsider",
+        avatarUrl: null,
+      },
+      guilds: [{ id: TEST_GUILD_ID, name: "Test Guild", iconUrl: null }],
     });
     vi.mocked(botRuntime.getDashboardMember).mockImplementationOnce(async () => null);
 
@@ -493,10 +504,13 @@ describe("Discord dashboard auth", () => {
     expect(sessionCookie).toMatch(/^dashboard_session=/);
 
     vi.mocked(discordOAuthClient.exchangeCode).mockResolvedValueOnce({
-      id: "discord-user-2",
-      username: "outsider",
-      globalName: "Outsider",
-      avatarUrl: null,
+      identity: {
+        id: "discord-user-2",
+        username: "outsider",
+        globalName: "Outsider",
+        avatarUrl: null,
+      },
+      guilds: [{ id: TEST_GUILD_ID, name: "Test Guild", iconUrl: null }],
     });
     vi.mocked(botRuntime.getDashboardMember).mockImplementationOnce(async () => {
       throw new Error("discord outage");

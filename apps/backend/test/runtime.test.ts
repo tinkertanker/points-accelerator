@@ -223,6 +223,7 @@ describe("bot runtime", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "store",
       guild: {
         members: {
@@ -274,6 +275,7 @@ describe("bot runtime", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "store",
       guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
       options: { getSubcommand: () => "group" },
@@ -310,6 +312,7 @@ describe("bot runtime", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "ledger",
       guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
       options: {},
@@ -361,6 +364,7 @@ describe("bot runtime", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handlePaginationButton({
+      guildId: "guild-test",
       customId: "v1:page:ledger:-:user-1:2",
       message: { flags: { has: () => false } },
       user: { id: "user-1", username: "Alice" },
@@ -390,6 +394,7 @@ describe("bot runtime", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handlePaginationButton({
+      guildId: "guild-test",
       customId: "v1:page:ledger:-:owner-1:2",
       message: { flags: { has: () => false } },
       user: { id: "stranger-1", username: "Stranger" },
@@ -418,6 +423,7 @@ describe("bot runtime", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handlePaginationButton({
+      guildId: "guild-test",
       customId: "v1:page:inventory:personal:owner-1:1",
       message: { flags: { has: (flag: number) => flag === 64 } },
       user: { id: "owner-1", username: "Owner" },
@@ -444,6 +450,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handlePaginationButton({
+      guildId: "guild-test",
       customId: "v1:page:ledger:-:user-1:1",
       message: { flags: { has: () => false } },
       user: { id: "user-1", username: "Alice" },
@@ -480,6 +487,7 @@ describe("bot runtime", () => {
     const editReply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handlePaginationButton({
+      guildId: "guild-test",
       customId: "v1:page:ledger:-:user-1:5",
       message: { flags: { has: () => false } },
       user: { id: "user-1", username: "Alice" },
@@ -524,6 +532,7 @@ describe("bot runtime", () => {
     }));
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "inventory",
       guild: { members: { fetch: fetchMember } },
       options: { getSubcommand: () => "group" },
@@ -572,6 +581,7 @@ describe("bot runtime", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "ledger",
       guild: {
         members: {
@@ -626,6 +636,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "award",
       guild: {
         members: {
@@ -691,6 +702,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "transfer",
       guild: {
         members: {
@@ -724,6 +736,7 @@ describe("bot runtime", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "donate",
       guild: {
         members: {
@@ -820,6 +833,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "award",
       guild: {
         members: {
@@ -910,6 +924,7 @@ describe("bot runtime", () => {
       });
 
       await (runtime as any).handleCommand({
+        guildId: "guild-test",
         commandName: "award",
         guild: { members: { fetch: fetchMember } },
         options: {
@@ -959,6 +974,7 @@ describe("bot runtime", () => {
 
       await expect(
         (runtime as any).handleCommand({
+          guildId: "guild-test",
           commandName: "award",
           guild: { members: { fetch: fetchMember } },
           options: {
@@ -988,6 +1004,7 @@ describe("bot runtime", () => {
 
       await expect(
         (runtime as any).handleCommand({
+          guildId: "guild-test",
           commandName: "award",
           guild: { members: { fetch: fetchMember } },
           options: {
@@ -1024,6 +1041,7 @@ describe("bot runtime", () => {
 
       await expect(
         (runtime as any).handleCommand({
+          guildId: "guild-test",
           commandName: "award",
           guild: { members: { fetch: fetchMember } },
           options: {
@@ -1064,6 +1082,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "award",
       guild: {
         members: {
@@ -1135,6 +1154,7 @@ describe("bot runtime", () => {
     });
 
     const awardInteraction = {
+      guildId: "guild-test",
       commandName: "award",
       guild: { members: { fetch: fetchMember } },
       options: {
@@ -1162,6 +1182,7 @@ describe("bot runtime", () => {
 
     await expect(
       (runtime as any).handleCommand({
+        guildId: "guild-test",
         commandName: "award",
         guild: { members: { fetch: fetchMember } },
         options: {
@@ -1227,6 +1248,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "award",
       guild: { members: { fetch: fetchMember } },
       options: {
@@ -1251,6 +1273,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "sell",
       guild: { members: { fetch: fetchMember } },
       options: {
@@ -1300,6 +1323,7 @@ describe("bot runtime", () => {
     });
 
     const awardInteraction = {
+      guildId: "guild-test",
       commandName: "award",
       guild: { members: { fetch: fetchMember } },
       options: {
@@ -1334,6 +1358,7 @@ describe("bot runtime", () => {
 
     await expect(
       (runtime as any).handleCommand({
+        guildId: "guild-test",
         commandName: "submissions",
         guild: {
           members: {
@@ -1431,6 +1456,7 @@ describe("bot runtime", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "review_submission",
       guild: {
         members: {
@@ -1557,6 +1583,7 @@ describe("bot runtime", () => {
     const editReply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "submit",
       guild: {
         members: {
@@ -1615,6 +1642,7 @@ describe("bot runtime", () => {
     const editReply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "submit",
       guild: {
         members: {
@@ -1690,6 +1718,7 @@ describe("bot runtime", () => {
     const editReply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "submit",
       guild: {
         members: {
@@ -1745,6 +1774,7 @@ describe("bot runtime", () => {
     const longIdentifier = `Missing Brief ${"with a very long copied message ".repeat(180)}`;
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "submit",
       guild: {
         members: {
@@ -1809,6 +1839,7 @@ describe("bot runtime", () => {
     const channelSend = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "submit",
       channel: {
         isTextBased: () => true,
@@ -1992,6 +2023,7 @@ describe("bot runtime", () => {
     const editReply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "assignments",
       guild: {
         members: {
@@ -2203,6 +2235,7 @@ describe("bot runtime", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "balance",
       guild: {
         members: {
@@ -2270,6 +2303,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "leaderboard",
       guild: {
         members: {
@@ -2396,6 +2430,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "forbes",
       guild: {
         members: {
@@ -2468,6 +2503,7 @@ describe("bot runtime", () => {
     }));
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "forbes",
       guild: {
         members: {
@@ -2512,6 +2548,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "buy",
       channelId: "channel-current",
       guild: {
@@ -2707,6 +2744,7 @@ describe("bot runtime", () => {
     });
 
     await (runtime as any).handleCommand({
+      guildId: "guild-test",
       commandName: "approve_purchase",
       guild: {
         members: {
@@ -2763,6 +2801,7 @@ describe("bot runtime", () => {
       });
 
       await (runtime as any).handleCommand({
+        guildId: "guild-test",
         commandName: "luckydraw",
         guild: { members: { fetch: fetchMember } },
         channel: { isTextBased: () => true, send },
@@ -2810,6 +2849,7 @@ describe("bot runtime", () => {
 
       await expect(
         (runtime as any).handleCommand({
+          guildId: "guild-test",
           commandName: "luckydraw",
           guild: { members: { fetch: fetchMember } },
           channel: { isTextBased: () => true, send: vi.fn() },
@@ -2838,6 +2878,7 @@ describe("bot runtime", () => {
 
       await expect(
         (runtime as any).handleCommand({
+          guildId: "guild-test",
           commandName: "luckydraw",
           guild: { members: { fetch: fetchMember } },
           channel: { isTextBased: () => true, send: vi.fn() },
@@ -2870,6 +2911,7 @@ describe("bot runtime", () => {
 
       await expect(
         (runtime as any).handleCommand({
+          guildId: "guild-test",
           commandName: "luckydraw",
           guild: { members: { fetch: fetchMember } },
           channel: { isTextBased: () => true, send: vi.fn() },

@@ -8,12 +8,13 @@ let cleanupDatabase = () => undefined;
 let ctx: Awaited<ReturnType<typeof createTestApp>>;
 const groupMemberCounts = new Map<string, number>();
 const botRuntime: BotRuntimeApi = {
+  listBotGuilds: vi.fn().mockResolvedValue([{ id: "guild-test", name: "Test Guild", iconUrl: null }]),
   getRoles: vi.fn().mockResolvedValue([]),
   getTextChannels: vi.fn().mockResolvedValue([]),
   getMembers: vi.fn().mockResolvedValue([]),
   getDashboardMember: vi.fn().mockResolvedValue(null),
-  getGroupMemberCount: vi.fn(async (roleId: string) => groupMemberCounts.get(roleId) ?? null),
-  getGroupMemberDiscordUserIds: vi.fn(async (roleId: string) => {
+  getGroupMemberCount: vi.fn(async (_guildId: string, roleId: string) => groupMemberCounts.get(roleId) ?? null),
+  getGroupMemberDiscordUserIds: vi.fn(async (_guildId: string, roleId: string) => {
     const count = groupMemberCounts.get(roleId);
     return count ? Array.from({ length: count }, (_, index) => `${roleId}-member-${index + 1}`) : null;
   }),
