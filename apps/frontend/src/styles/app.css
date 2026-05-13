@@ -592,6 +592,80 @@ button.tab-bar__tab:focus-visible {
   background-clip: text;
 }
 
+.guild-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.guild-picker-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
+}
+
+.guild-picker-row:hover {
+  border-color: var(--accent, #fb753a);
+  box-shadow: 0 4px 18px rgba(251, 117, 58, 0.1);
+}
+
+.guild-picker-row:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.guild-picker-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-elevated);
+  display: inline-grid;
+  place-items: center;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.guild-picker-icon--placeholder {
+  border: 1px dashed var(--border);
+}
+
+.guild-picker-name {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.guild-picker-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.guild-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.guild-picker-actions button.secondary {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
 .app-loading__panel h1 {
   margin: 0;
   font-size: clamp(1.4rem, 2.4vw, 2rem);
