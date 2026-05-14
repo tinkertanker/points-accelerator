@@ -59,13 +59,12 @@ export function resolveApiUrl(baseUrl: string, path: string): string {
 }
 
 async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  const hasBody = options.body !== undefined;
   const response = await fetch(resolveApiUrl(API_BASE_URL, path), {
     method: options.method ?? "GET",
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    headers: hasBody ? { "Content-Type": "application/json" } : {},
+    body: hasBody ? JSON.stringify(options.body) : undefined,
   });
 
   if (!response.ok) {
