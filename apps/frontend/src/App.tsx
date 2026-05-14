@@ -584,8 +584,8 @@ export default function App() {
     setIsMutating(true);
     try {
       await api.leaveGuild();
-      clearDashboardData();
       const session = await api.session();
+      clearDashboardData();
       if (session.authenticated && session.user) {
         setSessionUser(session.user);
         setAvailableGuilds(session.availableGuilds ?? []);
