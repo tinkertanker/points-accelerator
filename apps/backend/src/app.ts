@@ -729,6 +729,17 @@ export function createApp(params: {
       return;
     }
 
+    // Fastify's own errors (bad content-type, malformed body, etc.) carry an
+    // accurate 4xx statusCode. Preserve it instead of masking every one as a 500.
+    const statusCode = typeof (error as { statusCode?: unknown }).statusCode === "number"
+      ? (error as { statusCode: number }).statusCode
+      : 500;
+    if (statusCode >= 400 && statusCode < 500) {
+      const message = error instanceof Error ? error.message : "Bad request";
+      reply.status(statusCode).send({ message });
+      return;
+    }
+
     request.log?.error?.(error);
     reply.status(500).send({ message: "Internal server error" });
   });

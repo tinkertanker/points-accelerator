@@ -657,5 +657,20 @@ describe("Discord dashboard auth", () => {
       expect(payload.user?.activeGuildId).toBe(TEST_GUILD_ID);
       expect(payload.availableGuilds?.map((guild) => guild.guildId)).toContain(TEST_GUILD_ID);
     });
+
+    it("reports an empty JSON body as a 4xx rather than masking it as a 500", async () => {
+      const sessionCookie = await startDashboardSession();
+
+      // Reproduces a browser sending Content-Type: application/json with no body.
+      // Fastify's JSON parser rejects this with a 400; the error handler must not
+      // re-label it as an opaque 500.
+      const response = await ctx.app.inject({
+        method: "POST",
+        url: "/api/guilds/leave",
+        headers: { cookie: sessionCookie ?? "", "content-type": "application/json" },
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
   });
 });
