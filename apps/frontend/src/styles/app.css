@@ -532,7 +532,9 @@ button.tab-bar__tab:focus-visible {
   box-shadow: 0 4px 24px rgba(251, 117, 58, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
-.login-card button {
+/* Direct-child only: the primary CTA (e.g. "Sign In with Discord").
+   Nested buttons (guild picker rows, picker actions) keep their own styles. */
+.login-card > button {
   background: var(--gradient);
   border-color: transparent;
   color: #fff;
@@ -544,7 +546,7 @@ button.tab-bar__tab:focus-visible {
   transition: all 0.2s ease;
 }
 
-.login-card button:hover {
+.login-card > button:hover {
   filter: brightness(1.08);
   box-shadow: 0 4px 16px rgba(251, 117, 58, 0.35);
   border-color: transparent;
@@ -603,7 +605,7 @@ button.tab-bar__tab:focus-visible {
 
 .guild-picker-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   align-items: center;
   gap: 0.85rem;
   padding: 0.75rem 1rem;
@@ -614,6 +616,13 @@ button.tab-bar__tab:focus-visible {
   width: 100%;
   cursor: pointer;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
+}
+
+.guild-picker-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
 }
 
 .guild-picker-row:hover {
@@ -649,8 +658,9 @@ button.tab-bar__tab:focus-visible {
 
 .guild-picker-id {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.72rem;
-  color: var(--text-muted);
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
 }
 
 .guild-picker-actions {

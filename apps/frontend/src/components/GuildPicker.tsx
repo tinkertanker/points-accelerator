@@ -43,8 +43,10 @@ export default function GuildPicker({ guilds, isBusy, onSelect, onAddAnother, on
                       {guild.name.slice(0, 1).toUpperCase()}
                     </span>
                   )}
-                  <span className="guild-picker-name">{guild.name}</span>
-                  <span className="guild-picker-id">{guild.guildId}</span>
+                  <span className="guild-picker-text">
+                    <span className="guild-picker-name">{guild.name}</span>
+                    <span className="guild-picker-id">{guild.guildId}</span>
+                  </span>
                 </button>
               </li>
             ))}
