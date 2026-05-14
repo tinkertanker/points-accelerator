@@ -615,7 +615,8 @@ button.tab-bar__tab:focus-visible {
   text-align: left;
   width: 100%;
   cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease,
+    transform 0.05s ease;
 }
 
 .guild-picker-text {
@@ -625,9 +626,11 @@ button.tab-bar__tab:focus-visible {
   min-width: 0;
 }
 
-.guild-picker-row:hover {
-  border-color: var(--accent, #fb753a);
-  box-shadow: 0 4px 18px rgba(251, 117, 58, 0.1);
+.guild-picker-row:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--gradient-medium);
+  box-shadow: 0 8px 24px -8px rgba(251, 117, 58, 0.45);
+  transform: translateY(-1px);
 }
 
 .guild-picker-row:disabled {
