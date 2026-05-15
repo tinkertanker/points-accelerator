@@ -17,6 +17,7 @@ export default function OverviewPanel({ bootstrap, activeGuildId, onOpenGuide, o
         <SetupWizardCard
           guildId={activeGuildId!}
           presets={bootstrap.setup.presets}
+          discordRoles={bootstrap.discord.roles}
           onApplied={onSetupApplied}
         />
       )}

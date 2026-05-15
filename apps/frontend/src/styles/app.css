@@ -2268,6 +2268,33 @@ button.reset-mode-card[aria-checked="true"] {
   cursor: default;
 }
 
+.setup-wizard__staff-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 0.5rem;
+}
+
+.setup-wizard__staff-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.setup-wizard__staff-row > div {
+  flex: 1 1 14rem;
+}
+
+.setup-wizard__staff-row > div p.section-help {
+  margin: 0.15rem 0 0;
+}
+
+.setup-wizard__staff-row select {
+  min-width: 12rem;
+}
+
 .submission-filters {
   display: flex;
   flex-wrap: wrap;

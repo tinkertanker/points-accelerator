@@ -165,13 +165,13 @@ export const api = {
       },
     });
   },
-  applySetupPreset(key: "classroom" | "community") {
+  applySetupPreset(key: "classroom" | "community", staffRoles?: Record<string, string>) {
     if (isDesignPreview()) {
       return Promise.resolve({ settings: null });
     }
     return request<{ settings: unknown }>("/api/setup/apply-preset", {
       method: "POST",
-      body: { key },
+      body: { key, ...(staffRoles ? { staffRoles } : {}) },
     });
   },
   fetchGroupSuggestions() {

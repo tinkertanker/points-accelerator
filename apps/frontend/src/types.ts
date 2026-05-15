@@ -245,10 +245,18 @@ export type GuildListResponse = {
 
 export type SetupPresetKey = "classroom" | "community";
 
+export type SetupStaffTier = {
+  key: string;
+  label: string;
+  description: string;
+  grantsMentorDashboard: boolean;
+};
+
 export type SetupPresetSummary = {
   key: SetupPresetKey;
   label: string;
   description: string;
+  staffTiers: SetupStaffTier[];
 };
 
 export type SetupState = {

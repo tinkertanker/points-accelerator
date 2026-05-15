@@ -1,22 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { api } from "../services/api";
-import type { GroupSuggestionResponse, SetupPresetKey, SetupPresetSummary } from "../types";
+import type {
+  DiscordOption,
+  GroupSuggestionResponse,
+  SetupPresetKey,
+  SetupPresetSummary,
+} from "../types";
 
 const dismissKey = (guildId: string) => `pa.setup.skipped.${guildId}`;
 
 type SetupWizardCardProps = {
   guildId: string;
   presets: SetupPresetSummary[];
+  discordRoles: DiscordOption[];
   onApplied: () => Promise<void>;
 };
 
-export default function SetupWizardCard({ guildId, presets, onApplied }: SetupWizardCardProps) {
+export default function SetupWizardCard({ guildId, presets, discordRoles, onApplied }: SetupWizardCardProps) {
   const [isDismissed, setIsDismissed] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(dismissKey(guildId)) === "1";
   });
   const [selectedPreset, setSelectedPreset] = useState<SetupPresetKey | null>(null);
+  const [staffRoleAssignments, setStaffRoleAssignments] = useState<Record<string, string>>({});
   const [suggestions, setSuggestions] = useState<GroupSuggestionResponse | null>(null);
   const [applyGroups, setApplyGroups] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
@@ -43,12 +50,48 @@ export default function SetupWizardCard({ guildId, presets, onApplied }: SetupWi
     };
   }, [isDismissed]);
 
+  const activePreset = useMemo(
+    () => presets.find((preset) => preset.key === selectedPreset) ?? null,
+    [presets, selectedPreset],
+  );
+
+  // When the admin picks a preset for the first time, try to pre-fill staff
+  // role dropdowns by matching role names against tier labels.
+  useEffect(() => {
+    if (!activePreset) {
+      setStaffRoleAssignments({});
+      return;
+    }
+    setStaffRoleAssignments((current) => {
+      const next: Record<string, string> = { ...current };
+      for (const tier of activePreset.staffTiers) {
+        if (next[tier.key]) continue;
+        const match = discordRoles.find((role) => role.name.toLowerCase() === tier.label.toLowerCase());
+        if (match) {
+          next[tier.key] = match.id;
+        }
+      }
+      return next;
+    });
+  }, [activePreset, discordRoles]);
+
   if (isDismissed) {
     return null;
   }
 
   const primary = suggestions?.primary ?? null;
-  const canApply = selectedPreset !== null || (applyGroups && primary !== null);
+  const hasDuplicateAssignment = (() => {
+    const seen = new Set<string>();
+    for (const value of Object.values(staffRoleAssignments)) {
+      if (!value) continue;
+      if (seen.has(value)) return true;
+      seen.add(value);
+    }
+    return false;
+  })();
+  const canApply =
+    !hasDuplicateAssignment &&
+    (selectedPreset !== null || (applyGroups && primary !== null));
 
   const handleSkip = () => {
     window.localStorage.setItem(dismissKey(guildId), "1");
@@ -61,7 +104,10 @@ export default function SetupWizardCard({ guildId, presets, onApplied }: SetupWi
     setError(null);
     try {
       if (selectedPreset) {
-        await api.applySetupPreset(selectedPreset);
+        const staff = Object.fromEntries(
+          Object.entries(staffRoleAssignments).filter(([, value]) => value.length > 0),
+        );
+        await api.applySetupPreset(selectedPreset, Object.keys(staff).length > 0 ? staff : undefined);
       }
       if (applyGroups && primary) {
         await api.applyGroupSuggestion(primary.roleIds);
@@ -82,8 +128,8 @@ export default function SetupWizardCard({ guildId, presets, onApplied }: SetupWi
         <div>
           <h2>Quick start</h2>
           <p className="section-help">
-            This guild looks fresh. Pick a starter preset and optionally apply the detected student groups — both are
-            optional and you can change anything later from Settings.
+            This guild looks fresh. Pick a starter preset, map your staff roles, and optionally apply the detected
+            student groups — every section is optional and you can change anything later from Settings.
           </p>
         </div>
       </header>
@@ -121,6 +167,44 @@ export default function SetupWizardCard({ guildId, presets, onApplied }: SetupWi
           </label>
         </div>
       </fieldset>
+
+      {activePreset && activePreset.staffTiers.length > 0 && (
+        <fieldset className="setup-wizard__fieldset">
+          <legend className="setup-wizard__legend">Staff roles</legend>
+          <p className="section-help">
+            Map each tier to one of your Discord roles. Leave any tier on "(skip)" if the role doesn't exist yet — you
+            can always wire it up later in Settings.
+          </p>
+          <div className="setup-wizard__staff-grid">
+            {activePreset.staffTiers.map((tier) => (
+              <label key={tier.key} className="setup-wizard__staff-row">
+                <div>
+                  <strong>{tier.label}</strong>
+                  <p className="section-help">{tier.description}</p>
+                </div>
+                <select
+                  value={staffRoleAssignments[tier.key] ?? ""}
+                  onChange={(event) =>
+                    setStaffRoleAssignments((current) => ({ ...current, [tier.key]: event.target.value }))
+                  }
+                >
+                  <option value="">(skip)</option>
+                  {discordRoles.map((role) => (
+                    <option key={role.id} value={role.id}>
+                      {role.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+          {hasDuplicateAssignment && (
+            <p className="section-help section-help--warning">
+              Each Discord role can only be mapped to one staff tier — pick distinct roles.
+            </p>
+          )}
+        </fieldset>
+      )}
 
       <fieldset className="setup-wizard__fieldset">
         <legend className="setup-wizard__legend">Detected student groups</legend>
