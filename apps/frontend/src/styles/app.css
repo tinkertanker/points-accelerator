@@ -2222,8 +2222,7 @@ button.reset-mode-card[aria-checked="true"] {
 }
 
 .setup-wizard__options {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 0.6rem;
 }
 
@@ -2232,10 +2231,28 @@ button.reset-mode-card[aria-checked="true"] {
   gap: 0.65rem;
   align-items: flex-start;
   cursor: pointer;
+  color: var(--text);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.45;
+  text-transform: none;
 }
 
-.setup-wizard__option input {
+.setup-wizard__option input[type="checkbox"],
+.setup-wizard__option input[type="radio"] {
+  flex: 0 0 auto;
   margin-top: 0.25rem;
+  width: auto;
+}
+
+.setup-wizard__option > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.setup-wizard__option strong {
+  display: block;
 }
 
 .setup-wizard__option p.section-help {
@@ -2281,6 +2298,11 @@ button.reset-mode-card[aria-checked="true"] {
   align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
+  color: var(--text);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .setup-wizard__staff-row > div {
