@@ -25,6 +25,7 @@ export default function SetupWizardCard({ guildId, presets, discordRoles, onAppl
   const [selectedPreset, setSelectedPreset] = useState<SetupPresetKey | null>(null);
   const [staffRoleAssignments, setStaffRoleAssignments] = useState<Record<string, string>>({});
   const [suggestions, setSuggestions] = useState<GroupSuggestionResponse | null>(null);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const [applyGroups, setApplyGroups] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,12 +38,21 @@ export default function SetupWizardCard({ guildId, presets, discordRoles, onAppl
         const next = await api.fetchGroupSuggestions();
         if (cancelled) return;
         setSuggestions(next);
+        setSuggestionsError(null);
         if (next.primary) {
           setApplyGroups(true);
         }
       } catch {
         // Suggestions are optional; if discord isn't reachable the wizard
         // still works for the preset half.
+        if (cancelled) return;
+        setSuggestions({
+          totalHumanMembers: 0,
+          evaluatedRoleCount: 0,
+          primary: null,
+          alternatives: [],
+        });
+        setSuggestionsError("Could not inspect the Discord roster. You can still set group roles manually under Settings.");
       }
     })();
     return () => {
@@ -237,9 +247,10 @@ export default function SetupWizardCard({ guildId, presets, discordRoles, onAppl
           </label>
         ) : (
           <p className="section-help">
-            {suggestions
+            {suggestionsError ??
+            (suggestions
               ? "No clean role partition detected — you can still set group roles manually under Settings."
-              : "Inspecting guild roster…"}
+              : "Inspecting guild roster…")}
           </p>
         )}
       </fieldset>

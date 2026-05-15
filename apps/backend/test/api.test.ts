@@ -293,6 +293,24 @@ describe("points accelerator API", () => {
     ]);
   });
 
+  it("returns an empty suggestion result instead of failing when Discord roster inspection is unavailable", async () => {
+    vi.mocked(botRuntime.getRoleMembership).mockResolvedValueOnce(null);
+
+    const response = await ctx.app.inject({
+      method: "GET",
+      url: "/api/groups/suggestions",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      totalHumanMembers: 0,
+      evaluatedRoleCount: 0,
+      primary: null,
+      alternatives: [],
+    });
+  });
+
   it("drops stale synced groups from live queries when the role stops qualifying", async () => {
     await ctx.app.inject({
       method: "PUT",

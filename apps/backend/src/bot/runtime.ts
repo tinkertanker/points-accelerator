@@ -59,6 +59,7 @@ type UserRedemption = Awaited<
 type GuildMemberCollection = Awaited<
   ReturnType<NonNullable<ChatInputCommandInteraction["guild"]>["members"]["fetch"]>
 >;
+type GuildRoleCollection = Awaited<ReturnType<NonNullable<ChatInputCommandInteraction["guild"]>["roles"]["fetch"]>>;
 type AssignmentLookupResult =
   | { kind: "resolved"; assignment: ActiveAssignment }
   | { kind: "ambiguous"; matches: ActiveAssignment[] }
@@ -394,6 +395,7 @@ export class BotRuntime {
   private client: Client | null = null;
   private isReady = false;
   private readonly membersCache: Map<string, { fetchedAt: number; value: Array<{ id: string; name: string }> }> = new Map();
+  private readonly roleMembershipCache: Map<string, { fetchedAt: number; value: GuildRoleMembershipSnapshot }> = new Map();
   private readonly knownGuildIds = new Set<string>();
 
   public constructor(
@@ -756,26 +758,64 @@ export class BotRuntime {
   }
 
   public async getRoleMembership(guildId: string): Promise<GuildRoleMembershipSnapshot | null> {
+    const now = Date.now();
+    const cached = this.roleMembershipCache.get(guildId);
+    if (cached && now - cached.fetchedAt < MEMBERS_CACHE_TTL_MS) {
+      return cached.value;
+    }
+
     if (!this.client) {
-      return null;
+      return cached?.value ?? null;
     }
 
-    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+    const guild = await this.client.guilds.fetch(guildId).catch((error: unknown) => {
+      console.error("Failed to fetch Discord guild for role suggestions", { guildId, error });
+      return null;
+    });
     if (!guild) {
-      return null;
+      return cached?.value ?? null;
     }
 
-    const members = await guild.members.fetch().catch(() => null);
+    const members = await guild.members.fetch().catch((error: unknown) => {
+      console.error("Failed to fetch Discord guild members for role suggestions", { guildId, error });
+      return null;
+    });
     if (!members) {
-      return null;
+      const fallbackMembers = guild.members.cache;
+      if (fallbackMembers.size === 0) {
+        return cached?.value ?? null;
+      }
+
+      const fallbackSnapshot = this.buildRoleMembershipSnapshot(guild.id, fallbackMembers, guild.roles.cache);
+      this.roleMembershipCache.set(guildId, { fetchedAt: now, value: fallbackSnapshot });
+      return fallbackSnapshot;
     }
 
+    const roles = await guild.roles.fetch().catch((error: unknown) => {
+      console.error("Failed to fetch Discord guild roles for role suggestions", { guildId, error });
+      return null;
+    });
+    const roleSource = roles ?? guild.roles.cache;
+    if (roleSource.size === 0) {
+      return cached?.value ?? null;
+    }
+
+    const snapshot = this.buildRoleMembershipSnapshot(guild.id, members, roleSource);
+    this.roleMembershipCache.set(guildId, { fetchedAt: now, value: snapshot });
+    return snapshot;
+  }
+
+  private buildRoleMembershipSnapshot(
+    guildId: string,
+    members: GuildMemberCollection,
+    roles: NonNullable<GuildRoleCollection>,
+  ): GuildRoleMembershipSnapshot {
     const humans = Array.from(members.values()).filter((member) => !member.user.bot);
     const roleMembers = new Map<string, string[]>();
 
     for (const member of humans) {
       for (const role of member.roles.cache.values()) {
-        if (role.id === guild.id) {
+        if (role.id === guildId) {
           continue;
         }
         const bucket = roleMembers.get(role.id);
@@ -787,14 +827,9 @@ export class BotRuntime {
       }
     }
 
-    const roles = await guild.roles.fetch().catch(() => null);
-    if (!roles) {
-      return null;
-    }
-
     const snapshot: GuildRoleMembership[] = [];
     for (const role of roles.values()) {
-      if (!role || role.managed || role.id === guild.id) {
+      if (!role || role.managed || role.id === guildId) {
         continue;
       }
       const memberIds = roleMembers.get(role.id) ?? [];

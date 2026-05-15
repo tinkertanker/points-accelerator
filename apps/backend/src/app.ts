@@ -1110,7 +1110,13 @@ export function createApp(params: {
     }
     const snapshot = await params.botRuntime.getRoleMembership(guildIdOf(request));
     if (!snapshot) {
-      throw new AppError("Could not load guild members from Discord.", 503);
+      request.log.warn({ guildId: guildIdOf(request) }, "Could not load Discord guild members for group suggestions");
+      return {
+        totalHumanMembers: 0,
+        evaluatedRoleCount: 0,
+        primary: null,
+        alternatives: [],
+      };
     }
     const result = suggestGroupRoles(snapshot);
     const nameByRoleId = new Map(snapshot.roles.map((role) => [role.id, role.name] as const));
