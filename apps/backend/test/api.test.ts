@@ -1363,6 +1363,7 @@ describe("points accelerator API", () => {
     });
     const byRoleId = new Map(capabilities.map((capability) => [capability.roleId, capability]));
     expect(byRoleId.get("role-admin-id")?.canManageDashboard).toBe(true);
+    expect(byRoleId.get("role-admin-id")?.maxAward).toBeNull();
     expect(byRoleId.get("role-admin-id")?.riggedBetWinChance).toBe(90);
     expect(byRoleId.get("role-mentor-id")?.canManageDashboard).toBe(false);
     expect(byRoleId.get("role-mentor-id")?.canAward).toBe(true);

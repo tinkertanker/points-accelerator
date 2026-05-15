@@ -78,7 +78,7 @@ export const SETUP_PRESETS: Record<SetupPresetKey, SetupPreset> = {
         capability: cap({
           canManageDashboard: true,
           canAward: true,
-          maxAward: 10000,
+          maxAward: null,
           canDeduct: true,
           canMultiAward: true,
           canSell: true,
