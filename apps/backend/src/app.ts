@@ -12,6 +12,7 @@ import type { BotRuntimeApi } from "./bot/runtime.js";
 import type { AppServices } from "./services/app-services.js";
 import type { StorageService } from "./services/storage-service.js";
 import { resolveCapabilities } from "./domain/permissions.js";
+import { suggestGroupRoles } from "./domain/group-suggestions.js";
 import { AppError } from "./utils/app-error.js";
 import { decimalToNumber } from "./utils/decimal.js";
 
@@ -1078,6 +1079,105 @@ export function createApp(params: {
   app.post("/api/groups", { preHandler: requireAdmin }, async (request) => {
     const group = await services.groupService.upsert(guildIdOf(request), groupSchema.parse(request.body));
     return group;
+  });
+
+  app.get("/api/groups/suggestions", { preHandler: requireAdmin }, async (request) => {
+    if (!params.botRuntime) {
+      throw new AppError("Discord bot runtime is not connected.", 503);
+    }
+    const snapshot = await params.botRuntime.getRoleMembership(guildIdOf(request));
+    if (!snapshot) {
+      throw new AppError("Could not load guild members from Discord.", 503);
+    }
+    const result = suggestGroupRoles(snapshot);
+    const nameByRoleId = new Map(snapshot.roles.map((role) => [role.id, role.name] as const));
+    const decorate = (suggestion: typeof result.primary) =>
+      suggestion
+        ? {
+            ...suggestion,
+            roles: suggestion.roleIds.map((roleId) => ({
+              id: roleId,
+              name: nameByRoleId.get(roleId) ?? roleId,
+            })),
+          }
+        : null;
+    return {
+      totalHumanMembers: result.totalHumanMembers,
+      evaluatedRoleCount: result.evaluatedRoleCount,
+      primary: decorate(result.primary),
+      alternatives: result.alternatives.map((alt) => decorate(alt)).filter(Boolean),
+    };
+  });
+
+  const applySuggestionSchema = z.object({
+    roleIds: z.array(z.string().min(1)).min(2).max(64),
+  });
+
+  app.post("/api/groups/apply-suggestion", { preHandler: requireAdmin }, async (request) => {
+    if (!params.botRuntime) {
+      throw new AppError("Discord bot runtime is not connected.", 503);
+    }
+    const guildId = guildIdOf(request);
+    const input = applySuggestionSchema.parse(request.body);
+    const snapshot = await params.botRuntime.getRoleMembership(guildId);
+    if (!snapshot) {
+      throw new AppError("Could not load guild roles from Discord.", 503);
+    }
+    const rolesById = new Map(snapshot.roles.map((role) => [role.id, role] as const));
+    const targeted = input.roleIds.map((roleId) => {
+      const role = rolesById.get(roleId);
+      if (!role) {
+        throw new AppError(`Role ${roleId} is not in this guild.`, 400);
+      }
+      return role;
+    });
+
+    const existing = await services.roleCapabilityService.list(guildId);
+    const existingByRoleId = new Map(existing.map((capability) => [capability.roleId, capability] as const));
+    const merged = new Map(existing.map((capability) => [capability.roleId, { ...capability }]));
+    for (const role of targeted) {
+      const prior = existingByRoleId.get(role.id);
+      merged.set(role.id, {
+        ...(prior ?? {
+          id: "",
+          guildId,
+          roleId: role.id,
+          roleName: role.name,
+          canManageDashboard: false,
+          canAward: false,
+          maxAward: null,
+          actionCooldownSeconds: null,
+          canDeduct: false,
+          canMultiAward: false,
+          canSell: false,
+          riggedBetWinChance: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+        roleName: role.name,
+        canReceiveAwards: true,
+        isGroupRole: true,
+      });
+    }
+
+    const payload = Array.from(merged.values()).map((capability) => ({
+      roleId: capability.roleId,
+      roleName: capability.roleName,
+      canManageDashboard: capability.canManageDashboard,
+      canAward: capability.canAward,
+      maxAward: capability.maxAward ? decimalToNumber(capability.maxAward) : null,
+      actionCooldownSeconds: capability.actionCooldownSeconds ?? null,
+      canDeduct: capability.canDeduct,
+      canMultiAward: capability.canMultiAward,
+      canSell: capability.canSell,
+      canReceiveAwards: capability.canReceiveAwards,
+      isGroupRole: capability.isGroupRole,
+      riggedBetWinChance: capability.riggedBetWinChance ?? null,
+    }));
+
+    await services.roleCapabilityService.replaceAll(guildId, payload);
+    const groups = await services.groupService.list(guildId, { includeInactive: true });
+    return { groups: groups.map((group) => serialiseGroup(group)) };
   });
 
   const serialiseReactionRule = (
