@@ -350,10 +350,22 @@ export type DashboardMember = {
   hasManageGuild: boolean;
 };
 
+export type GuildRoleMembership = {
+  id: string;
+  name: string;
+  memberIds: string[];
+};
+
+export type GuildRoleMembershipSnapshot = {
+  roles: GuildRoleMembership[];
+  totalHumanMembers: number;
+};
+
 export interface BotRuntimeApi {
   getRoles(guildId: string): Promise<Array<{ id: string; name: string }>>;
   getTextChannels(guildId: string): Promise<Array<{ id: string; name: string }>>;
   getMembers(guildId: string): Promise<Array<{ id: string; name: string }>>;
+  getRoleMembership(guildId: string): Promise<GuildRoleMembershipSnapshot | null>;
   getDashboardMember(guildId: string, userId: string): Promise<DashboardMember | null>;
   getGroupMemberCount(guildId: string, roleId: string): Promise<number | null>;
   getGroupMemberDiscordUserIds(guildId: string, roleId: string): Promise<string[] | null>;
@@ -741,6 +753,58 @@ export class BotRuntime {
 
     this.membersCache.set(guildId, { fetchedAt: now, value });
     return value;
+  }
+
+  public async getRoleMembership(guildId: string): Promise<GuildRoleMembershipSnapshot | null> {
+    if (!this.client) {
+      return null;
+    }
+
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) {
+      return null;
+    }
+
+    const members = await guild.members.fetch().catch(() => null);
+    if (!members) {
+      return null;
+    }
+
+    const humans = Array.from(members.values()).filter((member) => !member.user.bot);
+    const roleMembers = new Map<string, string[]>();
+
+    for (const member of humans) {
+      for (const role of member.roles.cache.values()) {
+        if (role.id === guild.id) {
+          continue;
+        }
+        const bucket = roleMembers.get(role.id);
+        if (bucket) {
+          bucket.push(member.user.id);
+        } else {
+          roleMembers.set(role.id, [member.user.id]);
+        }
+      }
+    }
+
+    const roles = await guild.roles.fetch().catch(() => null);
+    if (!roles) {
+      return null;
+    }
+
+    const snapshot: GuildRoleMembership[] = [];
+    for (const role of roles.values()) {
+      if (!role || role.managed || role.id === guild.id) {
+        continue;
+      }
+      const memberIds = roleMembers.get(role.id) ?? [];
+      snapshot.push({ id: role.id, name: role.name, memberIds });
+    }
+
+    return {
+      roles: snapshot,
+      totalHumanMembers: humans.length,
+    };
   }
 
   public async getDashboardMember(guildId: string, userId: string): Promise<DashboardMember | null> {
