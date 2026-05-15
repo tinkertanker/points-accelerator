@@ -13,6 +13,7 @@ import type { AppServices } from "./services/app-services.js";
 import type { StorageService } from "./services/storage-service.js";
 import { resolveCapabilities } from "./domain/permissions.js";
 import { suggestGroupRoles } from "./domain/group-suggestions.js";
+import { SETUP_PRESETS, listSetupPresets, type SetupPresetKey } from "./domain/setup-presets.js";
 import { AppError } from "./utils/app-error.js";
 import { decimalToNumber } from "./utils/decimal.js";
 
@@ -1010,6 +1011,14 @@ export function createApp(params: {
         canManageAdminPages ? services.reactionRewardService.list(guildIdOf(request)) : Promise.resolve([]),
       ]);
 
+    // A guild counts as "fresh" while the admin still has nothing meaningful
+    // set up: GuildConfig was only auto-created (updatedAt ≈ createdAt), no
+    // groups exist, and no role capabilities have been configured. Any one of
+    // those flips signals the wizard should stay hidden.
+    const configTouchedMs = settings.updatedAt.getTime() - settings.createdAt.getTime();
+    const isFreshInstall =
+      canManageAdminPages && configTouchedMs < 1000 && groups.length === 0 && capabilities.length === 0;
+
     return {
       settings: serialiseSettings(settings),
       capabilities: capabilities.map((capability) => ({
@@ -1038,6 +1047,14 @@ export function createApp(params: {
         createdAt: rule.createdAt.toISOString(),
         updatedAt: rule.updatedAt.toISOString(),
       })),
+      setup: {
+        isFreshInstall,
+        presets: listSetupPresets().map((preset) => ({
+          key: preset.key,
+          label: preset.label,
+          description: preset.description,
+        })),
+      },
     };
   });
 
@@ -1107,6 +1124,17 @@ export function createApp(params: {
       primary: decorate(result.primary),
       alternatives: result.alternatives.map((alt) => decorate(alt)).filter(Boolean),
     };
+  });
+
+  const applyPresetSchema = z.object({
+    key: z.enum(["classroom", "community"]),
+  });
+
+  app.post("/api/setup/apply-preset", { preHandler: requireAdmin }, async (request) => {
+    const input = applyPresetSchema.parse(request.body);
+    const preset = SETUP_PRESETS[input.key as SetupPresetKey];
+    const settings = await services.configService.update(guildIdOf(request), preset.settings);
+    return { settings: serialiseSettings(settings) };
   });
 
   const applySuggestionSchema = z.object({
