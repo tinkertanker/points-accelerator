@@ -485,6 +485,7 @@ export default function App() {
             isBusy={isMutating}
             onGroupDraftsChange={setGroupDrafts}
             onSaveGroups={handleSaveGroups}
+            onSuggestionApplied={refreshBootstrap}
           />
         );
       case "shop":

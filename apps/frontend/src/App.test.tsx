@@ -406,6 +406,15 @@ describe("App", () => {
         }),
       )
       .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ totalHumanMembers: 0, evaluatedRoleCount: 0, primary: null, alternatives: [] }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
         new Response(JSON.stringify({ ok: true }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -426,10 +435,14 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /save aliases/i }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
 
-    const saveCall = fetchMock.mock.calls[2];
-    expect(String(saveCall?.[0])).toContain("/api/groups");
+    const saveCall = fetchMock.mock.calls.find((call) => {
+      const url = String(call?.[0] ?? "");
+      const method = (call?.[1] as RequestInit | undefined)?.method;
+      return url.endsWith("/api/groups") && method === "POST";
+    });
+    expect(saveCall).toBeDefined();
     const payload = JSON.parse(String((saveCall?.[1] as RequestInit | undefined)?.body));
     expect(payload.displayName).toBe("Red Team");
     expect(payload.roleId).toBe("role-alpha");

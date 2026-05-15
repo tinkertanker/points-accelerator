@@ -53,6 +53,24 @@ export type Group = {
   pointsBalance: number;
 };
 
+export type GroupSuggestion = {
+  kind: "naming-family" | "size-cluster";
+  label: string;
+  roleIds: string[];
+  roles: Array<{ id: string; name: string }>;
+  coverage: number;
+  exclusivity: number;
+  uniformity: number;
+  score: number;
+};
+
+export type GroupSuggestionResponse = {
+  totalHumanMembers: number;
+  evaluatedRoleCount: number;
+  primary: GroupSuggestion | null;
+  alternatives: GroupSuggestion[];
+};
+
 export type GroupDraft = {
   id?: string;
   displayName: string;

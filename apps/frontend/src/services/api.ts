@@ -19,6 +19,7 @@ import type {
   ParticipantSanction,
   SanctionApplyRequest,
   GroupDraft,
+  GroupSuggestionResponse,
   ReactionRewardRule,
   ReactionRewardRuleDraft,
   RoleCapability,
@@ -162,6 +163,26 @@ export const api = {
           .map((value) => value.trim())
           .filter(Boolean),
       },
+    });
+  },
+  fetchGroupSuggestions() {
+    if (isDesignPreview()) {
+      return Promise.resolve<GroupSuggestionResponse>({
+        totalHumanMembers: 0,
+        evaluatedRoleCount: 0,
+        primary: null,
+        alternatives: [],
+      });
+    }
+    return request<GroupSuggestionResponse>("/api/groups/suggestions");
+  },
+  applyGroupSuggestion(roleIds: string[]) {
+    if (isDesignPreview()) {
+      return Promise.resolve({ groups: [] });
+    }
+    return request<{ groups: unknown[] }>("/api/groups/apply-suggestion", {
+      method: "POST",
+      body: { roleIds },
     });
   },
   saveShopItem(payload: ShopItemDraft) {
