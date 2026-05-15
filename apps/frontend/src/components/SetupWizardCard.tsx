@@ -55,17 +55,23 @@ export default function SetupWizardCard({ guildId, presets, discordRoles, onAppl
     [presets, selectedPreset],
   );
 
-  // When the admin picks a preset for the first time, try to pre-fill staff
-  // role dropdowns by matching role names against tier labels.
+  // Rebuild staff-role state whenever the preset changes: drop tier keys that
+  // don't exist on the new preset (otherwise switching Classroom→Community
+  // would still POST `mentor`/`alumni`, which the backend rejects), preserve
+  // selections for tiers that exist in both, and pre-fill by name match.
   useEffect(() => {
     if (!activePreset) {
       setStaffRoleAssignments({});
       return;
     }
     setStaffRoleAssignments((current) => {
-      const next: Record<string, string> = { ...current };
+      const next: Record<string, string> = {};
       for (const tier of activePreset.staffTiers) {
-        if (next[tier.key]) continue;
+        const existing = current[tier.key];
+        if (existing) {
+          next[tier.key] = existing;
+          continue;
+        }
         const match = discordRoles.find((role) => role.name.toLowerCase() === tier.label.toLowerCase());
         if (match) {
           next[tier.key] = match.id;
