@@ -15,7 +15,7 @@ import { resolveCapabilities } from "./domain/permissions.js";
 import { suggestGroupRoles } from "./domain/group-suggestions.js";
 import { SETUP_PRESETS, listSetupPresets, type SetupPresetKey } from "./domain/setup-presets.js";
 import { AppError } from "./utils/app-error.js";
-import { decimalToNumber } from "./utils/decimal.js";
+import { decimal, decimalToNumber } from "./utils/decimal.js";
 
 const authCallbackSchema = z.object({
   code: z.string().min(1).optional(),
@@ -1053,6 +1053,12 @@ export function createApp(params: {
           key: preset.key,
           label: preset.label,
           description: preset.description,
+          staffTiers: preset.staffTiers.map((tier) => ({
+            key: tier.key,
+            label: tier.label,
+            description: tier.description,
+            grantsMentorDashboard: tier.grantsMentorDashboard,
+          })),
         })),
       },
     };
@@ -1128,12 +1134,111 @@ export function createApp(params: {
 
   const applyPresetSchema = z.object({
     key: z.enum(["classroom", "community"]),
+    staffRoles: z.record(z.string().min(1), z.string().min(1)).optional(),
   });
 
   app.post("/api/setup/apply-preset", { preHandler: requireAdmin }, async (request) => {
+    const guildId = guildIdOf(request);
     const input = applyPresetSchema.parse(request.body);
     const preset = SETUP_PRESETS[input.key as SetupPresetKey];
-    const settings = await services.configService.update(guildIdOf(request), preset.settings);
+    const requestedAssignments = Object.entries(input.staffRoles ?? {}).filter(
+      ([, roleId]) => roleId.trim().length > 0,
+    );
+
+    const seenRoleIds = new Set<string>();
+    for (const [, roleId] of requestedAssignments) {
+      if (seenRoleIds.has(roleId)) {
+        throw new AppError("Each Discord role can only be mapped to one staff tier.", 400);
+      }
+      seenRoleIds.add(roleId);
+    }
+
+    const tierByKey = new Map<string, (typeof preset.staffTiers)[number]>(
+      preset.staffTiers.map((tier) => [tier.key, tier]),
+    );
+    const assignments: Array<{ tier: (typeof preset.staffTiers)[number]; roleId: string }> = [];
+    for (const [tierKey, roleId] of requestedAssignments) {
+      const tier = tierByKey.get(tierKey);
+      if (!tier) {
+        throw new AppError(`Unknown staff tier '${tierKey}' for the ${preset.label} preset.`, 400);
+      }
+      assignments.push({ tier, roleId });
+    }
+
+    let roleNameById = new Map<string, string>();
+    if (assignments.length > 0) {
+      if (!params.botRuntime) {
+        throw new AppError("Discord bot runtime is not connected.", 503);
+      }
+      const roles = await params.botRuntime.getRoles(guildId);
+      roleNameById = new Map(roles.map((role) => [role.id, role.name] as const));
+      for (const { roleId } of assignments) {
+        if (!roleNameById.has(roleId)) {
+          throw new AppError(`Role ${roleId} is not in this guild.`, 400);
+        }
+      }
+    }
+
+    const existingConfig = await services.configService.getOrCreate(guildId);
+    const mergedMentorRoleIds = new Set(existingConfig.mentorRoleIds);
+    for (const { tier, roleId } of assignments) {
+      if (tier.grantsMentorDashboard) {
+        mergedMentorRoleIds.add(roleId);
+      }
+    }
+
+    const settings = await services.configService.update(guildId, {
+      ...preset.settings,
+      mentorRoleIds: Array.from(mergedMentorRoleIds),
+    });
+
+    if (assignments.length > 0) {
+      const existing = await services.roleCapabilityService.list(guildId);
+      const merged = new Map(existing.map((capability) => [capability.roleId, { ...capability }]));
+      for (const { tier, roleId } of assignments) {
+        const roleName = roleNameById.get(roleId) ?? roleId;
+        const prior = merged.get(roleId);
+        merged.set(roleId, {
+          ...(prior ?? {
+            id: "",
+            guildId,
+            roleId,
+            roleName,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }),
+          roleName,
+          canManageDashboard: tier.capability.canManageDashboard,
+          canAward: tier.capability.canAward,
+          maxAward: tier.capability.maxAward === null ? null : decimal(tier.capability.maxAward),
+          actionCooldownSeconds: tier.capability.actionCooldownSeconds,
+          canDeduct: tier.capability.canDeduct,
+          canMultiAward: tier.capability.canMultiAward,
+          canSell: tier.capability.canSell,
+          canReceiveAwards: tier.capability.canReceiveAwards,
+          isGroupRole: tier.capability.isGroupRole,
+          riggedBetWinChance: tier.capability.riggedBetWinChance,
+        });
+      }
+
+      const payload = Array.from(merged.values()).map((capability) => ({
+        roleId: capability.roleId,
+        roleName: capability.roleName,
+        canManageDashboard: capability.canManageDashboard,
+        canAward: capability.canAward,
+        maxAward: capability.maxAward ? decimalToNumber(capability.maxAward) : null,
+        actionCooldownSeconds: capability.actionCooldownSeconds ?? null,
+        canDeduct: capability.canDeduct,
+        canMultiAward: capability.canMultiAward,
+        canSell: capability.canSell,
+        canReceiveAwards: capability.canReceiveAwards,
+        isGroupRole: capability.isGroupRole,
+        riggedBetWinChance: capability.riggedBetWinChance ?? null,
+      }));
+
+      await services.roleCapabilityService.replaceAll(guildId, payload);
+    }
+
     return { settings: serialiseSettings(settings) };
   });
 

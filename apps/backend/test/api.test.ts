@@ -12,6 +12,7 @@ const botRuntime: BotRuntimeApi = {
   getRoles: vi.fn().mockResolvedValue([]),
   getTextChannels: vi.fn().mockResolvedValue([]),
   getMembers: vi.fn().mockResolvedValue([]),
+  getRoleMembership: vi.fn().mockResolvedValue({ roles: [], totalHumanMembers: 0 }),
   getDashboardMember: vi.fn().mockResolvedValue(null),
   getGroupMemberCount: vi.fn(async (_guildId: string, roleId: string) => groupMemberCounts.get(roleId) ?? null),
   getGroupMemberDiscordUserIds: vi.fn(async (_guildId: string, roleId: string) => {
@@ -1324,5 +1325,70 @@ describe("points accelerator API", () => {
     expect(approvalResult.executed).toBe(false);
     expect(approvalResult.approvalsCount).toBe(1);
     expect(approvalResult.threshold).toBe(2);
+  });
+
+  it("applies the classroom preset with staff role mappings", async () => {
+    (botRuntime.getRoles as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { id: "role-admin-id", name: "Admin" },
+      { id: "role-mentor-id", name: "Mentor" },
+      { id: "role-alumni-id", name: "Alumni" },
+    ]);
+
+    const response = await ctx.app.inject({
+      method: "POST",
+      url: "/api/setup/apply-preset",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        key: "classroom",
+        staffRoles: {
+          admin: "role-admin-id",
+          mentor: "role-mentor-id",
+          alumni: "role-alumni-id",
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const config = await ctx.prisma.guildConfig.findUniqueOrThrow({
+      where: { guildId: ctx.env.GUILD_ID },
+    });
+    expect(config.mentorRoleIds).toEqual(expect.arrayContaining(["role-admin-id", "role-mentor-id"]));
+    expect(config.mentorRoleIds).not.toContain("role-alumni-id");
+    expect(Number(config.passiveCurrencyReward)).toBe(2);
+    expect(config.betWinChance).toBe(51);
+
+    const capabilities = await ctx.prisma.discordRoleCapability.findMany({
+      where: { guildId: ctx.env.GUILD_ID },
+    });
+    const byRoleId = new Map(capabilities.map((capability) => [capability.roleId, capability]));
+    expect(byRoleId.get("role-admin-id")?.canManageDashboard).toBe(true);
+    expect(byRoleId.get("role-admin-id")?.riggedBetWinChance).toBe(90);
+    expect(byRoleId.get("role-mentor-id")?.canManageDashboard).toBe(false);
+    expect(byRoleId.get("role-mentor-id")?.canAward).toBe(true);
+    expect(Number(byRoleId.get("role-mentor-id")?.maxAward)).toBe(500);
+    expect(byRoleId.get("role-alumni-id")?.canDeduct).toBe(false);
+    expect(Number(byRoleId.get("role-alumni-id")?.maxAward)).toBe(1);
+  });
+
+  it("rejects duplicate role mappings across staff tiers", async () => {
+    (botRuntime.getRoles as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { id: "role-staff", name: "Staff" },
+    ]);
+
+    const response = await ctx.app.inject({
+      method: "POST",
+      url: "/api/setup/apply-preset",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        key: "classroom",
+        staffRoles: {
+          admin: "role-staff",
+          mentor: "role-staff",
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
   });
 });
