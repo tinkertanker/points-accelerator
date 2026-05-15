@@ -452,7 +452,14 @@ export default function App() {
         if (!sessionUser.canManageSettings) {
           return null;
         }
-        return <OverviewPanel bootstrap={bootstrap} onOpenGuide={() => setActiveTab("guide")} />;
+        return (
+          <OverviewPanel
+            bootstrap={bootstrap}
+            activeGuildId={sessionUser.activeGuildId ?? null}
+            onOpenGuide={() => setActiveTab("guide")}
+            onSetupApplied={refreshBootstrap}
+          />
+        );;
       case "settings":
         if (!settingsDraft || !sessionUser.canManageSettings) {
           return null;

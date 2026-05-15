@@ -165,6 +165,15 @@ export const api = {
       },
     });
   },
+  applySetupPreset(key: "classroom" | "community") {
+    if (isDesignPreview()) {
+      return Promise.resolve({ settings: null });
+    }
+    return request<{ settings: unknown }>("/api/setup/apply-preset", {
+      method: "POST",
+      body: { key },
+    });
+  },
   fetchGroupSuggestions() {
     if (isDesignPreview()) {
       return Promise.resolve<GroupSuggestionResponse>({

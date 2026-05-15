@@ -243,6 +243,19 @@ export type GuildListResponse = {
   activeGuildId: string | null;
 };
 
+export type SetupPresetKey = "classroom" | "community";
+
+export type SetupPresetSummary = {
+  key: SetupPresetKey;
+  label: string;
+  description: string;
+};
+
+export type SetupState = {
+  isFreshInstall: boolean;
+  presets: SetupPresetSummary[];
+};
+
 export type BootstrapPayload = {
   settings: Settings;
   capabilities: RoleCapability[];
@@ -261,6 +274,7 @@ export type BootstrapPayload = {
   participants: Participant[];
   submissions: Submission[];
   reactionRules: ReactionRewardRule[];
+  setup: SetupState;
 };
 
 export type TabId =

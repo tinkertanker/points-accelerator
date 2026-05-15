@@ -159,6 +159,10 @@ const bootstrapPayload = {
     channels: [{ id: "channel-1", name: "general" }],
     members: [],
   },
+  setup: {
+    isFreshInstall: false,
+    presets: [],
+  },
 };
 
 const fulfilmentPayload = [

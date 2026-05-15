@@ -502,6 +502,10 @@ function createInitialBootstrap(): BootstrapPayload {
       },
     ],
     reactionRules: [],
+    setup: {
+      isFreshInstall: false,
+      presets: [],
+    },
   };
 }
 

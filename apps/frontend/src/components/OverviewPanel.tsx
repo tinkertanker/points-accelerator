@@ -1,13 +1,26 @@
+import SetupWizardCard from "./SetupWizardCard";
 import type { BootstrapPayload } from "../types";
 
 type OverviewPanelProps = {
   bootstrap: BootstrapPayload;
+  activeGuildId: string | null;
   onOpenGuide: () => void;
+  onSetupApplied: () => Promise<void>;
 };
 
-export default function OverviewPanel({ bootstrap, onOpenGuide }: OverviewPanelProps) {
+export default function OverviewPanel({ bootstrap, activeGuildId, onOpenGuide, onSetupApplied }: OverviewPanelProps) {
+  const showWizard = bootstrap.setup.isFreshInstall && activeGuildId !== null;
+
   return (
     <div className="panel-stack">
+      {showWizard && (
+        <SetupWizardCard
+          guildId={activeGuildId!}
+          presets={bootstrap.setup.presets}
+          onApplied={onSetupApplied}
+        />
+      )}
+
       <dl className="stats-row stats-row--compact">
         <div className="stat-item">
           <dt>Groups</dt>
