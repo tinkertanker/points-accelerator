@@ -38,7 +38,7 @@ export default function SetupWizardCard({ guildId, presets, discordRoles, onAppl
         const next = await api.fetchGroupSuggestions();
         if (cancelled) return;
         setSuggestions(next);
-        setSuggestionsError(null);
+        setSuggestionsError(next.inspectionWarning ?? null);
         if (next.primary) {
           setApplyGroups(true);
         }
@@ -52,7 +52,9 @@ export default function SetupWizardCard({ guildId, presets, discordRoles, onAppl
           primary: null,
           alternatives: [],
         });
-        setSuggestionsError("Could not inspect the Discord roster. You can still set group roles manually under Settings.");
+        setSuggestionsError(
+          "Could not inspect the Discord roster. You can still set group roles manually under Settings.",
+        );
       }
     })();
     return () => {
@@ -248,9 +250,9 @@ export default function SetupWizardCard({ guildId, presets, discordRoles, onAppl
         ) : (
           <p className="section-help">
             {suggestionsError ??
-            (suggestions
-              ? "No clean role partition detected — you can still set group roles manually under Settings."
-              : "Inspecting guild roster…")}
+              (suggestions
+                ? "No clean role partition detected — you can still set group roles manually under Settings."
+                : "Inspecting guild roster…")}
           </p>
         )}
       </fieldset>
