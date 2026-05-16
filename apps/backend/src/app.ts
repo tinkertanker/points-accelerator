@@ -1116,6 +1116,7 @@ export function createApp(params: {
         evaluatedRoleCount: 0,
         primary: null,
         alternatives: [],
+        inspectionWarning: "Could not inspect the Discord roster. Try again later or set group roles manually.",
       };
     }
     const result = suggestGroupRoles(snapshot);

@@ -69,6 +69,7 @@ export type GroupSuggestionResponse = {
   evaluatedRoleCount: number;
   primary: GroupSuggestion | null;
   alternatives: GroupSuggestion[];
+  inspectionWarning?: string;
 };
 
 export type GroupDraft = {

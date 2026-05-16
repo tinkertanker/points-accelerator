@@ -141,9 +141,10 @@ export default function GroupsPanel({
             <p className="section-help">Inspecting guild roster…</p>
           ) : visibleSuggestions.length === 0 ? (
             <p className="section-help">
-              {suggestions
+              {suggestions?.inspectionWarning ??
+                (suggestions
                 ? `Looked at ${suggestions.evaluatedRoleCount} role${suggestions.evaluatedRoleCount === 1 ? "" : "s"} across ${suggestions.totalHumanMembers} members and didn't find a clean partition. You can still mark roles as Group role + Receivable in Settings.`
-                : "No suggestions loaded yet."}
+                : "No suggestions loaded yet.")}
             </p>
           ) : (
             <ul className="suggestion-list">{visibleSuggestions.map(renderSuggestion)}</ul>

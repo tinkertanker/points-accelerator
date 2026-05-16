@@ -308,6 +308,7 @@ describe("points accelerator API", () => {
       evaluatedRoleCount: 0,
       primary: null,
       alternatives: [],
+      inspectionWarning: "Could not inspect the Discord roster. Try again later or set group roles manually.",
     });
   });
 

@@ -384,7 +384,7 @@ function isDiscordUnknownMemberError(error: unknown): boolean {
   );
 }
 
-const MEMBERS_CACHE_TTL_MS = 60_000;
+const DISCORD_FETCH_CACHE_TTL_MS = 60_000;
 
 export class BotRuntime {
   private readonly passiveCooldowns = new Map<string, CooldownEntry>();
@@ -727,7 +727,7 @@ export class BotRuntime {
   public async getMembers(guildId: string) {
     const now = Date.now();
     const cached = this.membersCache.get(guildId);
-    if (cached && now - cached.fetchedAt < MEMBERS_CACHE_TTL_MS) {
+    if (cached && now - cached.fetchedAt < DISCORD_FETCH_CACHE_TTL_MS) {
       return cached.value;
     }
 
@@ -760,7 +760,7 @@ export class BotRuntime {
   public async getRoleMembership(guildId: string): Promise<GuildRoleMembershipSnapshot | null> {
     const now = Date.now();
     const cached = this.roleMembershipCache.get(guildId);
-    if (cached && now - cached.fetchedAt < MEMBERS_CACHE_TTL_MS) {
+    if (cached && now - cached.fetchedAt < DISCORD_FETCH_CACHE_TTL_MS) {
       return cached.value;
     }
 
