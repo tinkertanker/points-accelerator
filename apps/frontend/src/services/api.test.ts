@@ -63,3 +63,44 @@ describe("api design preview reaction rules", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("api design preview admin actions", () => {
+  it("keeps economy reset and sanction actions local", async () => {
+    vi.stubEnv("VITE_DESIGN_PREVIEW", "true");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const reset = await api.economyReset({
+      mode: "modulo-balance",
+      modulus: 10,
+      applyToParticipantCurrency: true,
+      applyToGroupPoints: true,
+      applyToGroupCurrency: false,
+      dryRun: true,
+    });
+    expect(reset).toMatchObject({
+      mode: "modulo-balance",
+      modulus: 10,
+      dryRun: true,
+      participantImpact: [],
+      groupImpact: [],
+    });
+
+    await expect(api.listSanctions()).resolves.toEqual([]);
+    const sanction = await api.applySanction("participant-1", {
+      flag: "CANNOT_BET",
+      reason: "Preview discipline",
+      expiresAt: null,
+    });
+    expect(sanction).toMatchObject({
+      participantId: "participant-1",
+      flag: "CANNOT_BET",
+      reason: "Preview discipline",
+      revokedAt: null,
+    });
+    await expect(api.listSanctions()).resolves.toHaveLength(1);
+
+    const revoked = await api.revokeSanction(sanction.id);
+    expect(revoked.revokedAt).toEqual(expect.any(String));
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});

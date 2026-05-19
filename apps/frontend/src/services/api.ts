@@ -1,5 +1,8 @@
 import {
   designPreviewDeleteReactionRule,
+  designPreviewApplySanction,
+  designPreviewEconomyReset,
+  designPreviewRevokeSanction,
   designPreviewSaveReactionRule,
   designPreviewSaveCapabilities,
   designPreviewSaveGroup,
@@ -8,6 +11,7 @@ import {
   designPreviewUpdateRedemptionStatus,
   getDesignPreviewBootstrap,
   getDesignPreviewRedemptions,
+  getDesignPreviewSanctions,
   getDesignPreviewSession,
   isDesignPreview,
 } from "../designPreview";
@@ -280,21 +284,33 @@ export const api = {
     });
   },
   economyReset(payload: EconomyResetRequest) {
+    if (isDesignPreview()) {
+      return Promise.resolve(designPreviewEconomyReset(payload));
+    }
     return request<EconomyResetResult>("/api/admin/economy/reset", {
       method: "POST",
       body: payload,
     });
   },
   listSanctions() {
+    if (isDesignPreview()) {
+      return Promise.resolve(getDesignPreviewSanctions());
+    }
     return request<ParticipantSanction[]>("/api/sanctions");
   },
   applySanction(participantId: string, payload: SanctionApplyRequest) {
+    if (isDesignPreview()) {
+      return Promise.resolve(designPreviewApplySanction(participantId, payload));
+    }
     return request<ParticipantSanction>(`/api/participants/${participantId}/sanctions`, {
       method: "POST",
       body: payload,
     });
   },
   revokeSanction(sanctionId: string) {
+    if (isDesignPreview()) {
+      return Promise.resolve(designPreviewRevokeSanction(sanctionId));
+    }
     return request<ParticipantSanction>(`/api/sanctions/${sanctionId}/revoke`, {
       method: "POST",
     });
