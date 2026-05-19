@@ -906,6 +906,47 @@ describe("points accelerator API", () => {
     });
   });
 
+  it("prevents shop item updates across guilds", async () => {
+    await ctx.services.configService.getOrCreate("guild-other");
+
+    const foreignItem = await ctx.prisma.shopItem.create({
+      data: {
+        guildId: "guild-other",
+        name: "Foreign item",
+        description: "Should not be editable",
+        audience: "INDIVIDUAL",
+        cost: 5,
+        stock: 2,
+        enabled: true,
+        fulfillmentInstructions: null,
+        emoji: "🎁",
+      },
+    });
+
+    await expect(
+      ctx.services.shopService.upsert(ctx.env.GUILD_ID, {
+        id: foreignItem.id,
+        name: "Tampered item",
+        description: "Cross-guild update",
+        audience: "GROUP",
+        cost: 99,
+        stock: 0,
+        enabled: false,
+        fulfillmentInstructions: null,
+      }),
+    ).rejects.toThrow("Shop item not found.");
+
+    const unchanged = await ctx.prisma.shopItem.findUniqueOrThrow({
+      where: { id: foreignItem.id },
+    });
+    expect(unchanged).toMatchObject({
+      guildId: "guild-other",
+      name: "Foreign item",
+      audience: "INDIVIDUAL",
+      enabled: true,
+    });
+  });
+
   it("allows unfunded group purchase requests to be created before points are available", async () => {
     await ctx.app.inject({
       method: "PUT",
