@@ -386,15 +386,15 @@ export class SubmissionService {
       },
     } as const;
 
-    if (existing) {
-      const previousImageKey = existing.imageKey;
-      const previousFeedChannelId = existing.feedChannelId;
-      const previousFeedMessageId = existing.feedMessageId;
+    const replacePendingSubmission = async (pendingSubmission: NonNullable<typeof existing>) => {
+      const previousImageKey = pendingSubmission.imageKey;
+      const previousFeedChannelId = pendingSubmission.feedChannelId;
+      const previousFeedMessageId = pendingSubmission.feedMessageId;
       const updated = await this.prisma.$transaction(async (tx) => {
         // Status-guarded claim so a concurrent review() that flips the row to
         // APPROVED/OUTSTANDING/REJECTED cannot have its content overwritten here.
         const claim = await tx.submission.updateMany({
-          where: { id: existing.id, guildId: params.guildId, status: "PENDING" },
+          where: { id: pendingSubmission.id, guildId: params.guildId, status: "PENDING" },
           data: {
             groupId: participant.groupId,
             text,
@@ -407,7 +407,7 @@ export class SubmissionService {
 
         if (claim.count === 0) {
           const latest = await tx.submission.findFirst({
-            where: { id: existing.id, guildId: params.guildId },
+            where: { id: pendingSubmission.id, guildId: params.guildId },
             select: { status: true },
           });
           throw new AppError(
@@ -416,7 +416,7 @@ export class SubmissionService {
           );
         }
 
-        return tx.submission.findUniqueOrThrow({ where: { id: existing.id }, include });
+        return tx.submission.findUniqueOrThrow({ where: { id: pendingSubmission.id }, include });
       });
       return {
         submission: this.toSubmissionResponse(updated),
@@ -425,6 +425,10 @@ export class SubmissionService {
         previousFeedChannelId,
         previousFeedMessageId,
       };
+    };
+
+    if (existing) {
+      return replacePendingSubmission(existing);
     }
 
     try {
@@ -441,8 +445,22 @@ export class SubmissionService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === "P2002"
       ) {
+        const latest = await this.prisma.submission.findFirst({
+          where: {
+            guildId: params.guildId,
+            assignmentId: params.assignmentId,
+            participantId: params.participantId,
+          },
+        });
+
+        if (latest?.status === "PENDING") {
+          return replacePendingSubmission(latest);
+        }
+
         throw new AppError(
-          "You have already submitted for this assignment. Contact an admin if you need to resubmit.",
+          latest
+            ? `Your submission has already been reviewed (${latest.status}). Contact an admin if you need to resubmit.`
+            : "You have already submitted for this assignment. Contact an admin if you need to resubmit.",
           409,
         );
       }
