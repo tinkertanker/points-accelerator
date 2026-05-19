@@ -170,20 +170,19 @@ export class ShopService {
   private async updateExistingItem(
     guildId: string,
     itemId: string,
-    data: Prisma.ShopItemUpdateInput,
+    data: Prisma.ShopItemUpdateManyMutationInput,
   ) {
-    const existing = await this.prisma.shopItem.findFirst({
+    const updated = await this.prisma.shopItem.updateMany({
       where: { id: itemId, guildId },
-      select: { id: true },
+      data,
     });
 
-    if (!existing) {
+    if (updated.count === 0) {
       throw new AppError("Shop item not found.", 404);
     }
 
-    return this.prisma.shopItem.update({
+    return this.prisma.shopItem.findUniqueOrThrow({
       where: { id: itemId },
-      data,
     });
   }
 
