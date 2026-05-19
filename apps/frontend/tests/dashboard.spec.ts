@@ -4,7 +4,9 @@ const bootstrapPayload = {
   settings: {
     appName: "points accelerator",
     pointsName: "beans",
+    pointsSymbol: "🏅",
     currencyName: "rice",
+    currencySymbol: "💲",
     groupPointsPerCurrencyDonation: 10,
     mentorRoleIds: ["role-mentor"],
     passivePointsReward: 1,
@@ -13,9 +15,16 @@ const bootstrapPayload = {
     passiveMinimumCharacters: 4,
     passiveAllowedChannelIds: [],
     passiveDeniedChannelIds: [],
+    bettingChannelIds: [],
+    luckyDrawChannelIds: [],
+    pointsChannelIds: [],
+    shopChannelIds: [],
+    wrongChannelPenalty: 0,
     commandLogChannelId: null,
     redemptionChannelId: null,
     listingChannelId: null,
+    announcementsChannelId: null,
+    submissionFeedChannelId: null,
     betWinChance: 50,
     bettingCooldownSeconds: 0,
   },
@@ -41,6 +50,11 @@ const bootstrapPayload = {
       { id: "role-mentor", name: "Mentor" },
     ],
     channels: [{ id: "channel-1", name: "general" }],
+    members: [],
+  },
+  setup: {
+    isFreshInstall: false,
+    presets: [],
   },
 };
 
@@ -82,6 +96,7 @@ test("authenticated admin can see the full control room", async ({ page }) => {
     canManageShop: true,
     canManageAssignments: true,
     canViewLeaderboard: true,
+    activeGuildId: "guild-test",
   });
 
   await page.goto("/");
@@ -110,6 +125,7 @@ test("authenticated mentor only sees shop, assignments, and leaderboard", async 
     canManageShop: true,
     canManageAssignments: true,
     canViewLeaderboard: true,
+    activeGuildId: "guild-test",
   });
 
   await page.goto("/");
@@ -139,6 +155,7 @@ test("authenticated viewer only sees the leaderboard", async ({ page }) => {
     canManageShop: false,
     canManageAssignments: false,
     canViewLeaderboard: true,
+    activeGuildId: "guild-test",
   });
 
   await page.goto("/");

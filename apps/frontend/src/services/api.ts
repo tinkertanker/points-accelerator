@@ -1,4 +1,9 @@
 import {
+  designPreviewDeleteReactionRule,
+  designPreviewApplySanction,
+  designPreviewEconomyReset,
+  designPreviewRevokeSanction,
+  designPreviewSaveReactionRule,
   designPreviewSaveCapabilities,
   designPreviewSaveGroup,
   designPreviewSaveSettings,
@@ -6,6 +11,7 @@ import {
   designPreviewUpdateRedemptionStatus,
   getDesignPreviewBootstrap,
   getDesignPreviewRedemptions,
+  getDesignPreviewSanctions,
   getDesignPreviewSession,
   isDesignPreview,
 } from "../designPreview";
@@ -237,6 +243,9 @@ export const api = {
     });
   },
   createReactionRule(payload: ReactionRewardRuleDraft) {
+    if (isDesignPreview()) {
+      return Promise.resolve(designPreviewSaveReactionRule(payload));
+    }
     return request<ReactionRewardRule>("/api/reaction-rules", {
       method: "POST",
       body: {
@@ -250,6 +259,9 @@ export const api = {
     });
   },
   updateReactionRule(id: string, payload: ReactionRewardRuleDraft) {
+    if (isDesignPreview()) {
+      return Promise.resolve(designPreviewSaveReactionRule({ ...payload, id }));
+    }
     return request<ReactionRewardRule>(`/api/reaction-rules/${id}`, {
       method: "PUT",
       body: {
@@ -263,26 +275,42 @@ export const api = {
     });
   },
   deleteReactionRule(id: string) {
+    if (isDesignPreview()) {
+      designPreviewDeleteReactionRule(id);
+      return Promise.resolve();
+    }
     return request<void>(`/api/reaction-rules/${id}`, {
       method: "DELETE",
     });
   },
   economyReset(payload: EconomyResetRequest) {
+    if (isDesignPreview()) {
+      return Promise.resolve(designPreviewEconomyReset(payload));
+    }
     return request<EconomyResetResult>("/api/admin/economy/reset", {
       method: "POST",
       body: payload,
     });
   },
   listSanctions() {
+    if (isDesignPreview()) {
+      return Promise.resolve(getDesignPreviewSanctions());
+    }
     return request<ParticipantSanction[]>("/api/sanctions");
   },
   applySanction(participantId: string, payload: SanctionApplyRequest) {
+    if (isDesignPreview()) {
+      return Promise.resolve(designPreviewApplySanction(participantId, payload));
+    }
     return request<ParticipantSanction>(`/api/participants/${participantId}/sanctions`, {
       method: "POST",
       body: payload,
     });
   },
   revokeSanction(sanctionId: string) {
+    if (isDesignPreview()) {
+      return Promise.resolve(designPreviewRevokeSanction(sanctionId));
+    }
     return request<ParticipantSanction>(`/api/sanctions/${sanctionId}/revoke`, {
       method: "POST",
     });

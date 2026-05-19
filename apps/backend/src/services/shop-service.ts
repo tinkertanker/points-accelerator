@@ -132,39 +132,27 @@ export class ShopService {
     const fulfillerRoleId = input.fulfillerRoleId?.trim() ? input.fulfillerRoleId.trim() : null;
     const autoFulfil = input.autoFulfil ?? false;
 
+    const data = {
+      name: input.name,
+      description: input.description,
+      audience: input.audience,
+      cost: decimal(input.cost),
+      stock: input.stock,
+      enabled: input.enabled,
+      fulfillmentInstructions: input.fulfillmentInstructions ?? null,
+      emoji,
+      ownerUserId,
+      ownerUsername,
+      fulfillerRoleId,
+      autoFulfil,
+    };
+
     const item = input.id
-      ? await this.prisma.shopItem.update({
-          where: { id: input.id },
-          data: {
-            name: input.name,
-            description: input.description,
-            audience: input.audience,
-            cost: decimal(input.cost),
-            stock: input.stock,
-            enabled: input.enabled,
-            fulfillmentInstructions: input.fulfillmentInstructions ?? null,
-            emoji,
-            ownerUserId,
-            ownerUsername,
-            fulfillerRoleId,
-            autoFulfil,
-          },
-        })
+      ? await this.updateExistingItem(guildId, input.id, data)
       : await this.prisma.shopItem.create({
           data: {
             guildId,
-            name: input.name,
-            description: input.description,
-            audience: input.audience,
-            cost: decimal(input.cost),
-            stock: input.stock,
-            enabled: input.enabled,
-            fulfillmentInstructions: input.fulfillmentInstructions ?? null,
-            emoji,
-            ownerUserId,
-            ownerUsername,
-            fulfillerRoleId,
-            autoFulfil,
+            ...data,
           },
         });
 
@@ -177,6 +165,25 @@ export class ShopService {
     });
 
     return item;
+  }
+
+  private async updateExistingItem(
+    guildId: string,
+    itemId: string,
+    data: Prisma.ShopItemUpdateManyMutationInput,
+  ) {
+    const updated = await this.prisma.shopItem.updateMany({
+      where: { id: itemId, guildId },
+      data,
+    });
+
+    if (updated.count === 0) {
+      throw new AppError("Shop item not found.", 404);
+    }
+
+    return this.prisma.shopItem.findUniqueOrThrow({
+      where: { id: itemId },
+    });
   }
 
   public async redeem(params: {

@@ -921,6 +921,55 @@ describe("participants, assignments and submissions", () => {
       expect(result.submission.imageUrl).toBe("https://example.com/image.png");
     });
 
+    it("createOrReplace handles concurrent first submissions as pending replacements", async () => {
+      const group = await seedGroupWithCapability();
+
+      const participant = await ctx.services.participantService.register({
+        guildId: GUILD_ID,
+        discordUserId: "user-001",
+        discordUsername: "student1",
+        indexId: "S001",
+        groupId: group.id,
+      });
+
+      const assignment = await ctx.services.assignmentService.upsert(GUILD_ID, {
+        title: "Reply Task",
+        baseCurrencyReward: 5,
+        basePointsReward: 10,
+        bonusCurrencyReward: 0,
+        bonusPointsReward: 0,
+        active: true,
+      });
+
+      const results = await Promise.all([
+        ctx.services.submissionService.createOrReplace({
+          guildId: GUILD_ID,
+          assignmentId: assignment.id,
+          participantId: participant.id,
+          text: "First concurrent version",
+        }),
+        ctx.services.submissionService.createOrReplace({
+          guildId: GUILD_ID,
+          assignmentId: assignment.id,
+          participantId: participant.id,
+          text: "Second concurrent version",
+        }),
+      ]);
+
+      expect(results.map((result) => result.submission.status)).toEqual(["PENDING", "PENDING"]);
+      expect(results.some((result) => result.replaced)).toBe(true);
+
+      const submissions = await ctx.prisma.submission.findMany({
+        where: {
+          guildId: GUILD_ID,
+          assignmentId: assignment.id,
+          participantId: participant.id,
+        },
+      });
+      expect(submissions).toHaveLength(1);
+      expect(["First concurrent version", "Second concurrent version"]).toContain(submissions[0]!.text);
+    });
+
     it("createOrReplace replaces a PENDING submission", async () => {
       const group = await seedGroupWithCapability();
 

@@ -2,9 +2,15 @@ import type {
   AuthSession,
   BootstrapPayload,
   DashboardAccessLevel,
+  EconomyResetRequest,
+  EconomyResetResult,
   Group,
   GroupDraft,
+  ParticipantSanction,
+  ReactionRewardRule,
+  ReactionRewardRuleDraft,
   RoleCapability,
+  SanctionApplyRequest,
   Settings,
   ShopRedemption,
   ShopItem,
@@ -510,6 +516,7 @@ function createInitialBootstrap(): BootstrapPayload {
 }
 
 let mockBootstrap = createInitialBootstrap();
+let mockSanctions: ParticipantSanction[] = [];
 
 export function getDesignPreviewSession(accessLevel = getDesignPreviewAccessLevel()): AuthSession {
   return {
@@ -634,6 +641,122 @@ export function designPreviewSaveShopItem(draft: ShopItemDraft): ShopItem {
   }
 
   return item;
+}
+
+export function designPreviewSaveReactionRule(draft: ReactionRewardRuleDraft): ReactionRewardRule {
+  const now = new Date().toISOString();
+  const existing = draft.id
+    ? mockBootstrap.reactionRules.find((candidate) => candidate.id === draft.id)
+    : null;
+  const rule: ReactionRewardRule = {
+    id: draft.id ?? `reaction-${Date.now()}`,
+    guildId: existing?.guildId ?? "preview-guild",
+    channelId: draft.channelId,
+    botUserId: draft.botUserId,
+    emoji: draft.emoji,
+    currencyDelta: draft.currencyDelta,
+    description: draft.description,
+    enabled: draft.enabled,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+
+  const existingIndex = mockBootstrap.reactionRules.findIndex((candidate) => candidate.id === rule.id);
+  if (existingIndex >= 0) {
+    mockBootstrap.reactionRules[existingIndex] = rule;
+  } else {
+    mockBootstrap.reactionRules.push(rule);
+  }
+
+  return structuredClone(rule);
+}
+
+export function designPreviewDeleteReactionRule(ruleId: string): void {
+  mockBootstrap.reactionRules = mockBootstrap.reactionRules.filter((candidate) => candidate.id !== ruleId);
+}
+
+export function designPreviewEconomyReset(request: EconomyResetRequest): EconomyResetResult {
+  const emptyImpact = {
+    dryRun: request.dryRun,
+    participantImpact: [],
+    groupImpact: [],
+    totalCurrencyDelta: 0,
+    totalPointsDelta: 0,
+  };
+
+  if (request.mode === "reverse-entries-since") {
+    return {
+      mode: request.mode,
+      ...emptyImpact,
+      scannedParticipantEntries: 0,
+      scannedGroupEntries: 0,
+      participantCorrectionEntryId: request.dryRun ? null : "preview-participant-correction",
+      groupCorrectionEntryId: request.dryRun ? null : "preview-group-correction",
+    };
+  }
+
+  if (request.mode === "modulo-balance") {
+    return {
+      mode: request.mode,
+      ...emptyImpact,
+      modulus: request.modulus,
+      participantCorrectionEntryId: request.dryRun ? null : "preview-participant-correction",
+      groupCorrectionEntryId: request.dryRun ? null : "preview-group-correction",
+    };
+  }
+
+  return {
+    mode: request.mode,
+    ...emptyImpact,
+    participantCorrectionEntryId: request.dryRun ? null : "preview-participant-correction",
+    groupCorrectionEntryId: request.dryRun ? null : "preview-group-correction",
+  };
+}
+
+export function getDesignPreviewSanctions(): ParticipantSanction[] {
+  return structuredClone(mockSanctions);
+}
+
+export function designPreviewApplySanction(
+  participantId: string,
+  request: SanctionApplyRequest,
+): ParticipantSanction {
+  const now = new Date().toISOString();
+  const sanction: ParticipantSanction = {
+    id: `sanction-${Date.now()}`,
+    participantId,
+    flag: request.flag,
+    reason: request.reason?.trim() ? request.reason.trim() : null,
+    expiresAt: request.expiresAt ?? null,
+    createdByUserId: "preview-admin",
+    createdByUsername: "Preview admin",
+    revokedAt: null,
+    revokedByUserId: null,
+    revokedByUsername: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  mockSanctions.push(sanction);
+  return structuredClone(sanction);
+}
+
+export function designPreviewRevokeSanction(sanctionId: string): ParticipantSanction {
+  const existingIndex = mockSanctions.findIndex((candidate) => candidate.id === sanctionId);
+  if (existingIndex < 0) {
+    throw new Error("Preview sanction not found.");
+  }
+
+  const now = new Date().toISOString();
+  const updated: ParticipantSanction = {
+    ...mockSanctions[existingIndex]!,
+    revokedAt: now,
+    revokedByUserId: "preview-admin",
+    revokedByUsername: "Preview admin",
+    updatedAt: now,
+  };
+  mockSanctions[existingIndex] = updated;
+  return structuredClone(updated);
 }
 
 export function designPreviewUpdateRedemptionStatus(
