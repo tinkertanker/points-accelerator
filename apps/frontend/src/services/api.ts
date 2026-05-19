@@ -1,4 +1,6 @@
 import {
+  designPreviewDeleteReactionRule,
+  designPreviewSaveReactionRule,
   designPreviewSaveCapabilities,
   designPreviewSaveGroup,
   designPreviewSaveSettings,
@@ -237,6 +239,9 @@ export const api = {
     });
   },
   createReactionRule(payload: ReactionRewardRuleDraft) {
+    if (isDesignPreview()) {
+      return Promise.resolve(designPreviewSaveReactionRule(payload));
+    }
     return request<ReactionRewardRule>("/api/reaction-rules", {
       method: "POST",
       body: {
@@ -250,6 +255,9 @@ export const api = {
     });
   },
   updateReactionRule(id: string, payload: ReactionRewardRuleDraft) {
+    if (isDesignPreview()) {
+      return Promise.resolve(designPreviewSaveReactionRule({ ...payload, id }));
+    }
     return request<ReactionRewardRule>(`/api/reaction-rules/${id}`, {
       method: "PUT",
       body: {
@@ -263,6 +271,10 @@ export const api = {
     });
   },
   deleteReactionRule(id: string) {
+    if (isDesignPreview()) {
+      designPreviewDeleteReactionRule(id);
+      return Promise.resolve();
+    }
     return request<void>(`/api/reaction-rules/${id}`, {
       method: "DELETE",
     });

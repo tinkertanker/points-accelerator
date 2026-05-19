@@ -4,6 +4,8 @@ import type {
   DashboardAccessLevel,
   Group,
   GroupDraft,
+  ReactionRewardRule,
+  ReactionRewardRuleDraft,
   RoleCapability,
   Settings,
   ShopRedemption,
@@ -634,6 +636,38 @@ export function designPreviewSaveShopItem(draft: ShopItemDraft): ShopItem {
   }
 
   return item;
+}
+
+export function designPreviewSaveReactionRule(draft: ReactionRewardRuleDraft): ReactionRewardRule {
+  const now = new Date().toISOString();
+  const existing = draft.id
+    ? mockBootstrap.reactionRules.find((candidate) => candidate.id === draft.id)
+    : null;
+  const rule: ReactionRewardRule = {
+    id: draft.id ?? `reaction-${Date.now()}`,
+    guildId: existing?.guildId ?? "preview-guild",
+    channelId: draft.channelId,
+    botUserId: draft.botUserId,
+    emoji: draft.emoji,
+    currencyDelta: draft.currencyDelta,
+    description: draft.description,
+    enabled: draft.enabled,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+
+  const existingIndex = mockBootstrap.reactionRules.findIndex((candidate) => candidate.id === rule.id);
+  if (existingIndex >= 0) {
+    mockBootstrap.reactionRules[existingIndex] = rule;
+  } else {
+    mockBootstrap.reactionRules.push(rule);
+  }
+
+  return structuredClone(rule);
+}
+
+export function designPreviewDeleteReactionRule(ruleId: string): void {
+  mockBootstrap.reactionRules = mockBootstrap.reactionRules.filter((candidate) => candidate.id !== ruleId);
 }
 
 export function designPreviewUpdateRedemptionStatus(

@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { resolveApiUrl } from "./api";
+import { api, resolveApiUrl } from "./api";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe("resolveApiUrl", () => {
   it("keeps a relative /api base from being prefixed twice", () => {
@@ -15,5 +20,46 @@ describe("resolveApiUrl", () => {
     expect(resolveApiUrl("https://points-accelerator.tk.sg/api/", "/api/bootstrap")).toBe(
       "https://points-accelerator.tk.sg/api/bootstrap",
     );
+  });
+});
+
+describe("api design preview reaction rules", () => {
+  it("keeps reaction rule mutations local", async () => {
+    vi.stubEnv("VITE_DESIGN_PREVIEW", "true");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const created = await api.createReactionRule({
+      channelId: "ch-general",
+      botUserId: "bot-1",
+      emoji: "⭐",
+      currencyDelta: 2,
+      description: "Helpful reaction",
+      enabled: true,
+    });
+    expect(created).toMatchObject({
+      guildId: "preview-guild",
+      channelId: "ch-general",
+      botUserId: "bot-1",
+      emoji: "⭐",
+      currencyDelta: 2,
+    });
+
+    const updated = await api.updateReactionRule(created.id, {
+      channelId: "ch-general",
+      botUserId: "bot-1",
+      emoji: "⭐",
+      currencyDelta: 3,
+      description: "Updated",
+      enabled: false,
+    });
+    expect(updated).toMatchObject({
+      id: created.id,
+      currencyDelta: 3,
+      description: "Updated",
+      enabled: false,
+    });
+
+    await expect(api.deleteReactionRule(created.id)).resolves.toBeUndefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
