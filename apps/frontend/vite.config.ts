@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react()],
   server: {
     port: 5173,
@@ -9,11 +9,14 @@ export default defineConfig({
   preview: {
     port: 4173,
   },
-  esbuild: {
-    // Drop debug noise from production bundles. console.warn/error still ship so prod errors surface.
-    drop: ["debugger"],
-    pure: ["console.log", "console.debug", "console.info"],
-  },
+  esbuild:
+    command === "build"
+      ? {
+          // Drop debug noise from production bundles. console.warn/error still ship so prod errors surface.
+          drop: ["debugger"],
+          pure: ["console.log", "console.debug", "console.info"],
+        }
+      : undefined,
   build: {
     rollupOptions: {
       output: {
@@ -29,4 +32,4 @@ export default defineConfig({
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     exclude: ["tests/**"],
   },
-});
+}));

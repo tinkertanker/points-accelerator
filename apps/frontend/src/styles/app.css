@@ -412,7 +412,7 @@ html[data-theme="dark"] .theme-toggle {
   scrollbar-width: thin;
   scroll-behavior: smooth;
   scroll-padding-inline: 0.75rem;
-  /* Hint scrollability with fade edges that fade as the scroller reaches each end */
+  /* Hint horizontal scrollability with static fade edges */
   mask-image: linear-gradient(
     to right,
     transparent 0,
