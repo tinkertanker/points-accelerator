@@ -1,15 +1,6 @@
-import { startTransition, useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, startTransition, useCallback, useEffect, useState } from "react";
 
-import ActivityPanel from "./components/ActivityPanel";
-import AdminToolsPanel from "./components/AdminToolsPanel";
-import AssignmentsPanel from "./components/AssignmentsPanel";
-import FulfilmentPanel from "./components/FulfilmentPanel";
-import GroupsPanel from "./components/GroupsPanel";
-import GuidePanel from "./components/GuidePanel";
 import GuildPicker from "./components/GuildPicker";
-import OverviewPanel from "./components/OverviewPanel";
-import SettingsPanel from "./components/SettingsPanel";
-import ShopPanel from "./components/ShopPanel";
 import TabBar, { type TabDefinition } from "./components/TabBar";
 import ThemeToggle from "./components/ThemeToggle";
 import { getDesignPreviewSession, isDesignPreview, setDesignPreviewAccessLevel } from "./designPreview";
@@ -33,6 +24,16 @@ import type {
   TabId,
 } from "./types";
 import "./styles/app.css";
+
+const ActivityPanel = lazy(() => import("./components/ActivityPanel"));
+const AdminToolsPanel = lazy(() => import("./components/AdminToolsPanel"));
+const AssignmentsPanel = lazy(() => import("./components/AssignmentsPanel"));
+const FulfilmentPanel = lazy(() => import("./components/FulfilmentPanel"));
+const GroupsPanel = lazy(() => import("./components/GroupsPanel"));
+const GuidePanel = lazy(() => import("./components/GuidePanel"));
+const OverviewPanel = lazy(() => import("./components/OverviewPanel"));
+const SettingsPanel = lazy(() => import("./components/SettingsPanel"));
+const ShopPanel = lazy(() => import("./components/ShopPanel"));
 
 function getInitialStatus() {
   if (typeof window === "undefined") {
@@ -459,7 +460,7 @@ export default function App() {
             onOpenGuide={() => setActiveTab("guide")}
             onSetupApplied={refreshBootstrap}
           />
-        );;
+        );
       case "settings":
         if (!settingsDraft || !sessionUser.canManageSettings) {
           return null;
@@ -767,7 +768,14 @@ export default function App() {
         <section className="login-page">
           <header className="login-hero">
             <h1 className="brand-title">
-              <img src="/favicon-32x32.png" alt="" aria-hidden="true" className="brand-title__icon brand-title__icon--hero" />
+              <img
+                src="/apple-touch-icon.png"
+                width="64"
+                height="64"
+                alt=""
+                aria-hidden="true"
+                className="brand-title__icon brand-title__icon--hero"
+              />
               <span>points accelerator</span>
             </h1>
             <p className="lede">
@@ -797,16 +805,25 @@ export default function App() {
           <header className="topbar">
             <hgroup className="topbar-brand">
               <h1 className="brand-title brand-title--compact">
-                <img src="/favicon-32x32.png" alt="" aria-hidden="true" className="brand-title__icon" />
+                <img
+                  src="/apple-touch-icon.png"
+                  width="32"
+                  height="32"
+                  alt=""
+                  aria-hidden="true"
+                  className="brand-title__icon"
+                />
                 <span>{appName}</span>
               </h1>
               {dashboardSubtitle ? <p>{dashboardSubtitle}</p> : null}
             </hgroup>
             <div className="topbar-right">
               {isDesignPreview() && sessionUser ? (
-                <label className="preview-access-picker">
+                <label className="preview-access-picker" htmlFor="preview-access-select">
                   <span>Preview as</span>
                   <select
+                    id="preview-access-select"
+                    name="preview-access-level"
                     value={sessionUser.dashboardAccessLevel}
                     onChange={(event) => handlePreviewAccessChange(event.target.value as DashboardAccessLevel)}
                   >
@@ -853,7 +870,15 @@ export default function App() {
             aria-labelledby={`tab-${activeTab}`}
             className="dashboard-panel-view"
           >
-            {activePanel}
+            <Suspense
+              fallback={
+                <p className="panel-loading" role="status" aria-live="polite">
+                  Loading...
+                </p>
+              }
+            >
+              {activePanel}
+            </Suspense>
           </section>
 
           <footer className="status-bar">{status}</footer>

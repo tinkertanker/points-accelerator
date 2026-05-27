@@ -342,7 +342,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("tab", { name: /overview/i, selected: true })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open the guide/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /open the guide/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: /settings/i }));
 
@@ -497,7 +497,8 @@ describe("App", () => {
     expect(await screen.findByRole("tab", { name: /leaderboard/i })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /shop/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /settings/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /view the leaderboard/i })).toBeInTheDocument();
+    // ActivityPanel is lazy-loaded; await the Suspense resolution before asserting its content.
+    expect(await screen.findByRole("heading", { name: /view the leaderboard/i })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /points/i })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: /currency/i })).not.toBeInTheDocument();
     expect(screen.getByText("Alpha")).toBeInTheDocument();
