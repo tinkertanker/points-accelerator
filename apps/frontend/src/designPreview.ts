@@ -655,6 +655,8 @@ export function designPreviewSaveReactionRule(draft: ReactionRewardRuleDraft): R
     botUserId: draft.botUserId,
     emoji: draft.emoji,
     currencyDelta: draft.currencyDelta,
+    amountMode: draft.amountMode,
+    maxCurrencyDelta: draft.maxCurrencyDelta,
     description: draft.description,
     enabled: draft.enabled,
     createdAt: existing?.createdAt ?? now,

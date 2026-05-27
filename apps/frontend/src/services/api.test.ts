@@ -33,6 +33,8 @@ describe("api design preview reaction rules", () => {
       botUserId: "bot-1",
       emoji: "⭐",
       currencyDelta: 2,
+      amountMode: "FIXED",
+      maxCurrencyDelta: null,
       description: "Helpful reaction",
       enabled: true,
     });
@@ -49,12 +51,16 @@ describe("api design preview reaction rules", () => {
       botUserId: "bot-1",
       emoji: "⭐",
       currencyDelta: 3,
+      amountMode: "COUNT_MULTIPLIER",
+      maxCurrencyDelta: 1000,
       description: "Updated",
       enabled: false,
     });
     expect(updated).toMatchObject({
       id: created.id,
       currencyDelta: 3,
+      amountMode: "COUNT_MULTIPLIER",
+      maxCurrencyDelta: 1000,
       description: "Updated",
       enabled: false,
     });

@@ -19,6 +19,8 @@ const EMPTY_DRAFT: ReactionRewardRuleDraft = {
   botUserId: "",
   emoji: "",
   currencyDelta: 1,
+  amountMode: "FIXED",
+  maxCurrencyDelta: null,
   description: "",
   enabled: true,
 };
@@ -34,7 +36,9 @@ const FIELD_STYLES = {
   channel: { flex: "1 1 180px", minWidth: 160 },
   botId: { flex: "1 1 200px", minWidth: 180 },
   emoji: { flex: "0 0 110px" },
+  mode: { flex: "0 0 150px" },
   delta: { flex: "0 0 110px" },
+  max: { flex: "0 0 120px" },
   note: { flex: "1 1 160px", minWidth: 140 },
   enabled: { flex: "0 0 70px" },
   actions: { flex: "0 0 auto" },
@@ -47,6 +51,8 @@ function ruleToDraft(rule: ReactionRewardRule): ReactionRewardRuleDraft {
     botUserId: rule.botUserId,
     emoji: rule.emoji,
     currencyDelta: rule.currencyDelta,
+    amountMode: rule.amountMode,
+    maxCurrencyDelta: rule.maxCurrencyDelta,
     description: rule.description ?? "",
     enabled: rule.enabled,
   };
@@ -58,6 +64,8 @@ function isDirty(rule: ReactionRewardRule, draft: ReactionRewardRuleDraft) {
     rule.botUserId !== draft.botUserId ||
     rule.emoji !== draft.emoji ||
     rule.currencyDelta !== draft.currencyDelta ||
+    rule.amountMode !== draft.amountMode ||
+    rule.maxCurrencyDelta !== draft.maxCurrencyDelta ||
     (rule.description ?? "") !== (draft.description ?? "") ||
     rule.enabled !== draft.enabled
   );
@@ -68,6 +76,14 @@ function parseDelta(text: string): number | null {
   if (!trimmed) return null;
   const parsed = Number(trimmed);
   if (!Number.isFinite(parsed) || parsed === 0) return null;
+  return parsed;
+}
+
+function parseOptionalPositive(text: string): number | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
   return parsed;
 }
 
@@ -88,10 +104,13 @@ export default function ReactionRulesEditor({
   const [drafts, setDrafts] = useState<Record<string, ReactionRewardRuleDraft>>({});
   const [newDraft, setNewDraft] = useState<ReactionRewardRuleDraft>(EMPTY_DRAFT);
   const [deltaTexts, setDeltaTexts] = useState<Record<string, string>>({ [NEW_ROW_KEY]: "1" });
+  const [maxTexts, setMaxTexts] = useState<Record<string, string>>({});
 
   const draftFor = (rule: ReactionRewardRule) => drafts[rule.id] ?? ruleToDraft(rule);
   const deltaTextFor = (key: string, fallback: number) =>
     deltaTexts[key] ?? String(fallback);
+  const maxTextFor = (key: string, fallback: number | null) =>
+    maxTexts[key] ?? (fallback === null ? "" : String(fallback));
 
   const updateDraft = (id: string, next: ReactionRewardRuleDraft) => {
     setDrafts((prev) => ({ ...prev, [id]: next }));
@@ -99,6 +118,10 @@ export default function ReactionRulesEditor({
 
   const setDeltaText = (key: string, value: string) => {
     setDeltaTexts((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const setMaxText = (key: string, value: string) => {
+    setMaxTexts((prev) => ({ ...prev, [key]: value }));
   };
 
   const resetDraft = (id: string) => {
@@ -112,14 +135,22 @@ export default function ReactionRulesEditor({
       delete copy[id];
       return copy;
     });
+    setMaxTexts((prev) => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
   };
 
   const handleSave = async (rule: ReactionRewardRule) => {
     const draft = draftFor(rule);
     const text = deltaTextFor(rule.id, draft.currencyDelta);
     const parsed = parseDelta(text);
-    if (parsed === null) return;
-    const success = await onUpdate(rule.id, { ...draft, currencyDelta: parsed });
+    const maxText = maxTextFor(rule.id, draft.maxCurrencyDelta);
+    const parsedMax = parseOptionalPositive(maxText);
+    const maxCurrencyDelta = draft.amountMode === "COUNT_MULTIPLIER" && maxText.trim() ? parsedMax : null;
+    if (parsed === null || (draft.amountMode === "COUNT_MULTIPLIER" && maxCurrencyDelta === null)) return;
+    const success = await onUpdate(rule.id, { ...draft, currencyDelta: parsed, maxCurrencyDelta });
     if (success) {
       resetDraft(rule.id);
     }
@@ -139,8 +170,11 @@ export default function ReactionRulesEditor({
   const handleCreate = async () => {
     const text = deltaTextFor(NEW_ROW_KEY, newDraft.currencyDelta);
     const parsed = parseDelta(text);
-    if (parsed === null) return;
-    const success = await onCreate({ ...newDraft, currencyDelta: parsed });
+    const maxText = maxTextFor(NEW_ROW_KEY, newDraft.maxCurrencyDelta);
+    const parsedMax = parseOptionalPositive(maxText);
+    const maxCurrencyDelta = newDraft.amountMode === "COUNT_MULTIPLIER" && maxText.trim() ? parsedMax : null;
+    if (parsed === null || (newDraft.amountMode === "COUNT_MULTIPLIER" && maxCurrencyDelta === null)) return;
+    const success = await onCreate({ ...newDraft, currencyDelta: parsed, maxCurrencyDelta });
     if (success) {
       // Keep channel + bot ID — admins typically add several rules per bot.
       setNewDraft({
@@ -148,6 +182,8 @@ export default function ReactionRulesEditor({
         botUserId: newDraft.botUserId,
         emoji: "",
         currencyDelta: 1,
+        amountMode: newDraft.amountMode,
+        maxCurrencyDelta: newDraft.amountMode === "COUNT_MULTIPLIER" ? maxCurrencyDelta : null,
         description: "",
         enabled: true,
       });
@@ -164,22 +200,24 @@ export default function ReactionRulesEditor({
 
   const newDeltaText = deltaTextFor(NEW_ROW_KEY, newDraft.currencyDelta);
   const newDeltaValid = parseDelta(newDeltaText) !== null;
+  const newMaxText = maxTextFor(NEW_ROW_KEY, newDraft.maxCurrencyDelta);
+  const newMaxValid =
+    newDraft.amountMode !== "COUNT_MULTIPLIER" || parseOptionalPositive(newMaxText) !== null;
   const canSubmitNew =
     !isBusy &&
     Boolean(newDraft.channelId) &&
     newDraft.botUserId.trim().length > 0 &&
     newDraft.emoji.trim().length > 0 &&
-    newDeltaValid;
+    newDeltaValid &&
+    newMaxValid;
 
   return (
     <fieldset className="settings-section span-full">
       <legend>Bot reaction rewards</legend>
       <p className="role-checklist__help">
-        Award or deduct {currencyName} when a configured bot reacts to a message in a chosen channel. The
-        message author receives the delta. Use a negative number to deduct (e.g. <code>-1</code>). Find a
-        bot's user ID by enabling Discord Developer Mode and right-clicking the bot user. Emoji accepts
-        either a unicode character (e.g. the green tick) or a custom emoji as <code>{"<:name:id>"}</code>
-        or just the ID.
+        Award or deduct {currencyName} when a configured bot reacts to a message in a chosen channel. Fixed
+        amount pays the configured delta. Count multiplier reads a number at the start of the message and
+        pays number x delta, capped at the configured maximum payout.
       </p>
 
       {rules.length > 0 ? (
@@ -188,8 +226,15 @@ export default function ReactionRulesEditor({
             const draft = draftFor(rule);
             const text = deltaTextFor(rule.id, draft.currencyDelta);
             const parsed = parseDelta(text);
+            const maxText = maxTextFor(rule.id, draft.maxCurrencyDelta);
+            const parsedMax = parseOptionalPositive(maxText);
+            const maxCurrencyDelta =
+              draft.amountMode === "COUNT_MULTIPLIER" && maxText.trim() ? parsedMax : null;
             const dirty =
-              isDirty(rule, draft) || (parsed !== null && parsed !== draft.currencyDelta);
+              isDirty(rule, draft) ||
+              (parsed !== null && parsed !== draft.currencyDelta) ||
+              maxCurrencyDelta !== draft.maxCurrencyDelta;
+            const maxValid = draft.amountMode !== "COUNT_MULTIPLIER" || maxCurrencyDelta !== null;
             return (
               <div key={rule.id} style={ROW_STYLE}>
                 <label className="settings-field" style={FIELD_STYLES.channel}>
@@ -225,12 +270,30 @@ export default function ReactionRulesEditor({
                     }
                   />
                 </label>
+                <label className="settings-field" style={FIELD_STYLES.mode}>
+                  Reward mode
+                  <select
+                    aria-label="Reward mode"
+                    value={draft.amountMode}
+                    onChange={(event) =>
+                      updateDraft(rule.id, {
+                        ...draft,
+                        amountMode: event.target.value as ReactionRewardRuleDraft["amountMode"],
+                        maxCurrencyDelta:
+                          event.target.value === "COUNT_MULTIPLIER" ? draft.maxCurrencyDelta : null,
+                      })
+                    }
+                  >
+                    <option value="FIXED">Fixed amount</option>
+                    <option value="COUNT_MULTIPLIER">Count multiplier</option>
+                  </select>
+                </label>
                 <label className="settings-field" style={FIELD_STYLES.delta}>
-                  {currencyName} delta
+                  {draft.amountMode === "COUNT_MULTIPLIER" ? `${currencyName} per count` : `${currencyName} delta`}
                   <input
                     type="text"
                     inputMode="numeric"
-                    aria-label="Currency delta"
+                    aria-label="Currency amount"
                     value={text}
                     onChange={(event) => setDeltaText(rule.id, event.target.value)}
                     onBlur={() => {
@@ -238,6 +301,23 @@ export default function ReactionRulesEditor({
                         updateDraft(rule.id, { ...draft, currencyDelta: parsed });
                       }
                     }}
+                  />
+                </label>
+                <label className="settings-field" style={FIELD_STYLES.max}>
+                  Max payout
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    aria-label="Maximum payout"
+                    value={maxText}
+                    disabled={draft.amountMode !== "COUNT_MULTIPLIER"}
+                    onChange={(event) => setMaxText(rule.id, event.target.value)}
+                    onBlur={() => {
+                      if (maxCurrencyDelta !== null) {
+                        updateDraft(rule.id, { ...draft, maxCurrencyDelta });
+                      }
+                    }}
+                    placeholder={draft.amountMode === "COUNT_MULTIPLIER" ? "10000" : ""}
                   />
                 </label>
                 <label className="settings-field" style={FIELD_STYLES.note}>
@@ -266,7 +346,7 @@ export default function ReactionRulesEditor({
                   <button
                     type="button"
                     onClick={() => void handleSave(rule)}
-                    disabled={isBusy || !dirty || parsed === null}
+                    disabled={isBusy || !dirty || parsed === null || !maxValid}
                   >
                     Save
                   </button>
@@ -315,14 +395,41 @@ export default function ReactionRulesEditor({
             placeholder="paste here"
           />
         </label>
+        <label className="settings-field" style={FIELD_STYLES.mode}>
+          Reward mode
+          <select
+            value={newDraft.amountMode}
+            onChange={(event) =>
+              setNewDraft({
+                ...newDraft,
+                amountMode: event.target.value as ReactionRewardRuleDraft["amountMode"],
+                maxCurrencyDelta: event.target.value === "COUNT_MULTIPLIER" ? newDraft.maxCurrencyDelta : null,
+              })
+            }
+          >
+            <option value="FIXED">Fixed amount</option>
+            <option value="COUNT_MULTIPLIER">Count multiplier</option>
+          </select>
+        </label>
         <label className="settings-field" style={FIELD_STYLES.delta}>
-          {currencyName} delta
+          {newDraft.amountMode === "COUNT_MULTIPLIER" ? `${currencyName} per count` : `${currencyName} delta`}
           <input
             type="text"
             inputMode="numeric"
             value={newDeltaText}
             onChange={(event) => setDeltaText(NEW_ROW_KEY, event.target.value)}
-            placeholder="1 or -1"
+            placeholder={newDraft.amountMode === "COUNT_MULTIPLIER" ? "10" : "1 or -1"}
+          />
+        </label>
+        <label className="settings-field" style={FIELD_STYLES.max}>
+          Max payout
+          <input
+            type="text"
+            inputMode="numeric"
+            value={newMaxText}
+            disabled={newDraft.amountMode !== "COUNT_MULTIPLIER"}
+            onChange={(event) => setMaxText(NEW_ROW_KEY, event.target.value)}
+            placeholder={newDraft.amountMode === "COUNT_MULTIPLIER" ? "10000" : ""}
           />
         </label>
         <label className="settings-field" style={FIELD_STYLES.note}>

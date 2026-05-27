@@ -76,6 +76,11 @@ enum ParticipantSanctionFlag {
   CANNOT_RECEIVE_REWARDS
 }
 
+enum ReactionRewardAmountMode {
+  FIXED
+  COUNT_MULTIPLIER
+}
+
 model GuildConfig {
   id                           String                @id @default(cuid())
   guildId                      String                @unique
@@ -131,6 +136,8 @@ model ReactionRewardRule {
   botUserId     String
   emoji         String
   currencyDelta Decimal     @db.Decimal(18, 6)
+  amountMode    ReactionRewardAmountMode @default(FIXED)
+  maxCurrencyDelta Decimal?  @db.Decimal(18, 6)
   description   String?
   enabled       Boolean     @default(true)
   createdAt     DateTime    @default(now())

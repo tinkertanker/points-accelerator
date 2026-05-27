@@ -189,6 +189,8 @@ export type ReactionRewardRule = {
   botUserId: string;
   emoji: string;
   currencyDelta: number;
+  amountMode: "FIXED" | "COUNT_MULTIPLIER";
+  maxCurrencyDelta: number | null;
   description: string | null;
   enabled: boolean;
   createdAt: string;
@@ -201,6 +203,8 @@ export type ReactionRewardRuleDraft = {
   botUserId: string;
   emoji: string;
   currencyDelta: number;
+  amountMode: "FIXED" | "COUNT_MULTIPLIER";
+  maxCurrencyDelta: number | null;
   description: string | null;
   enabled: boolean;
 };

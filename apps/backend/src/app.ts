@@ -283,6 +283,8 @@ const reactionRewardRuleSchema = z.object({
     .refine((value) => Number.isFinite(value) && value !== 0, {
       message: "currencyDelta must be a non-zero number",
     }),
+  amountMode: z.enum(["FIXED", "COUNT_MULTIPLIER"]).optional(),
+  maxCurrencyDelta: z.number().positive().nullable().optional(),
   description: z.string().nullable().optional(),
   enabled: z.boolean().optional(),
 });
