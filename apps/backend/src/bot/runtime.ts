@@ -2905,6 +2905,7 @@ export class BotRuntime {
       rule,
       participantId: resolved.participant.id,
       messageId: resolvedMessage.id,
+      messageContent: resolvedMessage.content,
       messageAuthorUserId: author.id,
       messageAuthorUsername: author.username,
     });
