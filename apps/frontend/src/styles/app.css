@@ -15,6 +15,7 @@
   --accent-hover: #fde8c8;
   --primary: #FB753A;
   --primary-hover: #e0622b;
+  --primary-strong: #b04316;
   --secondary: #F2C949;
   --secondary-hover: #e0b83a;
   --danger: #dc2626;
@@ -40,6 +41,7 @@ html[data-theme="dark"] {
   --accent-hover: #362a1e;
   --primary: #FB753A;
   --primary-hover: #ff8f5a;
+  --primary-strong: #ffb088;
   --secondary: #F2C949;
   --secondary-hover: #f5d56a;
   --danger: #ef4444;
@@ -345,7 +347,7 @@ html[data-theme="dark"] .theme-toggle {
 .guide-inline-link {
   background: none;
   border: none;
-  color: var(--primary);
+  color: var(--primary-strong);
   cursor: pointer;
   display: inline;
   font: inherit;
@@ -360,6 +362,19 @@ html[data-theme="dark"] .theme-toggle {
   color: var(--primary-hover);
   border: none;
   background: none;
+}
+
+.guide-inline-link:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.panel-loading {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  padding: 2rem 0.5rem;
+  text-align: center;
 }
 
 .preview-access-picker {
@@ -382,6 +397,7 @@ html[data-theme="dark"] .theme-toggle {
 
 .tab-bar {
   margin-bottom: 1rem;
+  position: relative;
 }
 
 .tab-bar__scroller {
@@ -394,6 +410,29 @@ html[data-theme="dark"] .theme-toggle {
   overflow-x: auto;
   padding: 0.45rem;
   scrollbar-width: thin;
+  scroll-behavior: smooth;
+  scroll-padding-inline: 0.75rem;
+  /* Hint horizontal scrollability with static fade edges */
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 1.25rem,
+    #000 calc(100% - 1.25rem),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 1.25rem,
+    #000 calc(100% - 1.25rem),
+    transparent 100%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-bar__scroller {
+    scroll-behavior: auto;
+  }
 }
 
 button.tab-bar__tab {

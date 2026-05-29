@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import type { TabId } from "../types";
 
 export type TabDefinition = {
@@ -13,9 +15,33 @@ type TabBarProps = {
 };
 
 export default function TabBar({ activeTab, onTabChange, tabs }: TabBarProps) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) {
+      return;
+    }
+    const activeButton = scroller.querySelector<HTMLButtonElement>(`#tab-${activeTab}`);
+    if (!activeButton || typeof activeButton.scrollIntoView !== "function") {
+      return;
+    }
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    activeButton.scrollIntoView({
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [activeTab]);
+
   return (
     <nav className="tab-bar" aria-label="Dashboard sections">
-      <div className="tab-bar__scroller" role="tablist" aria-orientation="horizontal">
+      <div
+        ref={scrollerRef}
+        className="tab-bar__scroller"
+        role="tablist"
+        aria-orientation="horizontal"
+      >
         {tabs.map((tab) => {
           const isActive = tab.id === activeTab;
 
