@@ -74,6 +74,31 @@ function createRuntimeFixture() {
         updatedAt: new Date("2026-04-01T12:00:00.000Z"),
         recentDonations: [],
       }),
+      getActiveLeaderboard: vi.fn().mockResolvedValue({
+        campaign: {
+          id: "campaign-1",
+          guildId: "guild-test",
+          title: "Pizza Fund",
+          goalPoints: 100,
+        },
+        donatedPoints: 35,
+        donationCount: 2,
+        entries: [
+          {
+            rank: 1,
+            participant: {
+              id: "participant-1",
+              discordUserId: "user-1",
+              discordUsername: "alice-user",
+              indexId: "alice",
+            },
+            group: { id: "group-1", displayName: "Gryffindor", roleId: "group-role" },
+            totalDonated: 35,
+            donationCount: 2,
+            lastDonatedAt: new Date("2026-04-01T12:00:00.000Z"),
+          },
+        ],
+      }),
       donatePersonalCurrency: vi.fn().mockResolvedValue({
         donation: { id: "donation-1", amount: 10 },
         currencyEntry: { id: "currency-2" },
@@ -893,6 +918,45 @@ describe("bot runtime", () => {
 
     const embed = reply.mock.calls[0][0].embeds[0].data;
     expect(embed.title).toBe("GoFundMe: help jiachen (2018) recover");
+  });
+
+  it("shows the GoFundMe donation leaderboard", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      guildId: "guild-test",
+      commandName: "gofundme",
+      guild: {
+        members: {
+          fetch: vi.fn(async (userId: string) => ({
+            displayName: userId === "user-1" ? "Alice Jones" : "Viewer",
+            roles: { cache: new Map() },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          })),
+        },
+      },
+      options: {
+        getSubcommand: () => "leaderboard",
+      },
+      reply,
+      user: {
+        id: "viewer-1",
+        username: "viewer",
+      },
+    });
+
+    expect(services.goFundMeService.getActiveLeaderboard).toHaveBeenCalledWith("guild-test");
+    const embed = reply.mock.calls[0][0].embeds[0].data;
+    expect(embed.title).toBe("GoFundMe Donor Leaderboard: Pizza Fund");
+    expect(embed.description).toContain("🥇 **<@user-1>**");
+    expect(embed.description).toContain("35 bananas 💲 · 2 donations");
+    expect(embed.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Top donors", value: "1" }),
+        expect.objectContaining({ name: "Total donated", value: "35 bananas 💲" }),
+      ]),
+    );
   });
 
   it("donates personal points to GoFundMe from the caller's wallet", async () => {
@@ -2858,6 +2922,7 @@ describe("bot runtime", () => {
     const deductMixedSub = deductCommand?.options?.find((option) => option.name === "mixed");
     const goFundMeSetSub = goFundMeCommand?.options?.find((option) => option.name === "set");
     const goFundMeDonateSub = goFundMeCommand?.options?.find((option) => option.name === "donate");
+    const goFundMeLeaderboardSub = goFundMeCommand?.options?.find((option) => option.name === "leaderboard");
 
     expect(awardPointsSub?.options).toEqual(
       expect.arrayContaining([
@@ -2903,6 +2968,7 @@ describe("bot runtime", () => {
         expect.objectContaining({ name: "amount", required: true, min_value: 0.01 }),
       ]),
     );
+    expect(goFundMeLeaderboardSub).toEqual(expect.objectContaining({ name: "leaderboard" }));
     expect(submitCommand?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "assignment", required: true }),

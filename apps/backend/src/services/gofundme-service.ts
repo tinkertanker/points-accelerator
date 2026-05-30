@@ -14,6 +14,7 @@ type Actor = {
 type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
 
 export type GoFundMeSummary = Awaited<ReturnType<GoFundMeService["getActiveSummary"]>>;
+export type GoFundMeLeaderboard = Awaited<ReturnType<GoFundMeService["getActiveLeaderboard"]>>;
 
 export class GoFundMeService {
   public constructor(
@@ -96,6 +97,67 @@ export class GoFundMeService {
     }
 
     return this.buildSummary(campaign, this.prisma);
+  }
+
+  public async getActiveLeaderboard(guildId: string, limit = 10) {
+    const campaign = await this.prisma.goFundMeCampaign.findFirst({
+      where: { guildId, active: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!campaign) {
+      return null;
+    }
+
+    const [aggregate, grouped] = await Promise.all([
+      this.prisma.goFundMeDonation.aggregate({
+        where: { campaignId: campaign.id },
+        _sum: { amount: true },
+        _count: { id: true },
+      }),
+      this.prisma.goFundMeDonation.groupBy({
+        by: ["participantId"],
+        where: { campaignId: campaign.id },
+        _sum: { amount: true },
+        _count: { id: true },
+        _max: { createdAt: true },
+        orderBy: [{ _sum: { amount: "desc" } }, { _count: { id: "desc" } }],
+        take: limit,
+      }),
+    ]);
+
+    const participantIds = grouped.map((entry) => entry.participantId);
+    const participants = await this.prisma.participant.findMany({
+      where: { id: { in: participantIds } },
+      include: { group: true },
+    });
+    const participantById = new Map(participants.map((participant) => [participant.id, participant]));
+
+    return {
+      campaign: {
+        id: campaign.id,
+        guildId: campaign.guildId,
+        title: campaign.title,
+        goalPoints: decimalToNumber(campaign.goalPoints),
+      },
+      donatedPoints: decimalToNumber(aggregate._sum.amount),
+      donationCount: aggregate._count.id,
+      entries: grouped
+        .map((entry, index) => {
+          const participant = participantById.get(entry.participantId);
+          if (!participant) {
+            return null;
+          }
+          return {
+            rank: index + 1,
+            participant,
+            group: participant.group,
+            totalDonated: decimalToNumber(entry._sum.amount),
+            donationCount: entry._count.id,
+            lastDonatedAt: entry._max.createdAt,
+          };
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+    };
   }
 
   public async donatePersonalCurrency(params: {

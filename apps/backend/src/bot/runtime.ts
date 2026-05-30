@@ -50,8 +50,15 @@ type BettingCooldownEntry = {
 type CommandLedgerEntry = Awaited<ReturnType<AppServices["economyService"]["getLedger"]>>[number];
 type GroupLeaderboardEntry = Awaited<ReturnType<AppServices["economyService"]["getLeaderboard"]>>[number];
 type GuildConfig = Awaited<ReturnType<AppServices["configService"]["getOrCreate"]>>;
+type GoFundMeLeaderboard = NonNullable<Awaited<ReturnType<AppServices["goFundMeService"]["getActiveLeaderboard"]>>>;
 type ActiveAssignment = Awaited<ReturnType<AppServices["assignmentService"]["listActive"]>>[number];
 type CurrencyLeaderboardEntry = Awaited<ReturnType<AppServices["participantService"]["getCurrencyLeaderboard"]>>[number];
+type ParticipantDisplayEntry = {
+  id: string;
+  discordUserId?: string | null;
+  discordUsername?: string | null;
+  indexId: string;
+};
 type ShopListItem = Awaited<ReturnType<AppServices["shopService"]["list"]>>[number];
 type UserRedemption = Awaited<
   ReturnType<AppServices["shopService"]["listPersonalRedemptionsByUser"]>
@@ -2396,6 +2403,45 @@ export class BotRuntime {
     return title.replace(USER_MENTION_TOKEN_PATTERN, (token, userId: string) => displayNames.get(userId) ?? token);
   }
 
+  private async buildGoFundMeLeaderboardEmbed(
+    leaderboard: GoFundMeLeaderboard,
+    config: GuildConfig,
+    guild?: ChatInputCommandInteraction["guild"] | null,
+  ) {
+    const title = await this.formatGoFundMeTitle(leaderboard.campaign.title, guild);
+    const displayNames = await this.resolveParticipantDisplayNames(
+      guild ?? null,
+      leaderboard.entries.map((entry) => entry.participant),
+    );
+    const standings = leaderboard.entries
+      .map((entry) => {
+        const displayName = this.formatParticipantReference(
+          entry.participant,
+          displayNames.get(entry.participant.id) ?? entry.participant.discordUsername ?? entry.participant.indexId,
+        );
+        const donationLabel = entry.donationCount === 1 ? "donation" : "donations";
+        return [
+          `${this.formatRankMarker(entry.rank - 1)} **${displayName}**`,
+          `${this.formatCurrencyAmount(entry.totalDonated, config)} · ${entry.donationCount} ${donationLabel}`,
+          this.formatGroupReference(entry.group),
+        ].join("\n");
+      })
+      .join("\n\n");
+
+    const embed = new EmbedBuilder()
+      .setColor(GOFUNDME_EMBED_COLOUR)
+      .setTitle(`GoFundMe Donor Leaderboard: ${title}`)
+      .setDescription(standings || "No donations yet.")
+      .addFields(
+        { name: "Top donors", value: `${leaderboard.entries.length}`, inline: true },
+        { name: "Total donated", value: this.formatCurrencyAmount(leaderboard.donatedPoints, config), inline: true },
+        { name: "Goal", value: this.formatCurrencyAmount(leaderboard.campaign.goalPoints, config), inline: true },
+      )
+      .setFooter({ text: "Ranked by personal wallet points donated to the active GoFundMe campaign." });
+
+    return embed;
+  }
+
   private formatUserReference(discordUserId: string | null | undefined, fallbackLabel: string) {
     return discordUserId ? `<@${discordUserId}>` : fallbackLabel;
   }
@@ -2507,10 +2553,7 @@ export class BotRuntime {
     return embed;
   }
 
-  private async resolveParticipantDisplayNames(
-    guild: ChatInputCommandInteraction["guild"],
-    participants: CurrencyLeaderboardEntry[],
-  ) {
+  private async resolveParticipantDisplayNames(guild: ChatInputCommandInteraction["guild"] | null, participants: ParticipantDisplayEntry[]) {
     const fallbackEntries = participants.map((participant) => [
       participant.id,
       participant.discordUsername ?? participant.indexId,
@@ -2521,7 +2564,9 @@ export class BotRuntime {
 
     const resolvedEntries = await Promise.all(
       participants.map(async (participant) => {
-        const member = await guild.members.fetch(participant.discordUserId).catch(() => null);
+        const member = participant.discordUserId
+          ? await guild.members.fetch(participant.discordUserId).catch(() => null)
+          : null;
         return [
           participant.id,
           member?.displayName || member?.user?.globalName || participant.discordUsername || participant.indexId,
@@ -3963,6 +4008,16 @@ export class BotRuntime {
           return;
         }
 
+        if (subcommand === "leaderboard") {
+          const leaderboard = await this.services.goFundMeService.getActiveLeaderboard(guildId);
+          if (!leaderboard) {
+            await interaction.reply("No active GoFundMe campaign. Ask an admin to run /gofundme set.");
+            return;
+          }
+          await interaction.reply({ embeds: [await this.buildGoFundMeLeaderboardEmbed(leaderboard, config, interaction.guild)] });
+          return;
+        }
+
         const summary = await this.services.goFundMeService.getActiveSummary(guildId);
         if (!summary) {
           await interaction.reply("No active GoFundMe campaign. Ask an admin to run /gofundme set.");
@@ -5141,6 +5196,11 @@ export class BotRuntime {
           sub
             .setName("status")
             .setDescription("Show the current GoFundMe progress."),
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("leaderboard")
+            .setDescription("Show top GoFundMe donors for the active campaign."),
         )
         .addSubcommand((sub) =>
           sub

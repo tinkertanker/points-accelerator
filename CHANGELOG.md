@@ -8,6 +8,11 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.9.4] - 2026-05-30
+
+### Added
+- `/gofundme leaderboard` shows the top donors for the active GoFundMe campaign, ranked by personal wallet points donated.
+
 ## [0.9.3] - 2026-05-30
 
 ### Fixed
