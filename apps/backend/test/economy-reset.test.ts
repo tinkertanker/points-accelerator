@@ -576,6 +576,101 @@ describe("EconomyResetService chunking helpers", () => {
   });
 });
 
+describe("EconomyResetService.rescaleBalances", () => {
+  it("rescales participant currency and group points by a decimal factor", async () => {
+    const group = await seedGroup("alpha", "role-alpha");
+    const participant = await seedParticipant(group.id, "student-1", "p-1");
+    await recordParticipantEntry({
+      type: "MANUAL_AWARD",
+      participantId: participant.id,
+      currencyDelta: 12_345,
+      createdAt: new Date("2026-05-01T04:00:00Z"),
+    });
+    await recordGroupEntry({
+      type: "MANUAL_AWARD",
+      groupId: group.id,
+      pointsDelta: 9_000,
+      currencyDelta: 500,
+      createdAt: new Date("2026-05-01T04:00:00Z"),
+    });
+
+    const result = await ctx.services.economyResetService.rescaleBalances({
+      guildId: GUILD_ID,
+      actor: { userId: "admin-1", username: "Admin" },
+      factor: 0.01,
+      applyToParticipantCurrency: true,
+      applyToGroupPoints: true,
+      dryRun: false,
+    });
+
+    expect(result.factor).toBe(0.01);
+    expect(result.participantImpact[0]).toMatchObject({
+      balanceBefore: 12_345,
+      delta: -12_221.55,
+      balanceAfter: 123.45,
+    });
+    expect(result.groupImpact[0]).toMatchObject({
+      pointsBefore: 9_000,
+      pointsDelta: -8_910,
+      pointsAfter: 90,
+      currencyBefore: 500,
+      currencyDelta: 0,
+      currencyAfter: 500,
+    });
+    expect(await getParticipantBalance(participant.id)).toBe(123.45);
+    expect(await getGroupBalance(group.id)).toEqual({ points: 90, currency: 500 });
+  });
+
+  it("dry run previews rescale impact without writing entries", async () => {
+    const group = await seedGroup("beta", "role-beta");
+    await recordGroupEntry({
+      type: "MANUAL_AWARD",
+      groupId: group.id,
+      pointsDelta: 100,
+      currencyDelta: 0,
+      createdAt: new Date("2026-05-01T04:00:00Z"),
+    });
+
+    const result = await ctx.services.economyResetService.rescaleBalances({
+      guildId: GUILD_ID,
+      actor: { userId: "admin-1", username: "Admin" },
+      factor: 0.5,
+      applyToGroupPoints: true,
+      dryRun: true,
+    });
+
+    expect(result.dryRun).toBe(true);
+    expect(result.groupCorrectionEntryId).toBeNull();
+    expect(result.groupImpact[0]).toMatchObject({
+      pointsBefore: 100,
+      pointsDelta: -50,
+      pointsAfter: 50,
+    });
+    expect(await getGroupBalance(group.id)).toEqual({ points: 100, currency: 0 });
+  });
+
+  it("rejects invalid factors and empty target selections", async () => {
+    await expect(
+      ctx.services.economyResetService.rescaleBalances({
+        guildId: GUILD_ID,
+        actor: { userId: "admin-1", username: "Admin" },
+        factor: -1,
+        applyToGroupPoints: true,
+        dryRun: true,
+      }),
+    ).rejects.toThrow(/non-negative finite/i);
+
+    await expect(
+      ctx.services.economyResetService.rescaleBalances({
+        guildId: GUILD_ID,
+        actor: { userId: "admin-1", username: "Admin" },
+        factor: 0.01,
+        dryRun: true,
+      }),
+    ).rejects.toThrow(/at least one target/i);
+  });
+});
+
 describe("EconomyResetService.setBalances", () => {
   it("nukes participant currency to 0 (handles even outsized abuse balances via chunking)", async () => {
     const group = await seedGroup("alpha", "role-alpha");

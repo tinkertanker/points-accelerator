@@ -272,7 +272,7 @@ model ShopItem {
   guildId                String
   name                   String
   description            String
-  audience               ShopItemAudience  @default(INDIVIDUAL)
+  audience               ShopItemAudience  @default(GROUP)
   cost                   Decimal           @db.Decimal(18, 6)
   stock                  Int?
   enabled                Boolean           @default(true)

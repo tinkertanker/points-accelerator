@@ -87,7 +87,7 @@ function toShopItemDraft(item?: ShopItem): ShopItemDraft {
     return {
       name: "",
       description: "",
-      audience: "INDIVIDUAL",
+      audience: "GROUP",
       cost: 0,
       stock: null,
       enabled: true,

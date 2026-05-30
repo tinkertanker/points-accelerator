@@ -2602,15 +2602,12 @@ export class BotRuntime {
     paged: ReturnType<typeof paginateArray<ShopListItem>>;
   }) {
     const { config, audience, totalItems, paged } = params;
-    const priceFormatter = (item: ShopListItem) =>
-      audience === "group"
-        ? this.formatPointsAmount(item.cost.toString(), config)
-        : this.formatCurrencyAmount(item.cost.toString(), config);
+    const priceFormatter = (item: ShopListItem) => this.formatPointsAmount(item.cost.toString(), config);
     const title = audience === "group" ? "Group store" : "Personal store";
     const headline =
       audience === "group"
         ? `Items buyable with shared ${config.pointsName}.`
-        : `Items buyable with your ${config.currencyName}.`;
+        : `Personal shop purchases are no longer available. Use /store group for shared ${config.pointsName} items.`;
     const description =
       totalItems === 0
         ? audience === "group"
@@ -2626,7 +2623,7 @@ export class BotRuntime {
     const footer =
       audience === "group"
         ? `/buy group spends shared ${config.pointsName} · /donate converts currency into points.`
-        : `/buy personal spends your ${config.currencyName} · /donate converts currency into points.`;
+        : `/buy group spends shared ${config.pointsName} · /donate converts currency into points.`;
 
     return new EmbedBuilder()
       .setColor(STORE_EMBED_COLOUR)
@@ -3204,10 +3201,7 @@ export class BotRuntime {
       .filter((item) => (query.length === 0 ? true : item.name.toLowerCase().includes(query)))
       .slice(0, AUTOCOMPLETE_CHOICE_LIMIT)
       .map((item) => {
-        const priceLabel =
-          audience === "GROUP"
-            ? this.formatPointsAmount(item.cost.toString(), config)
-            : this.formatCurrencyAmount(item.cost.toString(), config);
+        const priceLabel = this.formatPointsAmount(item.cost.toString(), config);
         const label = `${item.name} · ${priceLabel}`;
         const name =
           label.length > AUTOCOMPLETE_CHOICE_NAME_MAX
@@ -3684,7 +3678,7 @@ export class BotRuntime {
             },
           )
           .setFooter({
-            text: `Group ${config.pointsName} fuel /leaderboard and /buy group · Wallet ${config.currencyName} powers /forbes and /buy personal.`,
+            text: `Group ${config.pointsName} fuel /leaderboard and /buy group · Wallet ${config.currencyName} powers /forbes, /transfer, /donate, and /bet.`,
           });
 
         await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -4110,6 +4104,13 @@ export class BotRuntime {
         if (subcommand !== "personal" && subcommand !== "group") {
           throw new AppError("Unknown /buy subcommand.", 400);
         }
+        if (subcommand === "personal") {
+          await interaction.reply({
+            content: "Personal shop purchases are retired. Use /buy group to spend shared group points.",
+            ephemeral: true,
+          });
+          return;
+        }
         const config = await this.services.configService.getOrCreate(guildId);
         const itemId = interaction.options.getString("item_id", true);
         const quantity = interaction.options.getInteger("quantity") ?? 1;
@@ -4202,19 +4203,8 @@ export class BotRuntime {
           }
         }
 
-        const autoFulfilledIndividual =
-          purchaseMode === "INDIVIDUAL" && redemption.status === "FULFILLED";
-        const autoFulfilNotes = autoFulfilledIndividual
-          ? redemption.shopItem.fulfillmentInstructions
-          : null;
-        const personalSuffix = autoFulfilledIndividual
-          ? ` Fulfilled instantly.${autoFulfilNotes ? ` ${autoFulfilNotes}` : ""}`
-          : "";
         await interaction.reply({
-          content:
-            purchaseMode === "GROUP"
-              ? `Group purchase request created for ${this.formatGroupReference(group)} for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase and spend shared ${config.pointsName} if it passes.${sharedMessageSuffix}`
-              : `Purchase recorded for ${quantity} item(s). Request ID: ${redemption.id}. Cost uses your ${config.currencyName}.${personalSuffix}`,
+          content: `Group purchase request created for ${this.formatGroupReference(group)} for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase and spend shared ${config.pointsName} if it passes.${sharedMessageSuffix}`,
           ephemeral: true,
         });
         return;
@@ -4907,7 +4897,7 @@ export class BotRuntime {
         .setName("store")
         .setDescription("Browse the custom shop.")
         .addSubcommand((sub) =>
-          sub.setName("personal").setDescription("Items buyable with your wallet currency."),
+          sub.setName("personal").setDescription("Personal store is retired; use /store group."),
         )
         .addSubcommand((sub) =>
           sub.setName("group").setDescription("Items buyable with shared group points."),
@@ -4927,7 +4917,7 @@ export class BotRuntime {
         .addSubcommand((sub) =>
           sub
             .setName("personal")
-            .setDescription("Buy a shop item for yourself with your wallet currency.")
+            .setDescription("Personal buys are retired; use /buy group.")
             .addStringOption((option) =>
               option
                 .setName("item_id")

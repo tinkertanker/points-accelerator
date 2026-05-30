@@ -382,6 +382,15 @@ export type EconomyResetRequest =
       targetGroupCurrency?: number;
       note?: string;
       dryRun: boolean;
+    }
+  | {
+      mode: "rescale-balances";
+      factor: number;
+      applyToParticipantCurrency?: boolean;
+      applyToGroupPoints?: boolean;
+      applyToGroupCurrency?: boolean;
+      note?: string;
+      dryRun: boolean;
     };
 
 export type ParticipantSanctionFlag =
@@ -449,6 +458,17 @@ export type EconomyResetResult =
   | {
       mode: "set-balances";
       dryRun: boolean;
+      participantImpact: ResetParticipantImpact[];
+      groupImpact: ResetGroupImpact[];
+      totalCurrencyDelta: number;
+      totalPointsDelta: number;
+      participantCorrectionEntryId: string | null;
+      groupCorrectionEntryId: string | null;
+    }
+  | {
+      mode: "rescale-balances";
+      dryRun: boolean;
+      factor: number;
       participantImpact: ResetParticipantImpact[];
       groupImpact: ResetGroupImpact[];
       totalCurrencyDelta: number;

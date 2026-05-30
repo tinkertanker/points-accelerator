@@ -135,7 +135,7 @@ export class ShopService {
     const data = {
       name: input.name,
       description: input.description,
-      audience: input.audience,
+      audience: "GROUP" as const,
       cost: decimal(input.cost),
       stock: input.stock,
       enabled: input.enabled,
@@ -196,7 +196,7 @@ export class ShopService {
     purchaseMode?: PurchaseMode;
     groupMemberCount?: number;
   }) {
-    const purchaseMode = params.purchaseMode ?? "INDIVIDUAL";
+    const purchaseMode = params.purchaseMode ?? "GROUP";
 
     if (purchaseMode === "GROUP") {
       return this.createGroupPurchaseRequest(params);
@@ -611,137 +611,8 @@ export class ShopService {
     requestedByUserId: string;
     requestedByUsername?: string;
     quantity?: number;
-  }) {
-    const quantity = params.quantity ?? 1;
-
-    if (quantity <= 0) {
-      throw new AppError("Quantity must be greater than zero.");
-    }
-
-    const result = await this.prisma.$transaction(async (tx) => {
-      await this.lockParticipant(tx, params.guildId, params.participantId);
-      await this.lockShopItem(tx, params.guildId, params.shopItemId);
-
-      const [item, participant] = await Promise.all([
-        tx.shopItem.findUnique({
-          where: { id: params.shopItemId },
-        }),
-        tx.participant.findUnique({
-          where: { id: params.participantId },
-        }),
-      ]);
-
-      if (!item || item.guildId !== params.guildId) {
-        throw new AppError("Shop item not found.", 404);
-      }
-
-      if (!participant || participant.guildId !== params.guildId) {
-        throw new AppError("Participant not found.", 404);
-      }
-
-      if (!item.enabled) {
-        throw new AppError("This item is disabled.", 409);
-      }
-
-      if (item.stock !== null && item.stock < quantity) {
-        throw new AppError("Not enough stock available.", 409);
-      }
-
-      if (item.audience !== "INDIVIDUAL") {
-        throw new AppError("This item can only be purchased with /buy personal.", 409);
-      }
-
-      const totalCostDecimal = item.cost.mul(quantity);
-      const totalCost = decimalToNumber(totalCostDecimal);
-      const participantBalance = await this.getParticipantCurrencyBalance(tx, participant.id);
-      if (participantBalance < totalCost) {
-        throw new AppError("You do not have enough currency.", 409);
-      }
-
-      const redemption = await tx.shopRedemption.create({
-        data: {
-          guildId: params.guildId,
-          shopItemId: params.shopItemId,
-          groupId: participant.groupId,
-          requestedByParticipantId: participant.id,
-          requestedByUserId: params.requestedByUserId,
-          requestedByUsername: params.requestedByUsername,
-          purchaseMode: "INDIVIDUAL",
-          quantity,
-          totalCost: totalCostDecimal,
-          status: item.autoFulfil ? "FULFILLED" : "PENDING",
-        },
-      });
-
-      const currencyEntry = await this.participantCurrencyService.recordEntry({
-        guildId: params.guildId,
-        actor: {
-          userId: params.requestedByUserId,
-          username: params.requestedByUsername,
-          roleIds: [],
-        },
-        type: "SHOP_REDEMPTION",
-        description: `Shop redemption: ${item.name}`,
-        splits: [{ participantId: participant.id, currencyDelta: -totalCost }],
-        systemAction: true,
-        executor: tx,
-        externalRef: redemption.id,
-        auditAction: "shop.item.redeemed",
-        auditPayload: {
-          shopItemId: params.shopItemId,
-          participantId: participant.id,
-          quantity,
-          totalCost,
-        },
-      });
-
-      const stockHeld = item.stock !== null ? quantity : 0;
-      if (stockHeld > 0) {
-        await tx.shopItem.update({
-          where: { id: item.id },
-          data: {
-            stock: item.stock! - quantity,
-          },
-        });
-      }
-
-      return tx.shopRedemption.update({
-        where: { id: redemption.id },
-        data: {
-          currencyEntryId: currencyEntry.id,
-          stockHeld,
-        },
-        include: {
-          shopItem: true,
-          group: true,
-          requestedByParticipant: {
-            select: {
-              id: true,
-              discordUserId: true,
-              discordUsername: true,
-              indexId: true,
-            },
-          },
-          approvals: true,
-        },
-      });
-    });
-
-    await this.auditService.record({
-      guildId: params.guildId,
-      actorUserId: params.requestedByUserId,
-      actorUsername: params.requestedByUsername,
-      action: "shop.item.redeem.completed",
-      entityType: "ShopRedemption",
-      entityId: result.id,
-      payload: {
-        purchaseMode: "INDIVIDUAL",
-        quantity: result.quantity,
-        totalCost: decimalToNumber(result.totalCost),
-      },
-    });
-
-    return result;
+  }): Promise<never> {
+    throw new AppError("Shop items can only be bought with group points. Use /buy group.", 409);
   }
 
   private async createGroupPurchaseRequest(params: {
