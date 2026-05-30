@@ -82,6 +82,7 @@ type PendingSubmissionReplacement = {
 const CURRENCY_BULK_MAX_MEMBERS = 10;
 const KAHOOT_WINNER_COUNT_MAX = 5;
 const USER_MENTION_PATTERN = /^<@!?(\d{17,20})>$/;
+const USER_MENTION_TOKEN_PATTERN = /<@!?(\d{17,20})>/g;
 
 const DISCORD_SNOWFLAKE_PATTERN = /^\d{17,20}$/;
 
@@ -2334,12 +2335,14 @@ export class BotRuntime {
     }).join("");
   }
 
-  private buildGoFundMeEmbed(
+  private async buildGoFundMeEmbed(
     summary: NonNullable<Awaited<ReturnType<AppServices["goFundMeService"]["getActiveSummary"]>>>,
     config: GuildConfig,
+    guild?: ChatInputCommandInteraction["guild"] | null,
   ) {
     const percent = Math.floor(summary.progress * 100);
     const remaining = Math.max(0, summary.goalPoints - summary.donatedPoints);
+    const title = await this.formatGoFundMeTitle(summary.title, guild);
     const recent = summary.recentDonations
       .map((donation) => {
         const donor = this.formatUserReference(
@@ -2352,7 +2355,7 @@ export class BotRuntime {
 
     const embed = new EmbedBuilder()
       .setColor(GOFUNDME_EMBED_COLOUR)
-      .setTitle(`GoFundMe: ${summary.title}`)
+      .setTitle(`GoFundMe: ${title}`)
       .setDescription(
         [
           this.formatGoFundMeProgressBar(summary.progress),
@@ -2370,6 +2373,27 @@ export class BotRuntime {
     }
 
     return embed;
+  }
+
+  private async formatGoFundMeTitle(title: string, guild?: ChatInputCommandInteraction["guild"] | null) {
+    const userIds = Array.from(new Set(Array.from(title.matchAll(USER_MENTION_TOKEN_PATTERN), (match) => match[1])));
+    if (!guild || userIds.length === 0) {
+      return title;
+    }
+
+    const displayNames = new Map<string, string>();
+    await Promise.all(
+      userIds.map(async (userId) => {
+        try {
+          const member = await guild.members.fetch(userId);
+          displayNames.set(userId, member.displayName);
+        } catch {
+          // Leave unresolved mentions untouched so staff can still see the original target.
+        }
+      }),
+    );
+
+    return title.replace(USER_MENTION_TOKEN_PATTERN, (token, userId: string) => displayNames.get(userId) ?? token);
   }
 
   private formatUserReference(discordUserId: string | null | undefined, fallbackLabel: string) {
@@ -3902,7 +3926,7 @@ export class BotRuntime {
           });
           await interaction.reply({
             content: `GoFundMe goal set to ${this.formatCurrencyAmount(goal, config)}.`,
-            embeds: [this.buildGoFundMeEmbed(summary, config)],
+            embeds: [await this.buildGoFundMeEmbed(summary, config, interaction.guild)],
           });
           return;
         }
@@ -3934,7 +3958,7 @@ export class BotRuntime {
           });
           await interaction.reply({
             content: `${sourceLabel} donated ${this.formatCurrencyAmount(amount, config)} from their wallet to GoFundMe.`,
-            embeds: [this.buildGoFundMeEmbed(result.summary, config)],
+            embeds: [await this.buildGoFundMeEmbed(result.summary, config, interaction.guild)],
           });
           return;
         }
@@ -3944,7 +3968,7 @@ export class BotRuntime {
           await interaction.reply("No active GoFundMe campaign. Ask an admin to run /gofundme set.");
           return;
         }
-        await interaction.reply({ embeds: [this.buildGoFundMeEmbed(summary, config)] });
+        await interaction.reply({ embeds: [await this.buildGoFundMeEmbed(summary, config, interaction.guild)] });
         return;
       }
       case "transfer": {

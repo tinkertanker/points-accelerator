@@ -852,6 +852,49 @@ describe("bot runtime", () => {
     expect(embed.description).toContain("🟥🟥🟥🟧⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛");
   });
 
+  it("shows display names for mentioned users in the GoFundMe title", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const reply = vi.fn().mockResolvedValue(undefined);
+    services.goFundMeService.getActiveSummary.mockResolvedValueOnce({
+      id: "campaign-1",
+      guildId: "guild-test",
+      title: "help <@529197897774923797> recover",
+      goalPoints: 100,
+      donatedPoints: 0,
+      donationCount: 0,
+      progress: 0,
+      active: true,
+      createdAt: new Date("2026-04-01T12:00:00.000Z"),
+      updatedAt: new Date("2026-04-01T12:00:00.000Z"),
+      recentDonations: [],
+    });
+
+    await (runtime as any).handleCommand({
+      guildId: "guild-test",
+      commandName: "gofundme",
+      guild: {
+        members: {
+          fetch: vi.fn(async (userId: string) => ({
+            displayName: userId === "529197897774923797" ? "jiachen (2018)" : "Viewer",
+            roles: { cache: new Map() },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          })),
+        },
+      },
+      options: {
+        getSubcommand: () => "status",
+      },
+      reply,
+      user: {
+        id: "user-1",
+        username: "viewer",
+      },
+    });
+
+    const embed = reply.mock.calls[0][0].embeds[0].data;
+    expect(embed.title).toBe("GoFundMe: help jiachen (2018) recover");
+  });
+
   it("donates personal points to GoFundMe from the caller's wallet", async () => {
     const { runtime, services } = createRuntimeFixture();
     const reply = vi.fn().mockResolvedValue(undefined);

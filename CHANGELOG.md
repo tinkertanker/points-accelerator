@@ -8,6 +8,11 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.9.3] - 2026-05-30
+
+### Fixed
+- `/gofundme` status messages now show readable Discord display names in campaign titles instead of raw mention IDs.
+
 ## [0.9.2] - 2026-05-30
 
 ### Fixed
