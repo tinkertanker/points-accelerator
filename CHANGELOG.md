@@ -8,6 +8,11 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.9.1] - 2026-05-30
+
+### Added
+- `/gofundme` lets admins set a shared group-points goal and students donate from their current group balance towards an emoji progress bar.
+
 ## [0.9.0] - 2026-05-30
 
 ### Added

@@ -22,11 +22,13 @@ type LedgerEntryKind =
   | "CORRECTION"
   | "TRANSFER"
   | "DONATION"
+  | "GOFUNDME_DONATION"
   | "SHOP_REDEMPTION"
   | "ADJUSTMENT"
   | "SUBMISSION_REWARD"
   | "BET_WIN"
-  | "BET_LOSS";
+  | "BET_LOSS"
+  | "LUCKYDRAW_WIN";
 
 type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
 

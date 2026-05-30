@@ -47,6 +47,51 @@ function createRuntimeFixture() {
       awardGroups: vi.fn().mockResolvedValue({ id: "ledger-1" }),
       donateParticipantCurrencyToGroupPoints: vi.fn().mockResolvedValue({ groupPointsAward: 20 }),
     },
+    goFundMeService: {
+      setActiveCampaign: vi.fn().mockResolvedValue({
+        id: "campaign-1",
+        guildId: "guild-test",
+        title: "Pizza Fund",
+        goalPoints: 100,
+        donatedPoints: 25,
+        donationCount: 1,
+        progress: 0.25,
+        active: true,
+        createdAt: new Date("2026-04-01T12:00:00.000Z"),
+        updatedAt: new Date("2026-04-01T12:00:00.000Z"),
+        recentDonations: [],
+      }),
+      getActiveSummary: vi.fn().mockResolvedValue({
+        id: "campaign-1",
+        guildId: "guild-test",
+        title: "Pizza Fund",
+        goalPoints: 100,
+        donatedPoints: 25,
+        donationCount: 1,
+        progress: 0.25,
+        active: true,
+        createdAt: new Date("2026-04-01T12:00:00.000Z"),
+        updatedAt: new Date("2026-04-01T12:00:00.000Z"),
+        recentDonations: [],
+      }),
+      donateGroupPoints: vi.fn().mockResolvedValue({
+        donation: { id: "donation-1", amount: 10 },
+        ledgerEntry: { id: "ledger-2" },
+        summary: {
+          id: "campaign-1",
+          guildId: "guild-test",
+          title: "Pizza Fund",
+          goalPoints: 100,
+          donatedPoints: 35,
+          donationCount: 2,
+          progress: 0.35,
+          active: true,
+          createdAt: new Date("2026-04-01T12:00:00.000Z"),
+          updatedAt: new Date("2026-04-01T12:00:00.000Z"),
+          recentDonations: [],
+        },
+      }),
+    },
     roleCapabilityService: {
       listForRoleIds: vi.fn().mockResolvedValue([]),
     },
@@ -758,6 +803,101 @@ describe("bot runtime", () => {
     });
 
     expect(reply).toHaveBeenCalledWith("<@user-1> donated 3 bananas 💲 to <@&group-role>, adding 20 blorgshj 🏅.");
+  });
+
+  it("lets admins set the active GoFundMe goal", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      guildId: "guild-test",
+      commandName: "gofundme",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue({
+            displayName: "Admin",
+            roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 1 }]]) },
+            permissions: { has: vi.fn().mockReturnValue(true) },
+          }),
+        },
+      },
+      options: {
+        getSubcommand: () => "set",
+        getNumber: vi.fn((name: string) => (name === "goal" ? 100 : null)),
+        getString: vi.fn((name: string) => (name === "title" ? "Pizza Fund" : null)),
+      },
+      reply,
+      user: {
+        id: "admin-1",
+        username: "mentor",
+      },
+    });
+
+    expect(services.goFundMeService.setActiveCampaign).toHaveBeenCalledWith({
+      guildId: "guild-test",
+      actor: {
+        userId: "admin-1",
+        username: "mentor",
+        roleIds: ["staff-role"],
+      },
+      title: "Pizza Fund",
+      goalPoints: 100,
+    });
+    expect(reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "GoFundMe goal set to 100 blorgshj 🏅.",
+      }),
+    );
+    const embed = reply.mock.calls[0][0].embeds[0].data;
+    expect(embed.description).toContain("🟥🟥🟥🟧⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛");
+  });
+
+  it("donates group points to GoFundMe from the caller's active group", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await (runtime as any).handleCommand({
+      guildId: "guild-test",
+      commandName: "gofundme",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue({
+            displayName: "Alice Jones",
+            roles: { cache: new Map([["group-role", { id: "group-role", rawPosition: 1 }]]) },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          }),
+        },
+      },
+      options: {
+        getSubcommand: () => "donate",
+        getNumber: vi.fn((name: string) => (name === "amount" ? 10 : null)),
+      },
+      reply,
+      user: {
+        id: "user-1",
+        username: "alice-user",
+      },
+    });
+
+    expect(services.goFundMeService.donateGroupPoints).toHaveBeenCalledWith({
+      guildId: "guild-test",
+      actor: {
+        userId: "user-1",
+        username: "alice-user",
+        roleIds: ["group-role"],
+      },
+      participantId: "participant-1",
+      groupId: "group-1",
+      amount: 10,
+      description: "alice-user donated 10 blorgshj 🏅 from Gryffindor to GoFundMe",
+    });
+    expect(reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "<@user-1> donated 10 blorgshj 🏅 from <@&group-role> to GoFundMe.",
+      }),
+    );
+    const embed = reply.mock.calls[0][0].embeds[0].data;
+    expect(embed.description).toContain("🟥🟥🟥🟧🟧🟧⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛");
   });
 
   it("awards currency in bulk to eligible members across selected groups", async () => {
@@ -2659,6 +2799,7 @@ describe("bot runtime", () => {
     const awardCommand = commands.find((command) => command.name === "award");
     const deductCommand = commands.find((command) => command.name === "deduct");
     const forbesCommand = commands.find((command) => command.name === "forbes");
+    const goFundMeCommand = commands.find((command) => command.name === "gofundme");
     const submitCommand = commands.find((command) => command.name === "submit");
     const kahootCommand = commands.find((command) => command.name === "kahoot");
     const flatAwardPoints = commands.find((command) => command.name === "awardpoints");
@@ -2672,6 +2813,8 @@ describe("bot runtime", () => {
     const awardCurrencySub = awardCommand?.options?.find((option) => option.name === "currency");
     const awardCurrencyGroupSub = awardCommand?.options?.find((option) => option.name === "currencygroup");
     const deductMixedSub = deductCommand?.options?.find((option) => option.name === "mixed");
+    const goFundMeSetSub = goFundMeCommand?.options?.find((option) => option.name === "set");
+    const goFundMeDonateSub = goFundMeCommand?.options?.find((option) => option.name === "donate");
 
     expect(awardPointsSub?.options).toEqual(
       expect.arrayContaining([
@@ -2704,6 +2847,17 @@ describe("bot runtime", () => {
         expect.objectContaining({ name: "member", required: true }),
         expect.objectContaining({ name: "currency", required: true, min_value: 0.01 }),
         expect.objectContaining({ name: "reason", required: false }),
+      ]),
+    );
+    expect(goFundMeSetSub?.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "goal", required: true, min_value: 0.01 }),
+        expect.objectContaining({ name: "title", required: false }),
+      ]),
+    );
+    expect(goFundMeDonateSub?.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "amount", required: true, min_value: 0.01 }),
       ]),
     );
     expect(submitCommand?.options).toEqual(

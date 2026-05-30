@@ -103,6 +103,8 @@ const BALANCE_EMBED_COLOUR = 0x6366f1;
 const STORE_EMBED_COLOUR = 0x10b981;
 const INVENTORY_EMBED_COLOUR = 0xec4899;
 const ASSIGNMENTS_EMBED_COLOUR = 0x14b8a6;
+const GOFUNDME_EMBED_COLOUR = 0xf97316;
+const GOFUNDME_BAR_SEGMENTS = 16;
 const AUTOCOMPLETE_CHOICE_LIMIT = 25;
 const AUTOCOMPLETE_CHOICE_NAME_MAX = 100;
 const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
@@ -1971,6 +1973,25 @@ export class BotRuntime {
     }
   }
 
+  private async assertCanManageGoFundMe(guildId: string, member: GuildMember | null, roleIds: string[]) {
+    if (!member) {
+      throw new AppError("Only admins can set the GoFundMe goal.", 403);
+    }
+
+    if (
+      member.permissions.has(PermissionFlagsBits.Administrator) ||
+      member.permissions.has(PermissionFlagsBits.ManageGuild)
+    ) {
+      return;
+    }
+
+    const capabilities = await this.services.roleCapabilityService.listForRoleIds(guildId, roleIds);
+    const resolved = resolveCapabilities(capabilities);
+    if (!resolved.canManageDashboard) {
+      throw new AppError("Only admins can set the GoFundMe goal.", 403);
+    }
+  }
+
   private async canBypassActionCooldown(guildId: string, member: GuildMember | null, roleIds: string[]) {
     if (!member) {
       return false;
@@ -2298,6 +2319,57 @@ export class BotRuntime {
 
   private formatGroupPurchaseProgress(approvalsCount: number, threshold: number) {
     return `${approvalsCount}/${threshold} approval${threshold === 1 ? "" : "s"}`;
+  }
+
+  private formatGoFundMeProgressBar(progress: number) {
+    const clampedProgress = Math.max(0, Math.min(1, progress));
+    const filled = Math.max(0, Math.min(GOFUNDME_BAR_SEGMENTS, Math.round(clampedProgress * GOFUNDME_BAR_SEGMENTS)));
+    return Array.from({ length: GOFUNDME_BAR_SEGMENTS }, (_, index) => {
+      if (index >= filled) return "⬛";
+      const segmentProgress = (index + 1) / GOFUNDME_BAR_SEGMENTS;
+      if (segmentProgress <= 0.2) return "🟥";
+      if (segmentProgress <= 0.4) return "🟧";
+      if (segmentProgress <= 0.6) return "🟨";
+      return "🟩";
+    }).join("");
+  }
+
+  private buildGoFundMeEmbed(
+    summary: NonNullable<Awaited<ReturnType<AppServices["goFundMeService"]["getActiveSummary"]>>>,
+    config: GuildConfig,
+  ) {
+    const percent = Math.floor(summary.progress * 100);
+    const remaining = Math.max(0, summary.goalPoints - summary.donatedPoints);
+    const recent = summary.recentDonations
+      .map((donation) => {
+        const donor = this.formatUserReference(
+          donation.createdByUserId,
+          donation.createdByUsername ?? donation.participant.discordUsername ?? donation.participant.indexId,
+        );
+        return `${donor} · ${this.formatPointsAmount(donation.amount, config)} from ${this.formatGroupReference(donation.group)}`;
+      })
+      .join("\n");
+
+    const embed = new EmbedBuilder()
+      .setColor(GOFUNDME_EMBED_COLOUR)
+      .setTitle(`GoFundMe: ${summary.title}`)
+      .setDescription(
+        [
+          this.formatGoFundMeProgressBar(summary.progress),
+          `**${this.formatPointsAmount(summary.donatedPoints, config)} / ${this.formatPointsAmount(summary.goalPoints, config)}** (${percent}%)`,
+        ].join("\n"),
+      )
+      .addFields(
+        { name: "Donations", value: `${summary.donationCount}`, inline: true },
+        { name: "Still needed", value: this.formatPointsAmount(remaining, config), inline: true },
+      )
+      .setFooter({ text: `Donate with /gofundme donate. Group ${config.pointsName} are deducted from your current group.` });
+
+    if (recent) {
+      embed.addFields({ name: "Recent donations", value: this.truncateText(recent, 1024), inline: false });
+    }
+
+    return embed;
   }
 
   private formatUserReference(discordUserId: string | null | undefined, fallbackLabel: string) {
@@ -3814,6 +3886,68 @@ export class BotRuntime {
         await interaction.reply({ embeds: [view.embed], components: view.row ? [view.row] : [] });
         return;
       }
+      case "gofundme": {
+        const subcommand = interaction.options.getSubcommand();
+        const config = await this.services.configService.getOrCreate(guildId);
+
+        if (subcommand === "set") {
+          await this.assertCanManageGoFundMe(guildId, member ?? null, roleIds);
+          const goal = interaction.options.getNumber("goal", true);
+          const title = interaction.options.getString("title") ?? "Class GoFundMe";
+          const summary = await this.services.goFundMeService.setActiveCampaign({
+            guildId,
+            actor,
+            title,
+            goalPoints: goal,
+          });
+          await interaction.reply({
+            content: `GoFundMe goal set to ${this.formatPointsAmount(goal, config)}.`,
+            embeds: [this.buildGoFundMeEmbed(summary, config)],
+          });
+          return;
+        }
+
+        if (subcommand === "donate") {
+          const amount = interaction.options.getNumber("amount", true);
+          const { group, participant } = await this.resolveActiveParticipant({
+            guildId,
+            discordUserId: interaction.user.id,
+            discordUsername: interaction.user.username,
+            roleIds,
+          });
+          const guardOk = await this.enforceChannelGuard({
+            guildId,
+            interaction,
+            activity: "points",
+            participantId: participant.id,
+            config,
+          });
+          if (!guardOk) return;
+          const sourceLabel = this.formatUserReference(interaction.user.id, member?.displayName ?? interaction.user.username);
+          const groupLabel = this.formatGroupReference(group);
+          const result = await this.services.goFundMeService.donateGroupPoints({
+            guildId,
+            actor,
+            participantId: participant.id,
+            groupId: group.id,
+            amount,
+            description: `${interaction.user.username} donated ${this.formatPointsAmount(amount, config)} from ${group.displayName} to GoFundMe`,
+          });
+          await interaction.reply({
+            content: `${sourceLabel} donated ${this.formatPointsAmount(amount, config)} from ${groupLabel} to GoFundMe.`,
+            embeds: [this.buildGoFundMeEmbed(result.summary, config)],
+          });
+          return;
+        }
+
+        const summary = await this.services.goFundMeService.getActiveSummary(guildId);
+        if (!summary) {
+          await interaction.reply("No active GoFundMe campaign. Ask an admin to run /gofundme set.");
+          return;
+        }
+        await interaction.reply({ embeds: [this.buildGoFundMeEmbed(summary, config)] });
+        return;
+      }
       case "transfer": {
         const targetUser = interaction.options.getUser("member", true);
         const amount = interaction.options.getNumber("amount", true);
@@ -4977,6 +5111,44 @@ export class BotRuntime {
       new SlashCommandBuilder()
         .setName("ledger")
         .setDescription("Show the 10 most recent ledger entries."),
+      new SlashCommandBuilder()
+        .setName("gofundme")
+        .setDescription("Track and donate group points towards a shared goal.")
+        .addSubcommand((sub) =>
+          sub
+            .setName("status")
+            .setDescription("Show the current GoFundMe progress."),
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("donate")
+            .setDescription("Donate points from your current group.")
+            .addNumberOption((option) =>
+              option
+                .setName("amount")
+                .setDescription("Group points to donate")
+                .setRequired(true)
+                .setMinValue(0.01),
+            ),
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("set")
+            .setDescription("Set the active GoFundMe goal (admin).")
+            .addNumberOption((option) =>
+              option
+                .setName("goal")
+                .setDescription("Target points")
+                .setRequired(true)
+                .setMinValue(0.01),
+            )
+            .addStringOption((option) =>
+              option
+                .setName("title")
+                .setDescription("Campaign title")
+                .setRequired(false),
+            ),
+        ),
       new SlashCommandBuilder()
         .setName("transfer")
         .setDescription("Send wallet currency to another student.")

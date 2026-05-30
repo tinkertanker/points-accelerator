@@ -7,6 +7,7 @@ import { ChannelGuardService } from "./channel-guard-service.js";
 import { ConfigService } from "./config-service.js";
 import { EconomyResetService } from "./economy-reset-service.js";
 import { EconomyService } from "./economy-service.js";
+import { GoFundMeService } from "./gofundme-service.js";
 import { GroupService } from "./group-service.js";
 import { ListingService } from "./listing-service.js";
 import { LuckyDrawService } from "./lucky-draw-service.js";
@@ -34,6 +35,7 @@ export function createServices(prisma: PrismaClient) {
     auditService,
     participantCurrencyService,
   );
+  const goFundMeService = new GoFundMeService(prisma, economyService, auditService);
   const bettingService = new BettingService(prisma, configService, participantCurrencyService, roleCapabilityService);
   const shopService = new ShopService(prisma, economyService, participantCurrencyService, auditService);
   const listingService = new ListingService(prisma, roleCapabilityService, auditService);
@@ -53,6 +55,7 @@ export function createServices(prisma: PrismaClient) {
     roleCapabilityService,
     groupService,
     economyService,
+    goFundMeService,
     participantCurrencyService,
     bettingService,
     shopService,

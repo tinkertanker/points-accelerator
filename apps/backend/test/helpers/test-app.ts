@@ -52,6 +52,8 @@ export async function createTestApp(
 export async function resetDatabase(prisma: ReturnType<typeof createPrismaClient>) {
   await prisma.luckyDrawEntry.deleteMany();
   await prisma.luckyDraw.deleteMany();
+  await prisma.goFundMeDonation.deleteMany();
+  await prisma.goFundMeCampaign.deleteMany();
   await prisma.submission.deleteMany();
   await prisma.assignment.deleteMany();
   await prisma.shopRedemptionApproval.deleteMany();
