@@ -80,6 +80,7 @@ type PendingSubmissionReplacement = {
 };
 
 const CURRENCY_BULK_MAX_MEMBERS = 10;
+const KAHOOT_WINNER_COUNT_MAX = 5;
 const USER_MENTION_PATTERN = /^<@!?(\d{17,20})>$/;
 
 const DISCORD_SNOWFLAKE_PATTERN = /^\d{17,20}$/;
@@ -3212,6 +3213,134 @@ export class BotRuntime {
     await interaction.respond(matches);
   }
 
+  private async handleKahoot(params: {
+    guildId: string;
+    interaction: ChatInputCommandInteraction;
+    member: GuildMember | null;
+    roleIds: string[];
+  }) {
+    const { guildId, interaction, roleIds } = params;
+    if (!interaction.guild) {
+      throw new AppError("Kahoot rewards can only be awarded in a server.", 400);
+    }
+
+    const config = await this.services.configService.getOrCreate(guildId);
+    const guardOk = await this.enforceChannelGuard({
+      guildId,
+      interaction,
+      activity: "points",
+      participantId: null,
+      config,
+    });
+    if (!guardOk) return;
+
+    const rollbackCooldown = await this.enforceAwardCommandCooldown({
+      guildId,
+      member: params.member,
+      roleIds,
+      userId: interaction.user.id,
+      isDeduction: false,
+    });
+
+    try {
+      const starting = interaction.options.getInteger("starting", true);
+      const quantum = interaction.options.getInteger("quantum", true);
+      const winnerUsers = [interaction.options.getUser("winner1", true)];
+      for (let index = 2; index <= KAHOOT_WINNER_COUNT_MAX; index++) {
+        const user = interaction.options.getUser(`winner${index}`);
+        if (user) winnerUsers.push(user);
+      }
+
+      const duplicateUserIds = winnerUsers
+        .map((user) => user.id)
+        .filter((userId, index, ids) => ids.indexOf(userId) !== index);
+      if (duplicateUserIds.length > 0) {
+        throw new AppError("Each Kahoot winner must be a different member.", 400);
+      }
+
+      const payouts = winnerUsers.map((user, index) => ({
+        user,
+        rank: index + 1,
+        points: starting - quantum * index,
+      }));
+      const nonPositivePayout = payouts.find((payout) => payout.points <= 0);
+      if (nonPositivePayout) {
+        throw new AppError(
+          `Winner ${nonPositivePayout.rank} would receive ${nonPositivePayout.points} points. Reduce the quantum or raise the starting amount.`,
+          400,
+        );
+      }
+
+      const resolvedWinnerAwards = await Promise.all(
+        payouts.map(async (payout) => {
+          const guildMember = await interaction.guild!.members.fetch(payout.user.id).catch(() => null);
+          if (!guildMember) {
+            throw new AppError(`Winner ${payout.rank} is not in this server.`, 404);
+          }
+          const { group } = await this.resolveActiveParticipant({
+            guildId,
+            discordUserId: payout.user.id,
+            discordUsername: payout.user.username,
+            roleIds: this.getOrderedRoleIds(guildMember),
+          });
+          return {
+            ...payout,
+            group,
+            memberLabel: guildMember.displayName || payout.user.globalName || payout.user.username,
+          };
+        }),
+      );
+
+      const capabilities = await this.services.roleCapabilityService.listForRoleIds(guildId, roleIds);
+      const resolvedCapabilities = resolveCapabilities(capabilities);
+      if (!resolvedCapabilities.canAward) {
+        throw new AppError("This role cannot award groups.", 403);
+      }
+
+      const uniqueGroupIds = new Set(resolvedWinnerAwards.map((award) => award.group.id));
+      if (uniqueGroupIds.size > 1 && !resolvedCapabilities.canMultiAward) {
+        throw new AppError("This role cannot target multiple groups in one action.", 403);
+      }
+
+      const totalPayout = resolvedWinnerAwards.reduce((sum, award) => sum + award.points, 0);
+      if (Number.isFinite(resolvedCapabilities.maxAward) && totalPayout > resolvedCapabilities.maxAward) {
+        throw new AppError(
+          `Total Kahoot payout (${totalPayout}) exceeds your role's maximum award of ${resolvedCapabilities.maxAward}. Reduce the starting amount, quantum, or winner count.`,
+          403,
+        );
+      }
+
+      await this.services.prisma.$transaction(async (tx) => {
+        for (const award of resolvedWinnerAwards) {
+          await this.services.economyService.awardGroups({
+            guildId,
+            actor: {
+              userId: interaction.user.id,
+              username: interaction.user.username,
+              roleIds,
+            },
+            targetGroupIds: [award.group.id],
+            pointsDelta: award.points,
+            currencyDelta: 0,
+            description: `Kahoot #${award.rank}: ${award.memberLabel}`,
+            executor: tx,
+          });
+        }
+      });
+
+      const summary = resolvedWinnerAwards
+        .map(
+          (award) =>
+            `#${award.rank} ${this.formatUserReference(award.user.id, award.memberLabel)} earned ${this.formatPointsAmount(award.points, config)} for ${this.formatGroupReference(award.group)}`,
+        )
+        .join("\n");
+      await interaction.reply(`Kahoot awarded:\n${summary}`);
+    } catch (error) {
+      rollbackCooldown?.();
+      throw error;
+    }
+  }
+
   private async handleLuckyDrawStart(params: {
     guildId: string;
     interaction: ChatInputCommandInteraction;
@@ -4625,6 +4754,10 @@ export class BotRuntime {
         await this.handleLuckyDrawStart({ guildId, interaction, member: member ?? null, roleIds });
         return;
       }
+      case "kahoot": {
+        await this.handleKahoot({ guildId, interaction, member: member ?? null, roleIds });
+        return;
+      }
       case "fulfil":
       case "cancel_redemption": {
         await this.handleRedemptionSlashAction({
@@ -5058,6 +5191,38 @@ export class BotRuntime {
             .setName("description")
             .setDescription("Optional flavour text shown on the announcement.")
             .setRequired(false),
+        ),
+      new SlashCommandBuilder()
+        .setName("kahoot")
+        .setDescription("Award staggered group points to ranked Kahoot winners.")
+        .addIntegerOption((option) =>
+          option
+            .setName("starting")
+            .setDescription("Points awarded to winner1.")
+            .setRequired(true)
+            .setMinValue(1),
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName("quantum")
+            .setDescription("Points subtracted for each lower rank.")
+            .setRequired(true)
+            .setMinValue(1),
+        )
+        .addUserOption((option) =>
+          option.setName("winner1").setDescription("First place winner.").setRequired(true),
+        )
+        .addUserOption((option) =>
+          option.setName("winner2").setDescription("Second place winner.").setRequired(false),
+        )
+        .addUserOption((option) =>
+          option.setName("winner3").setDescription("Third place winner.").setRequired(false),
+        )
+        .addUserOption((option) =>
+          option.setName("winner4").setDescription("Fourth place winner.").setRequired(false),
+        )
+        .addUserOption((option) =>
+          option.setName("winner5").setDescription("Fifth place winner.").setRequired(false),
         ),
     ].map((command) => command.toJSON());
   }
