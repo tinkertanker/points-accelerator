@@ -1408,6 +1408,21 @@ export function createApp(params: {
     };
   });
 
+  app.delete("/api/shop-items/:id", { preHandler: requireMentor }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    await services.shopService.delete(guildIdOf(request), id);
+    reply.status(204).send();
+  });
+
+  app.post("/api/shop-items/:id/archive", { preHandler: requireMentor }, async (request) => {
+    const { id } = request.params as { id: string };
+    const item = await services.shopService.archive(guildIdOf(request), id);
+    return {
+      ...item,
+      cost: decimalToNumber(item.cost),
+    };
+  });
+
   app.get("/api/shop-redemptions", { preHandler: requireMentor }, async (request) => {
     const redemptions = await services.shopService.listRedemptions(guildIdOf(request));
     return redemptions.map((redemption) => serialiseShopRedemption(redemption));

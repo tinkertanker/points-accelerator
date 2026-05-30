@@ -167,6 +167,65 @@ export class ShopService {
     return item;
   }
 
+  public async delete(guildId: string, itemId: string) {
+    const item = await this.prisma.shopItem.findFirst({
+      where: { id: itemId, guildId },
+      select: { id: true, name: true },
+    });
+
+    if (!item) {
+      throw new AppError("Shop item not found.", 404);
+    }
+
+    const redemptionCount = await this.prisma.shopRedemption.count({
+      where: { guildId, shopItemId: itemId },
+    });
+
+    if (redemptionCount > 0) {
+      throw new AppError("Shop items with redemption history cannot be deleted. Disable the item instead.", 409);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.shopItem.delete({
+        where: { id: itemId },
+      });
+
+      await this.auditService.record({
+        guildId,
+        action: "shop.item.deleted",
+        entityType: "ShopItem",
+        entityId: itemId,
+        payload: { name: item.name },
+        executor: tx,
+      });
+    });
+  }
+
+  public async archive(guildId: string, itemId: string) {
+    const updated = await this.prisma.shopItem.updateMany({
+      where: { id: itemId, guildId },
+      data: { enabled: false },
+    });
+
+    if (updated.count === 0) {
+      throw new AppError("Shop item not found.", 404);
+    }
+
+    const item = await this.prisma.shopItem.findUniqueOrThrow({
+      where: { id: itemId },
+    });
+
+    await this.auditService.record({
+      guildId,
+      action: "shop.item.archived",
+      entityType: "ShopItem",
+      entityId: item.id,
+      payload: { name: item.name },
+    });
+
+    return item;
+  }
+
   private async updateExistingItem(
     guildId: string,
     itemId: string,

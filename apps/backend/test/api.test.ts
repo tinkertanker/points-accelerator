@@ -923,6 +923,114 @@ describe("points accelerator API", () => {
     });
   });
 
+  it("archives shop items without deleting their catalogue record", async () => {
+    await ctx.services.configService.getOrCreate(ctx.env.GUILD_ID);
+
+    const item = await ctx.prisma.shopItem.create({
+      data: {
+        guildId: ctx.env.GUILD_ID,
+        name: "Seasonal badge",
+        description: "Limited time",
+        audience: "GROUP",
+        cost: 12,
+        stock: null,
+        enabled: true,
+        fulfillmentInstructions: null,
+        emoji: "🎁",
+      },
+    });
+
+    const response = await ctx.app.inject({
+      method: "POST",
+      url: `/api/shop-items/${item.id}/archive`,
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      id: item.id,
+      enabled: false,
+    });
+
+    await expect(ctx.prisma.shopItem.findUniqueOrThrow({ where: { id: item.id } })).resolves.toMatchObject({
+      enabled: false,
+    });
+  });
+
+  it("deletes unused shop items but preserves items with redemption history", async () => {
+    await ctx.services.configService.getOrCreate(ctx.env.GUILD_ID);
+
+    const unusedItem = await ctx.prisma.shopItem.create({
+      data: {
+        guildId: ctx.env.GUILD_ID,
+        name: "Unused badge",
+        description: "Can be deleted",
+        audience: "GROUP",
+        cost: 3,
+        stock: null,
+        enabled: true,
+        fulfillmentInstructions: null,
+        emoji: "🏷️",
+      },
+    });
+    const usedItem = await ctx.prisma.shopItem.create({
+      data: {
+        guildId: ctx.env.GUILD_ID,
+        name: "Used badge",
+        description: "Has purchase history",
+        audience: "GROUP",
+        cost: 5,
+        stock: null,
+        enabled: true,
+        fulfillmentInstructions: null,
+        emoji: "🎟️",
+      },
+    });
+    const group = await ctx.prisma.group.create({
+      data: {
+        guildId: ctx.env.GUILD_ID,
+        displayName: "Archive testers",
+        slug: "archive-testers",
+        roleId: "role-archive-testers",
+        active: true,
+      },
+    });
+    await ctx.prisma.shopRedemption.create({
+      data: {
+        guildId: ctx.env.GUILD_ID,
+        shopItemId: usedItem.id,
+        groupId: group.id,
+        requestedByUserId: "user-buyer",
+        requestedByUsername: "Buyer",
+        purchaseMode: "GROUP",
+        quantity: 1,
+        totalCost: 5,
+      },
+    });
+
+    const deleteUnusedResponse = await ctx.app.inject({
+      method: "DELETE",
+      url: `/api/shop-items/${unusedItem.id}`,
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+    expect(deleteUnusedResponse.statusCode).toBe(204);
+    await expect(ctx.prisma.shopItem.findUnique({ where: { id: unusedItem.id } })).resolves.toBeNull();
+
+    const deleteUsedResponse = await ctx.app.inject({
+      method: "DELETE",
+      url: `/api/shop-items/${usedItem.id}`,
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+    });
+    expect(deleteUsedResponse.statusCode).toBe(409);
+    expect(deleteUsedResponse.json()).toMatchObject({
+      message: "Shop items with redemption history cannot be deleted. Disable the item instead.",
+    });
+    await expect(ctx.prisma.shopItem.findUniqueOrThrow({ where: { id: usedItem.id } })).resolves.toMatchObject({
+      id: usedItem.id,
+      enabled: true,
+    });
+  });
+
   it("prevents shop item updates across guilds", async () => {
     await ctx.services.configService.getOrCreate("guild-other");
 

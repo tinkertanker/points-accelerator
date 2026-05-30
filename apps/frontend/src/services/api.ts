@@ -1,4 +1,6 @@
 import {
+  designPreviewArchiveShopItem,
+  designPreviewDeleteShopItem,
   designPreviewDeleteReactionRule,
   designPreviewApplySanction,
   designPreviewEconomyReset,
@@ -207,6 +209,23 @@ export const api = {
     return request("/api/shop-items", {
       method: "POST",
       body: payload,
+    });
+  },
+  deleteShopItem(id: string) {
+    if (isDesignPreview()) {
+      designPreviewDeleteShopItem(id);
+      return Promise.resolve();
+    }
+    return request<void>(`/api/shop-items/${id}`, {
+      method: "DELETE",
+    });
+  },
+  archiveShopItem(id: string) {
+    if (isDesignPreview()) {
+      return Promise.resolve(designPreviewArchiveShopItem(id));
+    }
+    return request(`/api/shop-items/${id}/archive`, {
+      method: "POST",
     });
   },
   saveAssignment(payload: AssignmentDraft) {

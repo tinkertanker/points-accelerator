@@ -78,6 +78,8 @@ describe("ShopPanel", () => {
         })}
         onShopDraftsChange={vi.fn()}
         onSaveShop={vi.fn(async () => undefined)}
+        onArchiveShopItem={vi.fn(async () => true)}
+        onDeleteShopItem={vi.fn(async () => true)}
       />,
     );
 
@@ -93,6 +95,7 @@ describe("ShopPanel", () => {
       "Fulfiller role",
       "Auto-fulfil",
       "Enabled",
+      "Actions",
     ]);
 
     const nameInputs = within(screen.getByRole("table")).getAllByLabelText("Item name") as HTMLInputElement[];
@@ -122,6 +125,8 @@ describe("ShopPanel", () => {
         })}
         onShopDraftsChange={vi.fn()}
         onSaveShop={vi.fn(async () => undefined)}
+        onArchiveShopItem={vi.fn(async () => true)}
+        onDeleteShopItem={vi.fn(async () => true)}
       />,
     );
 
@@ -130,5 +135,43 @@ describe("ShopPanel", () => {
 
     const nameInputs = within(screen.getByRole("table")).getAllByLabelText("Item name") as HTMLInputElement[];
     expect(nameInputs.map((input) => input.value)).toEqual(["Zebra sticker", "Apple crate", "Apple badge"]);
+  });
+
+  it("offers archive and delete actions for each catalogue row", () => {
+    const onArchiveShopItem = vi.fn(async () => true);
+    const onDeleteShopItem = vi.fn(async () => true);
+
+    render(
+      <ShopPanel
+        shopDrafts={shopDrafts}
+        isBusy={false}
+        createShopDraft={() => ({
+          name: "",
+          description: "",
+          audience: "GROUP",
+          cost: 0,
+          stock: null,
+          enabled: true,
+          fulfillmentInstructions: "",
+          emoji: "💸",
+          ownerUserId: null,
+          ownerUsername: null,
+          fulfillerRoleId: null,
+          autoFulfil: false,
+        })}
+        onShopDraftsChange={vi.fn()}
+        onSaveShop={vi.fn(async () => undefined)}
+        onArchiveShopItem={onArchiveShopItem}
+        onDeleteShopItem={onDeleteShopItem}
+      />,
+    );
+
+    const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
+    const firstEnabledRow = rows[1]!;
+    fireEvent.click(within(firstEnabledRow).getByRole("button", { name: "Archive" }));
+    fireEvent.click(within(firstEnabledRow).getByRole("button", { name: "Delete" }));
+
+    expect(onArchiveShopItem).toHaveBeenCalledWith(shopDrafts[1], 1);
+    expect(onDeleteShopItem).toHaveBeenCalledWith(shopDrafts[1], 1);
   });
 });

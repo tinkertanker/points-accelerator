@@ -53,6 +53,8 @@ type ShopPanelProps = {
   createShopDraft: () => ShopItemDraft;
   onShopDraftsChange: (next: ShopItemDraft[]) => void;
   onSaveShop: () => Promise<void>;
+  onArchiveShopItem: (item: ShopItemDraft, index: number) => Promise<boolean>;
+  onDeleteShopItem: (item: ShopItemDraft, index: number) => Promise<boolean>;
 };
 
 export default function ShopPanel({
@@ -64,6 +66,8 @@ export default function ShopPanel({
   createShopDraft,
   onShopDraftsChange,
   onSaveShop,
+  onArchiveShopItem,
+  onDeleteShopItem,
 }: ShopPanelProps) {
   const [sortKey, setSortKey] = useState<ShopSortKey>("name");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
@@ -214,6 +218,7 @@ export default function ShopPanel({
                     </th>
                     <th scope="col" className="matrix-table__th--center col-auto-fulfil">Auto-fulfil</th>
                     <th scope="col" className="matrix-table__th--center col-enabled">Enabled</th>
+                    <th scope="col" className="matrix-table__th--center col-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -326,6 +331,26 @@ export default function ShopPanel({
                           onChange={(event) => updateShopDraft(index, { ...item, enabled: event.target.checked })}
                         />
                       </td>
+                      <td className="col-actions">
+                        <div className="shop-row-actions">
+                          <button
+                            type="button"
+                            className="button button--small"
+                            disabled={isBusy || !item.enabled}
+                            onClick={() => void onArchiveShopItem(item, index)}
+                          >
+                            Archive
+                          </button>
+                          <button
+                            type="button"
+                            className="button button--small button--danger"
+                            disabled={isBusy}
+                            onClick={() => void onDeleteShopItem(item, index)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -341,6 +366,24 @@ export default function ShopPanel({
                     <span aria-hidden>{item.emoji}</span> {item.name.trim() || "New shop item"}
                   </h3>
                   <span className="shop-card__audience">Group points</span>
+                  <div className="shop-card__actions">
+                    <button
+                      type="button"
+                      className="button button--small"
+                      disabled={isBusy || !item.enabled}
+                      onClick={() => void onArchiveShopItem(item, index)}
+                    >
+                      Archive
+                    </button>
+                    <button
+                      type="button"
+                      className="button button--small button--danger"
+                      disabled={isBusy}
+                      onClick={() => void onDeleteShopItem(item, index)}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
                 <div className="shop-card__grid">
                   <label className="shop-field">

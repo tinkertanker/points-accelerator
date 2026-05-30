@@ -1752,7 +1752,7 @@ button.reset-mode-card[aria-checked="true"] {
 }
 
 .shop-table {
-  min-width: 48rem;
+  min-width: 56rem;
 }
 
 .shop-table input,
@@ -1834,6 +1834,27 @@ button.reset-mode-card[aria-checked="true"] {
 .shop-table .col-actions {
   text-align: right;
   white-space: nowrap;
+  width: 10rem;
+}
+
+.shop-table .col-actions .button {
+  width: auto;
+}
+
+.shop-row-actions,
+.shop-card__actions {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.shop-row-actions {
+  flex-wrap: nowrap;
+}
+
+.shop-card__actions {
+  flex-wrap: wrap;
 }
 
 .shop-card {
@@ -2141,6 +2162,10 @@ button.reset-mode-card[aria-checked="true"] {
   .shop-card__header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .shop-card__actions {
+    justify-content: flex-start;
   }
 
   .shop-card__grid {

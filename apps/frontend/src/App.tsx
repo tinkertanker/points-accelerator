@@ -510,6 +510,8 @@ export default function App() {
             createShopDraft={() => toShopItemDraft()}
             onShopDraftsChange={setShopDrafts}
             onSaveShop={handleSaveShop}
+            onArchiveShopItem={handleArchiveShopItem}
+            onDeleteShopItem={handleDeleteShopItem}
           />
         );
       case "fulfilment":
@@ -654,6 +656,40 @@ export default function App() {
       () => Promise.all(validItems.map((item) => api.saveShopItem(item))),
       `Saved ${validItems.length} shop item${validItems.length === 1 ? "" : "s"}.`,
       "Failed to save shop items.",
+    );
+  };
+
+  const handleDeleteShopItem = async (item: ShopItemDraft, index: number) => {
+    if (!item.id) {
+      setShopDrafts((current) => current.filter((_, candidateIndex) => candidateIndex !== index));
+      setStatus("Unsaved shop item removed.");
+      return true;
+    }
+
+    const itemName = item.name.trim() || "this shop item";
+    if (!window.confirm(`Delete ${itemName}? This cannot be undone.`)) {
+      return false;
+    }
+
+    return withMutation(
+      () => api.deleteShopItem(item.id!),
+      `Deleted ${itemName}.`,
+      "Failed to delete shop item.",
+    );
+  };
+
+  const handleArchiveShopItem = async (item: ShopItemDraft, index: number) => {
+    if (!item.id) {
+      setShopDrafts((current) => current.filter((_, candidateIndex) => candidateIndex !== index));
+      setStatus("Unsaved shop item removed.");
+      return true;
+    }
+
+    const itemName = item.name.trim() || "this shop item";
+    return withMutation(
+      () => api.archiveShopItem(item.id!),
+      `Archived ${itemName}.`,
+      "Failed to archive shop item.",
     );
   };
 

@@ -643,6 +643,23 @@ export function designPreviewSaveShopItem(draft: ShopItemDraft): ShopItem {
   return item;
 }
 
+export function designPreviewDeleteShopItem(id: string): void {
+  const existingIndex = mockBootstrap.shopItems.findIndex((candidate) => candidate.id === id);
+  if (existingIndex >= 0) {
+    mockBootstrap.shopItems.splice(existingIndex, 1);
+  }
+}
+
+export function designPreviewArchiveShopItem(id: string): ShopItem | null {
+  const item = mockBootstrap.shopItems.find((candidate) => candidate.id === id);
+  if (!item) {
+    return null;
+  }
+
+  item.enabled = false;
+  return item;
+}
+
 export function designPreviewSaveReactionRule(draft: ReactionRewardRuleDraft): ReactionRewardRule {
   const now = new Date().toISOString();
   const existing = draft.id
