@@ -57,7 +57,7 @@ afterEach(() => {
 });
 
 describe("ShopPanel", () => {
-  it("shows group-point shop columns and sorts by name by default", () => {
+  it("shows grouped store columns and sorts active items by name by default", () => {
     render(
       <ShopPanel
         shopDrafts={shopDrafts}
@@ -83,7 +83,11 @@ describe("ShopPanel", () => {
       />,
     );
 
-    const headers = within(screen.getByRole("table")).getAllByRole("columnheader");
+    expect(screen.getByRole("heading", { name: "Active store items" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Archived items" })).toBeInTheDocument();
+
+    const activeTable = screen.getAllByRole("table")[0]!;
+    const headers = within(activeTable).getAllByRole("columnheader");
     expect(headers.map((header) => header.textContent?.trim())).toEqual([
       "Emoji",
       "Name",
@@ -92,14 +96,16 @@ describe("ShopPanel", () => {
       "Stock",
       "Fulfilment",
       "Owner",
-      "Fulfiller role",
       "Auto-fulfil",
-      "Enabled",
       "Actions",
     ]);
+    expect(screen.queryByText("Merchant role")).not.toBeInTheDocument();
 
-    const nameInputs = within(screen.getByRole("table")).getAllByLabelText("Item name") as HTMLInputElement[];
-    expect(nameInputs.map((input) => input.value)).toEqual(["Apple badge", "Apple crate", "Zebra sticker"]);
+    const activeNameInputs = within(activeTable).getAllByLabelText("Item name") as HTMLInputElement[];
+    expect(activeNameInputs.map((input) => input.value)).toEqual(["Apple crate", "Zebra sticker"]);
+    const archivedTable = screen.getAllByRole("table")[1]!;
+    const archivedNameInputs = within(archivedTable).getAllByLabelText("Item name") as HTMLInputElement[];
+    expect(archivedNameInputs.map((input) => input.value)).toEqual(["Apple badge"]);
     expect(screen.getByLabelText("Sort by")).toHaveValue("name");
     expect(screen.getByLabelText("Direction")).toHaveValue("asc");
   });
@@ -133,8 +139,9 @@ describe("ShopPanel", () => {
     fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "name" } });
     fireEvent.change(screen.getByLabelText("Direction"), { target: { value: "desc" } });
 
-    const nameInputs = within(screen.getByRole("table")).getAllByLabelText("Item name") as HTMLInputElement[];
-    expect(nameInputs.map((input) => input.value)).toEqual(["Zebra sticker", "Apple crate", "Apple badge"]);
+    const activeTable = screen.getAllByRole("table")[0]!;
+    const nameInputs = within(activeTable).getAllByLabelText("Item name") as HTMLInputElement[];
+    expect(nameInputs.map((input) => input.value)).toEqual(["Zebra sticker", "Apple crate"]);
   });
 
   it("offers archive and delete actions for each catalogue row", () => {
@@ -166,12 +173,54 @@ describe("ShopPanel", () => {
       />,
     );
 
-    const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
-    const firstEnabledRow = rows[1]!;
-    fireEvent.click(within(firstEnabledRow).getByRole("button", { name: "Archive" }));
-    fireEvent.click(within(firstEnabledRow).getByRole("button", { name: "Delete" }));
+    const activeTable = screen.getAllByRole("table")[0]!;
+    const rows = within(activeTable).getAllByRole("row").slice(1);
+    const firstEnabledRow = rows[0]!;
+    fireEvent.click(within(firstEnabledRow).getByRole("button", { name: "Archive Apple crate" }));
+    fireEvent.click(within(firstEnabledRow).getByRole("button", { name: "Delete Apple crate" }));
 
     expect(onArchiveShopItem).toHaveBeenCalledWith(shopDrafts[1], 1);
     expect(onDeleteShopItem).toHaveBeenCalledWith(shopDrafts[1], 1);
+  });
+
+  it("toggles auto-fulfil from the icon button", () => {
+    const onShopDraftsChange = vi.fn();
+
+    render(
+      <ShopPanel
+        shopDrafts={shopDrafts}
+        isBusy={false}
+        createShopDraft={() => ({
+          name: "",
+          description: "",
+          audience: "GROUP",
+          cost: 0,
+          stock: null,
+          enabled: true,
+          fulfillmentInstructions: "",
+          emoji: "💸",
+          ownerUserId: null,
+          ownerUsername: null,
+          fulfillerRoleId: null,
+          autoFulfil: false,
+        })}
+        onShopDraftsChange={onShopDraftsChange}
+        onSaveShop={vi.fn(async () => undefined)}
+        onArchiveShopItem={vi.fn(async () => true)}
+        onDeleteShopItem={vi.fn(async () => true)}
+      />,
+    );
+
+    const activeTable = screen.getAllByRole("table")[0]!;
+    const toggle = within(activeTable).getByRole("button", { name: "Enable auto-fulfil for Apple crate" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(toggle);
+
+    expect(onShopDraftsChange).toHaveBeenCalledWith([
+      shopDrafts[0],
+      { ...shopDrafts[1], autoFulfil: true },
+      shopDrafts[2],
+    ]);
   });
 });

@@ -55,6 +55,30 @@ describe("permission evaluation", () => {
     ).toThrow(/at most 10/i);
   });
 
+  it("lets award-capable roles target multiple groups", () => {
+    const resolved = resolveCapabilities([
+      {
+        canManageDashboard: false,
+        canAward: true,
+        maxAward: { toString: () => "10" } as never,
+        canDeduct: false,
+        canMultiAward: false,
+        canSell: false,
+      },
+    ]);
+
+    expect(resolved.canMultiAward).toBe(true);
+    expect(() =>
+      assertCanAward({
+        capabilities: resolved,
+        magnitude: 5,
+        targetCount: 2,
+        isDeduction: false,
+      }),
+    ).not.toThrow();
+  });
+
+
   it("treats an empty max award as unlimited for award-capable staff roles", () => {
     const resolved = resolveCapabilities([
       {

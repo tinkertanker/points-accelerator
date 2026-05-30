@@ -5,7 +5,7 @@ const SECTIONS = [
   { id: "economy", label: "How the economy works" },
   { id: "commands", label: "Command reference" },
   { id: "dashboard", label: "Dashboard & roles" },
-  { id: "shop", label: "Shop & purchases" },
+  { id: "shop", label: "Store & purchases" },
   { id: "assignments", label: "Assignments & submissions" },
   { id: "faq", label: "FAQ" },
 ] as const;
@@ -108,7 +108,7 @@ export default function GuidePanel() {
               <h3>Two-tier currency</h3>
               <p>
                 The economy has two layers. <strong>Group points</strong> are a shared pool belonging to the whole team —
-                they drive the leaderboard and are spent on group shop purchases.{" "}
+                they drive the leaderboard and are spent on group store purchases.{" "}
                 <strong>Personal wallet currency</strong> belongs to individual students and is used for transfers
                 between students, betting, and donations to the group pool.
               </p>
@@ -294,7 +294,7 @@ export default function GuidePanel() {
                       <td><code>/store</code></td>
                       <td>Everyone</td>
                       <td>&mdash;</td>
-                      <td>Browse all enabled shop items</td>
+                      <td>Browse all active store items</td>
                     </tr>
                     <tr>
                       <td><code>/buy group</code></td>
@@ -327,19 +327,19 @@ export default function GuidePanel() {
               <p>
                 The dashboard adapts based on your role. <strong>Admins</strong> (guild owners and roles with the{" "}
                 <em>canManageDashboard</em> capability) see every tab. <strong>Mentors</strong> (roles listed in
-                Settings → Mentor roles) see Shop, Assignments, Leaderboard, and this Guide.{" "}
+                Settings → Mentor roles) see Store, Assignments, Leaderboard, and this Guide.{" "}
                 <strong>Members</strong> see only the Leaderboard and this Guide.
               </p>
 
               <h3>Tab overview</h3>
               <dl className="guide-flow">
                 <dt>Overview</dt>
-                <dd>At-a-glance counts for groups, participants, assignments, submissions, and shop items.</dd>
+                <dd>At-a-glance counts for groups, participants, assignments, submissions, and store items.</dd>
                 <dt>Settings</dt>
                 <dd>Economy shape (names, conversion rate, passive rewards), mentor roles, log channels, and the capability matrix.</dd>
                 <dt>Groups</dt>
                 <dd>Manage aliases for synced group roles that can receive points, and review participants.</dd>
-                <dt>Shop</dt>
+                <dt>Store</dt>
                 <dd>Create and manage items students can buy with points or currency.</dd>
                 <dt>Assignments</dt>
                 <dd>Create prompts with deadlines and rewards. Review student submissions.</dd>
@@ -356,10 +356,8 @@ export default function GuidePanel() {
                 <dd>Allow this role to use the award and deduct slash commands.</dd>
                 <dt>maxAward</dt>
                 <dd>Cap the amount that can be awarded or deducted in a single command. Leave blank for no limit.</dd>
-                <dt>canMultiAward</dt>
-                <dd>Allow targeting multiple groups in one group award or deduction command.</dd>
-                <dt>canSell</dt>
-                <dd>Allow creating marketplace listings via <code>/sell</code>.</dd>
+                <dt>Merchant</dt>
+                <dd>Allow creating marketplace listings via <code>/sell</code> and being assigned to fulfil store purchases.</dd>
                 <dt>canReceiveAwards</dt>
                 <dd>Allow this role&rsquo;s group to be the target of awards. Disable to prevent self-awarding.</dd>
               </dl>
@@ -369,13 +367,13 @@ export default function GuidePanel() {
             </div>
           </details>
 
-          {/* E — Shop & Purchases */}
+          {/* E — Store & Purchases */}
           <details id="guide-shop" className="guide-section">
-            <summary>Shop &amp; purchases</summary>
+            <summary>Store &amp; purchases</summary>
             <div className="guide-prose">
               <h3>Group items</h3>
               <p>
-                Shop items cost group points. A student initiates the purchase with <code>/buy group</code>, then
+                Store items cost group points. A student initiates the purchase with <code>/buy group</code>, then
                 other group members approve it with <code>/approve_purchase</code>. The number of approvals required
                 scales with group size. Once the threshold is met, the points are deducted and the request moves into
                 the dashboard&rsquo;s <strong>Fulfilment</strong> queue until staff mark it fulfilled.
@@ -390,7 +388,7 @@ export default function GuidePanel() {
               <h3>Marketplace listings</h3>
               <p>
                 Staff can create peer-to-peer listings with <code>/sell</code>. These are posted to the configured
-                listing channel and allow students to trade items outside the standard shop.
+                listing channel and allow students to trade items outside the standard store.
               </p>
             </div>
           </details>

@@ -14,7 +14,6 @@ type CapabilityToggleKey = keyof Pick<
   | "canManageDashboard"
   | "canAward"
   | "canDeduct"
-  | "canMultiAward"
   | "canSell"
   | "canReceiveAwards"
   | "isGroupRole"
@@ -24,8 +23,7 @@ const CAPABILITY_COLUMNS: Array<{ key: CapabilityToggleKey; header: string; abbr
   { key: "canManageDashboard", header: "Dashboard admin", abbr: "Admin" },
   { key: "canAward", header: "Award", abbr: "Award" },
   { key: "canDeduct", header: "Deduct", abbr: "Deduct" },
-  { key: "canMultiAward", header: "Multi-target award", abbr: "Multi" },
-  { key: "canSell", header: "Sell", abbr: "Sell" },
+  { key: "canSell", header: "Merchant", abbr: "Merchant" },
   { key: "canReceiveAwards", header: "Receivable", abbr: "Recv" },
   { key: "isGroupRole", header: "Group role", abbr: "Group" },
 ];
@@ -51,12 +49,14 @@ function normaliseRoleCapability(role: RoleCapability): RoleCapability {
   if (!role.canAward && !role.canDeduct) {
     return {
       ...role,
+      canMultiAward: false,
       actionCooldownSeconds: null,
     };
   }
 
   return {
     ...role,
+    canMultiAward: role.canAward,
     actionCooldownSeconds: role.actionCooldownSeconds ?? DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS,
   };
 }
@@ -590,7 +590,7 @@ export default function SettingsPanel({
                   }
                 />
                 <ChannelMultiSelectField
-                  label="Shop channels"
+                  label="Store channels"
                   selectedIds={settingsDraft.shopChannelIds}
                   channels={sortedDiscordChannels}
                   emptyState="Empty = no restriction."
@@ -605,7 +605,7 @@ export default function SettingsPanel({
             <fieldset className="span-full role-checklist">
               <legend>Mentor roles</legend>
               <p className="role-checklist__help">
-                These roles can manage the shop, assignments, and submission reviews without getting access to
+                These roles can manage the store, assignments, and submission reviews without getting access to
                 settings or groups.
               </p>
               <div className="role-checklist__options">
@@ -655,10 +655,8 @@ export default function SettingsPanel({
               <dd>Can subtract points from groups and handle staff-side currency corrections.</dd>
               <dt>Cooldown</dt>
               <dd>Seconds between award or deduct commands for that role. Defaults to 10 when enabled, and admins bypass it.</dd>
-              <dt>Multi</dt>
-              <dd>Can award multiple groups at once.</dd>
-              <dt>Sell</dt>
-              <dd>Can create marketplace listings.</dd>
+              <dt>Merchant</dt>
+              <dd>Can create marketplace listings and be assigned to fulfil store items.</dd>
               <dt>Recv</dt>
               <dd>Groups with this role can receive awards.</dd>
               <dt>Group</dt>

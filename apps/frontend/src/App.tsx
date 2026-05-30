@@ -157,7 +157,7 @@ const DASHBOARD_TABS: TabDefinition[] = [
   { id: "overview", label: "Overview", description: "At-a-glance totals" },
   { id: "settings", label: "Settings", description: "Economy rules and role capabilities" },
   { id: "groups", label: "Groups", description: "Aliases and participants" },
-  { id: "shop", label: "Shop", description: "Catalogue, pricing, and fulfilment" },
+  { id: "shop", label: "Store", description: "Catalogue, pricing, and fulfilment" },
   { id: "fulfilment", label: "Fulfilment", description: "Redemption queue and handover status" },
   { id: "assignments", label: "Assignments", description: "Prompts and submission review" },
   { id: "activity", label: "Activity", description: "Leaderboard and ledger feed" },
@@ -208,7 +208,7 @@ function getDashboardSubtitle(accessLevel?: DashboardAccessLevel): string {
   }
 
   if (accessLevel === "mentor") {
-    return "Update the shop, track fulfilment, and review class submissions.";
+    return "Update the store, track fulfilment, and review class submissions.";
   }
 
   return "Check the latest leaderboard standings for your Discord server.";
@@ -506,7 +506,6 @@ export default function App() {
             isBusy={isMutating}
             participants={bootstrap.participants}
             members={bootstrap.discord.members}
-            roles={discordRoles}
             createShopDraft={() => toShopItemDraft()}
             onShopDraftsChange={setShopDrafts}
             onSaveShop={handleSaveShop}
@@ -635,7 +634,9 @@ export default function App() {
   };
 
   const handleSaveRoles = async () => {
-    const validRoles = roleDrafts.filter((role) => role.roleId.trim().length > 0 && role.roleName.trim().length > 0);
+    const validRoles = roleDrafts
+      .filter((role) => role.roleId.trim().length > 0 && role.roleName.trim().length > 0)
+      .map((role) => ({ ...role, canMultiAward: role.canAward }));
     await withMutation(() => api.saveCapabilities(validRoles), "Role capabilities saved.", "Failed to save role capabilities.");
   };
 
@@ -653,20 +654,20 @@ export default function App() {
       (item) => item.name.trim().length > 0 && item.description.trim().length > 0,
     );
     await withMutation(
-      () => Promise.all(validItems.map((item) => api.saveShopItem(item))),
-      `Saved ${validItems.length} shop item${validItems.length === 1 ? "" : "s"}.`,
-      "Failed to save shop items.",
+      () => Promise.all(validItems.map((item) => api.saveShopItem({ ...item, fulfillerRoleId: null }))),
+      `Saved ${validItems.length} store item${validItems.length === 1 ? "" : "s"}.`,
+      "Failed to save store items.",
     );
   };
 
   const handleDeleteShopItem = async (item: ShopItemDraft, index: number) => {
     if (!item.id) {
       setShopDrafts((current) => current.filter((_, candidateIndex) => candidateIndex !== index));
-      setStatus("Unsaved shop item removed.");
+      setStatus("Unsaved store item removed.");
       return true;
     }
 
-    const itemName = item.name.trim() || "this shop item";
+    const itemName = item.name.trim() || "this store item";
     if (!window.confirm(`Delete ${itemName}? This cannot be undone.`)) {
       return false;
     }
@@ -674,22 +675,22 @@ export default function App() {
     return withMutation(
       () => api.deleteShopItem(item.id!),
       `Deleted ${itemName}.`,
-      "Failed to delete shop item.",
+      "Failed to delete store item.",
     );
   };
 
   const handleArchiveShopItem = async (item: ShopItemDraft, index: number) => {
     if (!item.id) {
       setShopDrafts((current) => current.filter((_, candidateIndex) => candidateIndex !== index));
-      setStatus("Unsaved shop item removed.");
+      setStatus("Unsaved store item removed.");
       return true;
     }
 
-    const itemName = item.name.trim() || "this shop item";
+    const itemName = item.name.trim() || "this store item";
     return withMutation(
       () => api.archiveShopItem(item.id!),
       `Archived ${itemName}.`,
-      "Failed to archive shop item.",
+      "Failed to archive store item.",
     );
   };
 
@@ -815,7 +816,7 @@ export default function App() {
               <span>points accelerator</span>
             </h1>
             <p className="lede">
-              Group points, personal wallets, shop pricing, role capabilities, and passive chat earn rates all live
+              Group points, personal wallets, store pricing, role capabilities, and passive chat earn rates all live
               here.
             </p>
           </header>

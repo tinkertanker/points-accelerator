@@ -35,7 +35,7 @@ export function resolveCapabilities(capabilities: RoleCapabilityLike[]): Resolve
         canAward: resolved.canAward || capability.canAward,
         maxAward: nextMaxAward,
         canDeduct: resolved.canDeduct || capability.canDeduct,
-        canMultiAward: resolved.canMultiAward || capability.canMultiAward,
+        canMultiAward: resolved.canMultiAward || capability.canMultiAward || capability.canAward,
         canSell: resolved.canSell || capability.canSell,
       };
     },
@@ -73,13 +73,11 @@ export function assertCanAward(params: {
     throw new AppError(`This role can award at most ${capabilities.maxAward}.`, 403);
   }
 
-  if (targetCount > 1 && !capabilities.canMultiAward) {
-    throw new AppError("This role cannot target multiple groups in one action.", 403);
-  }
+  void targetCount;
 }
 
 export function assertCanSell(capabilities: ResolvedCapabilities): void {
   if (!capabilities.canSell) {
-    throw new AppError("This role cannot create marketplace listings.", 403);
+    throw new AppError("This role cannot create marketplace listings. Enable Merchant for the role first.", 403);
   }
 }

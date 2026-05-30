@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import SettingsPanel from "./SettingsPanel";
-import type { Settings } from "../types";
+import type { RoleCapability, Settings } from "../types";
 
 const baseSettings: Settings = {
   appName: "points accelerator",
@@ -32,13 +32,13 @@ const baseSettings: Settings = {
   bettingCooldownSeconds: 0,
 };
 
-function renderSettingsPanel(overrides?: Partial<Settings>) {
+function renderSettingsPanel(overrides?: Partial<Settings>, roleDrafts: RoleCapability[] = []) {
   const onSettingsChange = vi.fn();
 
   render(
     <SettingsPanel
       settingsDraft={{ ...baseSettings, ...overrides }}
-      roleDrafts={[]}
+      roleDrafts={roleDrafts}
       reactionRules={[]}
       discordRoles={[]}
       discordChannels={[
@@ -96,5 +96,28 @@ describe("SettingsPanel passive channel picker", () => {
         "Leave this empty to deny none. Denied channels always block passive rewards, even if they also appear in the allowed list.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("shows Merchant in the role matrix without the old Multi column", () => {
+    renderSettingsPanel(undefined, [
+      {
+        id: "cap-staff",
+        roleId: "role-staff",
+        roleName: "Staff",
+        canManageDashboard: true,
+        canAward: true,
+        maxAward: null,
+        actionCooldownSeconds: 10,
+        canDeduct: true,
+        canMultiAward: true,
+        canSell: true,
+        canReceiveAwards: false,
+        isGroupRole: false,
+        riggedBetWinChance: null,
+      },
+    ]);
+
+    expect(screen.getByRole("columnheader", { name: "Merchant" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Multi" })).not.toBeInTheDocument();
   });
 });

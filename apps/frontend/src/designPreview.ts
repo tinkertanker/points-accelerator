@@ -161,7 +161,7 @@ function createInitialBootstrap(): BootstrapPayload {
         maxAward: 50,
         actionCooldownSeconds: 10,
         canDeduct: true,
-        canMultiAward: false,
+        canMultiAward: true,
         canSell: true,
         canReceiveAwards: false,
         isGroupRole: false,
@@ -233,7 +233,7 @@ function createInitialBootstrap(): BootstrapPayload {
         emoji: "🎟️",
         ownerUserId: null,
         ownerUsername: null,
-        fulfillerRoleId: null,
+        fulfillerRoleId: "role-staff",
         autoFulfil: false,
       },
       {
@@ -248,7 +248,7 @@ function createInitialBootstrap(): BootstrapPayload {
         emoji: "🍕",
         ownerUserId: null,
         ownerUsername: null,
-        fulfillerRoleId: null,
+        fulfillerRoleId: "role-staff",
         autoFulfil: false,
       },
     ],
@@ -542,6 +542,7 @@ export function designPreviewSaveCapabilities(capabilities: RoleCapability[]): R
   const next = capabilities.map((capability, index) => ({
     ...capability,
     id: capability.id ?? `cap-${index + 1}`,
+    canMultiAward: capability.canAward,
   }));
   mockBootstrap.capabilities = next;
   syncMockGroupsFromCapabilities();

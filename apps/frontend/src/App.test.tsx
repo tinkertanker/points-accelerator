@@ -226,7 +226,7 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(screen.getByText(/group points, personal wallets, shop pricing/i)).toBeInTheDocument();
+    expect(screen.getByText(/group points, personal wallets, store pricing/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign in with discord/i })).toBeInTheDocument();
   });
 
@@ -469,7 +469,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("tab", { name: /shop/i })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: /store/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /^Fulfilment\b/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /assignments/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /leaderboard/i })).toBeInTheDocument();
@@ -495,7 +495,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("tab", { name: /leaderboard/i })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /shop/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /store/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /settings/i })).not.toBeInTheDocument();
     // ActivityPanel is lazy-loaded; await the Suspense resolution before asserting its content.
     expect(await screen.findByRole("heading", { name: /view the leaderboard/i })).toBeInTheDocument();

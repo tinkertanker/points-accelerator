@@ -1014,7 +1014,7 @@ export class BotRuntime {
   private async postRedemptionFulfilmentNotice(params: {
     channelId: string;
     ownerUserId: string | null;
-    fulfillerRoleId: string | null;
+    merchantRoleIds: string[];
     buyerUserId: string;
     buyerMention: string;
     shopItemName: string;
@@ -1036,10 +1036,8 @@ export class BotRuntime {
 
     const validOwnerId = isDiscordSnowflake(params.ownerUserId) ? params.ownerUserId : null;
     const ownerMention = validOwnerId ? `<@${validOwnerId}>` : null;
-    const validFulfillerRoleId = isDiscordSnowflake(params.fulfillerRoleId)
-      ? params.fulfillerRoleId
-      : null;
-    const fulfillerRoleMention = validFulfillerRoleId ? `<@&${validFulfillerRoleId}>` : null;
+    const validMerchantRoleIds = params.merchantRoleIds.filter(isDiscordSnowflake);
+    const merchantRoleMentions = validMerchantRoleIds.map((roleId) => `<@&${roleId}>`);
     const subject =
       params.audience === "GROUP"
         ? `${params.buyerMention} (on behalf of **${params.groupName}**)`
@@ -1047,9 +1045,7 @@ export class BotRuntime {
     const fulfilmentLine = params.fulfillmentInstructions
       ? `\nFulfilment notes: ${params.fulfillmentInstructions}`
       : "";
-    const headerMentions = [ownerMention, fulfillerRoleMention].filter(
-      (value): value is string => value !== null,
-    );
+    const headerMentions = [ownerMention, ...merchantRoleMentions].filter((value): value is string => value !== null);
     const header = headerMentions.length > 0 ? `${headerMentions.join(" ")} heads up — ` : "";
     const content = `${header}${subject} purchased ${params.shopItemEmoji} **${params.shopItemName}**${
       params.quantity > 1 ? ` x${params.quantity}` : ""
@@ -1058,7 +1054,7 @@ export class BotRuntime {
     const mentionUsers = [params.buyerUserId, ...(validOwnerId ? [validOwnerId] : [])].filter(
       isDiscordSnowflake,
     );
-    const mentionRoles = validFulfillerRoleId ? [validFulfillerRoleId] : [];
+    const mentionRoles = validMerchantRoleIds;
 
     const sent = await (channel as GuildTextBasedChannel)
       .send({
@@ -1578,19 +1574,20 @@ export class BotRuntime {
         params.memberPermissions.has(PermissionFlagsBits.ManageGuild)
       : false;
 
+    const capabilities = await this.services.roleCapabilityService.listForRoleIds(
+      params.guildId,
+      params.roleIds,
+    );
+    const resolved = resolveCapabilities(capabilities);
+
     let isStaff = hasStaffPerms;
     if (!isStaff) {
-      const capabilities = await this.services.roleCapabilityService.listForRoleIds(
-        params.guildId,
-        params.roleIds,
-      );
-      const resolved = resolveCapabilities(capabilities);
       isStaff = resolved.canManageDashboard || resolved.canAward || resolved.canDeduct;
     }
 
     const fulfillerRoleId = params.redemption.shopItem.fulfillerRoleId;
     const isFulfiller =
-      fulfillerRoleId !== null && params.roleIds.includes(fulfillerRoleId);
+      resolved.canSell || (fulfillerRoleId !== null && params.roleIds.includes(fulfillerRoleId));
 
     return { isOwner, isStaff, isFulfiller };
   }
@@ -3297,11 +3294,6 @@ export class BotRuntime {
         throw new AppError("This role cannot award groups.", 403);
       }
 
-      const uniqueGroupIds = new Set(resolvedWinnerAwards.map((award) => award.group.id));
-      if (uniqueGroupIds.size > 1 && !resolvedCapabilities.canMultiAward) {
-        throw new AppError("This role cannot target multiple groups in one action.", 403);
-      }
-
       const totalPayout = resolvedWinnerAwards.reduce((sum, award) => sum + award.points, 0);
       if (Number.isFinite(resolvedCapabilities.maxAward) && totalPayout > resolvedCapabilities.maxAward) {
         throw new AppError(
@@ -4306,10 +4298,11 @@ export class BotRuntime {
         if (redemption.status === "PENDING") {
           const fulfilmentChannelId = config.redemptionChannelId ?? interaction.channelId;
           if (fulfilmentChannelId) {
+            const merchantRoleIds = await this.services.roleCapabilityService.listMerchantRoleIds(guildId);
             const posted = await this.postRedemptionFulfilmentNotice({
               channelId: fulfilmentChannelId,
               ownerUserId: redemption.shopItem.ownerUserId,
-              fulfillerRoleId: redemption.shopItem.fulfillerRoleId,
+              merchantRoleIds,
               buyerUserId: interaction.user.id,
               buyerMention: `<@${interaction.user.id}>`,
               shopItemName: redemption.shopItem.name,
@@ -4378,10 +4371,11 @@ export class BotRuntime {
           const fulfilmentChannelId = config.redemptionChannelId ?? interaction.channelId;
           if (fulfilmentChannelId) {
             const buyerUserId = fullRedemption.requestedByUserId;
+            const merchantRoleIds = await this.services.roleCapabilityService.listMerchantRoleIds(guildId);
             const posted = await this.postRedemptionFulfilmentNotice({
               channelId: fulfilmentChannelId,
               ownerUserId: fullRedemption.shopItem.ownerUserId,
-              fulfillerRoleId: fullRedemption.shopItem.fulfillerRoleId,
+              merchantRoleIds,
               buyerUserId,
               buyerMention: `<@${buyerUserId}>`,
               shopItemName: fullRedemption.shopItem.name,

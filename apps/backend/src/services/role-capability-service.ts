@@ -57,6 +57,7 @@ export class RoleCapabilityService {
           capability.canAward || capability.canDeduct
             ? capability.actionCooldownSeconds ?? DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS
             : null;
+        const canMultiAward = capability.canAward || capability.canMultiAward;
 
         await tx.discordRoleCapability.upsert({
           where: {
@@ -74,7 +75,7 @@ export class RoleCapabilityService {
             maxAward: capability.maxAward === null ? null : decimal(capability.maxAward),
             actionCooldownSeconds,
             canDeduct: capability.canDeduct,
-            canMultiAward: capability.canMultiAward,
+            canMultiAward,
             canSell: capability.canSell,
             canReceiveAwards: capability.canReceiveAwards,
             isGroupRole: capability.isGroupRole,
@@ -87,7 +88,7 @@ export class RoleCapabilityService {
             maxAward: capability.maxAward === null ? null : decimal(capability.maxAward),
             actionCooldownSeconds,
             canDeduct: capability.canDeduct,
-            canMultiAward: capability.canMultiAward,
+            canMultiAward,
             canSell: capability.canSell,
             canReceiveAwards: capability.canReceiveAwards,
             isGroupRole: capability.isGroupRole,
@@ -115,5 +116,19 @@ export class RoleCapabilityService {
         },
       },
     });
+  }
+
+  public async listMerchantRoleIds(guildId: string) {
+    const capabilities = await this.prisma.discordRoleCapability.findMany({
+      where: {
+        guildId,
+        canSell: true,
+      },
+      select: {
+        roleId: true,
+      },
+    });
+
+    return capabilities.map((capability) => capability.roleId);
   }
 }

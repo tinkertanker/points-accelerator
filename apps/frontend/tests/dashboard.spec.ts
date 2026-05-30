@@ -108,7 +108,7 @@ test("authenticated admin can see the full control room", async ({ page }) => {
   await expect(page.getByRole("tab", { name: /activity/i })).toBeVisible();
 });
 
-test("authenticated mentor only sees shop, assignments, and leaderboard", async ({ page }) => {
+test("authenticated mentor only sees store, assignments, and leaderboard", async ({ page }) => {
   await mockDashboard(page, {
     userId: "user-2",
     username: "mentor",
@@ -130,10 +130,10 @@ test("authenticated mentor only sees shop, assignments, and leaderboard", async 
 
   await page.goto("/");
 
-  await expect(page.getByRole("tab", { name: /shop/i })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: /store/i })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("tab", { name: /assignments/i })).toBeVisible();
   await expect(page.getByRole("tab", { name: /leaderboard/i })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /edit the shop catalogue/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /edit the store catalogue/i })).toBeVisible();
   await expect(page.getByRole("tab", { name: /settings/i })).toHaveCount(0);
   await expect(page.getByRole("tab", { name: /groups/i })).toHaveCount(0);
 });
@@ -168,6 +168,6 @@ test("authenticated viewer only sees the leaderboard", async ({ page }) => {
   await expect(page.getByText("99")).toBeVisible();
   await expect(page.getByText("500")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: /ledger/i })).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: /shop/i })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: /store/i })).toHaveCount(0);
   await expect(page.getByRole("tab", { name: /settings/i })).toHaveCount(0);
 });

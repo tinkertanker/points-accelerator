@@ -23,7 +23,7 @@ const SANCTION_FLAGS: ParticipantSanctionFlag[] = [
 const FLAG_LABEL: Record<ParticipantSanctionFlag, string> = {
   CANNOT_BET: "No betting",
   CANNOT_EARN_PASSIVE: "No passive earnings",
-  CANNOT_BUY: "No shop purchases",
+  CANNOT_BUY: "No store purchases",
   CANNOT_TRANSFER: "No transfers",
   CANNOT_RECEIVE_REWARDS: "No rewards (lucky draw, reactions)",
 };

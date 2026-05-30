@@ -40,7 +40,7 @@ export default function OverviewPanel({ bootstrap, activeGuildId, onOpenGuide, o
           <dd>{bootstrap.submissions.length}</dd>
         </div>
         <div className="stat-item">
-          <dt>Shop Items</dt>
+          <dt>Store Items</dt>
           <dd>{bootstrap.shopItems.length}</dd>
         </div>
       </dl>
