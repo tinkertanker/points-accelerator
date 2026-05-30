@@ -8,6 +8,17 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.8.0] - 2026-05-30
+
+### Added
+- Admins can now rescale participant wallet currency and group points by a decimal factor, with dry-run previews and append-only correction entries.
+
+### Changed
+- Store items now use shared group points only. Existing item prices are preserved as group-point costs, and group approval still applies.
+
+### Removed
+- Personal shop purchases are retired. Participant wallet currency remains for transfers, donations, and betting.
+
 ## [0.7.0] - 2026-05-13
 
 ### Added
