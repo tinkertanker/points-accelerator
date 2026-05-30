@@ -85,7 +85,7 @@ const shopItemSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1),
   description: z.string().min(1),
-  audience: z.enum(["INDIVIDUAL", "GROUP"]),
+  audience: z.enum(["INDIVIDUAL", "GROUP"]).optional().default("GROUP"),
   cost: z.number().nonnegative(),
   stock: z.number().int().nonnegative().nullable(),
   enabled: z.boolean(),
@@ -155,7 +155,7 @@ const redeemSchema = z.object({
   requestedByUserId: z.string().min(1),
   requestedByUsername: z.string().optional(),
   quantity: z.number().int().positive().optional(),
-  purchaseMode: z.enum(["INDIVIDUAL", "GROUP"]).optional(),
+  purchaseMode: z.enum(["INDIVIDUAL", "GROUP"]).optional().default("GROUP"),
 });
 
 const approveGroupPurchaseSchema = z.object({
@@ -255,6 +255,15 @@ const economyResetSchema = z.discriminatedUnion("mode", [
     targetParticipantCurrency: z.number().optional(),
     targetGroupPoints: z.number().optional(),
     targetGroupCurrency: z.number().optional(),
+    note: z.string().max(500).optional(),
+    dryRun: z.boolean(),
+  }),
+  z.object({
+    mode: z.literal("rescale-balances"),
+    factor: z.number().nonnegative(),
+    applyToParticipantCurrency: z.boolean().optional(),
+    applyToGroupPoints: z.boolean().optional(),
+    applyToGroupCurrency: z.boolean().optional(),
     note: z.string().max(500).optional(),
     dryRun: z.boolean(),
   }),
@@ -1552,7 +1561,7 @@ export function createApp(params: {
   app.post("/api/actions/redeem", { preHandler: requireAdmin }, async (request) => {
     const payload = redeemSchema.parse(request.body);
     let groupMemberCount: number | undefined;
-    if ((payload.purchaseMode ?? "INDIVIDUAL") === "GROUP") {
+    if (payload.purchaseMode === "GROUP") {
       const participant = await services.participantService.findById(guildIdOf(request), payload.participantId);
       if (!participant) {
         throw new AppError("Participant not found.", 404);
@@ -1649,6 +1658,19 @@ export function createApp(params: {
         guildId: guildIdOf(request),
         actor,
         modulus: payload.modulus,
+        applyToParticipantCurrency: payload.applyToParticipantCurrency,
+        applyToGroupPoints: payload.applyToGroupPoints,
+        applyToGroupCurrency: payload.applyToGroupCurrency,
+        dryRun: payload.dryRun,
+        note: payload.note,
+      });
+    }
+
+    if (payload.mode === "rescale-balances") {
+      return services.economyResetService.rescaleBalances({
+        guildId: guildIdOf(request),
+        actor,
+        factor: payload.factor,
         applyToParticipantCurrency: payload.applyToParticipantCurrency,
         applyToGroupPoints: payload.applyToGroupPoints,
         applyToGroupCurrency: payload.applyToGroupCurrency,

@@ -43,7 +43,7 @@ The bot also supports participant-wallet betting: students can place double-or-n
 - Discord ledger command with paging for recent transactions
 - Discord-login leaderboard view for any guild member
 - Participant wallet transfers plus wallet-to-group point donations
-- Custom shop with personal purchases and majority-approved group purchases
+- Custom shop with majority-approved purchases using shared group points
 - Staff fulfilment queue for recorded and approved store redemptions
 - Participant wallet betting with configurable win chance
 - Lucky-draw giveaways: button-entry, random winner picking, automatic currency payout
@@ -58,7 +58,7 @@ The bot also supports participant-wallet betting: students can place double-or-n
 ## Command set
 
 - Staff roles such as admins or alumni: `/award points`, `/award currency`, `/award currencygroup`, `/award currencybulk`, `/deduct group`, `/deduct member`, `/deduct mixed`, `/luckydraw`
-- Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buy personal`, `/buy group`, `/approve_purchase`, `/bet`, `/betstats`
+- Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buy group`, `/approve_purchase`, `/bet`, `/betstats`
 
 The award and deduct flows are split into subcommands so Discord enforces the required fields:
 

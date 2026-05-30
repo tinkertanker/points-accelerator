@@ -92,7 +92,6 @@ export default function GuidePanel() {
                 <code>/balance</code>
                 <code>/transfer member:@harry amount:3</code>
                 <code>/donate amount:2</code>
-                <code>/buy personal item_id:bubble-tea</code>
                 <code>/buy group item_id:pizza quantity:2</code>
                 <code>/luckydraw duration:5m prize:50</code>
                 <code>/leaderboard</code>
@@ -110,8 +109,8 @@ export default function GuidePanel() {
               <p>
                 The economy has two layers. <strong>Group points</strong> are a shared pool belonging to the whole team —
                 they drive the leaderboard and are spent on group shop purchases.{" "}
-                <strong>Personal wallet currency</strong> belongs to individual students and is used for personal
-                purchases, transfers between students, and donations to the group pool.
+                <strong>Personal wallet currency</strong> belongs to individual students and is used for transfers
+                between students, betting, and donations to the group pool.
               </p>
 
               <h3>Earning passively</h3>
@@ -298,12 +297,6 @@ export default function GuidePanel() {
                       <td>Browse all enabled shop items</td>
                     </tr>
                     <tr>
-                      <td><code>/buy personal</code></td>
-                      <td>Everyone</td>
-                      <td><code>item_id</code> <code>quantity</code></td>
-                      <td>Buy an item for yourself using personal currency</td>
-                    </tr>
-                    <tr>
                       <td><code>/buy group</code></td>
                       <td>Everyone</td>
                       <td><code>item_id</code> <code>quantity</code></td>
@@ -380,21 +373,12 @@ export default function GuidePanel() {
           <details id="guide-shop" className="guide-section">
             <summary>Shop &amp; purchases</summary>
             <div className="guide-prose">
-              <h3>Individual items</h3>
-              <p>
-                Items with the <strong>Individual</strong> audience cost personal wallet currency. Students buy them
-                with <code>/buy personal</code> and the purchase is fulfilled immediately. Add fulfilment instructions
-                (e.g. &ldquo;show this receipt to a mentor&rdquo;) to tell students what happens next. Staff can then
-                clear the row from the <strong>Fulfilment</strong> tab once the handover is done.
-              </p>
-
               <h3>Group items</h3>
               <p>
-                Items with the <strong>Group</strong> audience cost group points. A student initiates the purchase
-                with <code>/buy group</code>, then other group members approve it with{" "}
-                <code>/approve_purchase</code>. The number of approvals required scales with group size. Once the
-                threshold is met, the points are deducted and the request moves into the dashboard&rsquo;s{" "}
-                <strong>Fulfilment</strong> queue until staff mark it fulfilled.
+                Shop items cost group points. A student initiates the purchase with <code>/buy group</code>, then
+                other group members approve it with <code>/approve_purchase</code>. The number of approvals required
+                scales with group size. Once the threshold is met, the points are deducted and the request moves into
+                the dashboard&rsquo;s <strong>Fulfilment</strong> queue until staff mark it fulfilled.
               </p>
 
               <h3>Stock management</h3>

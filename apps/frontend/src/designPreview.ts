@@ -225,7 +225,7 @@ function createInitialBootstrap(): BootstrapPayload {
         id: "shop-1",
         name: "Sticker pack",
         description: "Class merit stickers (digital)",
-        audience: "INDIVIDUAL",
+        audience: "GROUP",
         cost: 15,
         stock: 40,
         enabled: true,
@@ -255,11 +255,11 @@ function createInitialBootstrap(): BootstrapPayload {
     redemptions: [
       {
         id: "redeem-1",
-        purchaseMode: "INDIVIDUAL",
+        purchaseMode: "GROUP",
         quantity: 1,
         totalCost: 15,
-        approvalThreshold: null,
-        status: "PENDING",
+        approvalThreshold: 2,
+        status: "AWAITING_APPROVAL",
         notes: null,
         createdAt: new Date(Date.now() - 45 * 60_000).toISOString(),
         updatedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
@@ -270,7 +270,7 @@ function createInitialBootstrap(): BootstrapPayload {
         shopItem: {
           id: "shop-1",
           name: "Sticker pack",
-          audience: "INDIVIDUAL",
+          audience: "GROUP",
           fulfillmentInstructions: "DM the bot with your email.",
           emoji: "🎟️",
           ownerUserId: null,
@@ -702,6 +702,16 @@ export function designPreviewEconomyReset(request: EconomyResetRequest): Economy
       mode: request.mode,
       ...emptyImpact,
       modulus: request.modulus,
+      participantCorrectionEntryId: request.dryRun ? null : "preview-participant-correction",
+      groupCorrectionEntryId: request.dryRun ? null : "preview-group-correction",
+    };
+  }
+
+  if (request.mode === "rescale-balances") {
+    return {
+      mode: request.mode,
+      ...emptyImpact,
+      factor: request.factor,
       participantCorrectionEntryId: request.dryRun ? null : "preview-participant-correction",
       groupCorrectionEntryId: request.dryRun ? null : "preview-group-correction",
     };

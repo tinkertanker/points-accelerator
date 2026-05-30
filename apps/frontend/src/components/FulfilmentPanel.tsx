@@ -155,7 +155,7 @@ export default function FulfilmentPanel({
           <div>
             <h2>Run the fulfilment queue</h2>
             <p className="section-help">
-              Pending rows have already charged points or wallet currency. Awaiting approval rows stay visible so staff
+              Pending rows have already charged group points. Awaiting approval rows stay visible so staff
               can spot stalled requests before they turn into handover work.
             </p>
           </div>

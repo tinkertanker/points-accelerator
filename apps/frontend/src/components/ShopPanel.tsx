@@ -4,18 +4,8 @@ import type { DiscordOption, Participant, ShopItemDraft } from "../types";
 
 const OWNER_DATALIST_ID = "shop-owner-participants";
 
-type ShopSortKey = "audience" | "name" | "cost" | "stock" | "enabled";
+type ShopSortKey = "name" | "cost" | "stock" | "enabled";
 type SortDirection = "asc" | "desc";
-
-const AUDIENCE_LABELS: Record<ShopItemDraft["audience"], string> = {
-  GROUP: "Group",
-  INDIVIDUAL: "Personal",
-};
-
-const AUDIENCE_ORDER: Record<ShopItemDraft["audience"], number> = {
-  GROUP: 0,
-  INDIVIDUAL: 1,
-};
 
 function compareText(a: string, b: string) {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
@@ -30,29 +20,24 @@ function compareShopItems(
   const directionMultiplier = direction === "asc" ? 1 : -1;
   const normalisedLeftName = left.name.trim() || "\uffff";
   const normalisedRightName = right.name.trim() || "\uffff";
-  const audienceComparison = AUDIENCE_ORDER[left.audience] - AUDIENCE_ORDER[right.audience];
   const nameComparison = compareText(normalisedLeftName, normalisedRightName);
 
   let primaryComparison = 0;
 
   switch (sortKey) {
-    case "audience":
-      primaryComparison = audienceComparison || nameComparison;
-      break;
     case "name":
-      primaryComparison = nameComparison || audienceComparison;
+      primaryComparison = nameComparison;
       break;
     case "cost":
-      primaryComparison = left.cost - right.cost || audienceComparison || nameComparison;
+      primaryComparison = left.cost - right.cost || nameComparison;
       break;
     case "stock":
       primaryComparison =
         (left.stock ?? Number.POSITIVE_INFINITY) - (right.stock ?? Number.POSITIVE_INFINITY) ||
-        audienceComparison ||
         nameComparison;
       break;
     case "enabled":
-      primaryComparison = Number(right.enabled) - Number(left.enabled) || audienceComparison || nameComparison;
+      primaryComparison = Number(right.enabled) - Number(left.enabled) || nameComparison;
       break;
   }
 
@@ -80,7 +65,7 @@ export default function ShopPanel({
   onShopDraftsChange,
   onSaveShop,
 }: ShopPanelProps) {
-  const [sortKey, setSortKey] = useState<ShopSortKey>("audience");
+  const [sortKey, setSortKey] = useState<ShopSortKey>("name");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
 
   const ownerSuggestions = useMemo(() => {
@@ -179,7 +164,6 @@ export default function ShopPanel({
               <label className="shop-sort-control">
                 <span>Sort by</span>
                 <select value={sortKey} onChange={(event) => setSortKey(event.target.value as ShopSortKey)}>
-                  <option value="audience">Audience, then name</option>
                   <option value="name">Name</option>
                   <option value="cost">Cost</option>
                   <option value="stock">Stock</option>
@@ -204,9 +188,6 @@ export default function ShopPanel({
               <table className="matrix-table shop-table">
                 <thead>
                   <tr>
-                    <th scope="col" className="col-audience">
-                      Audience
-                    </th>
                     <th scope="col" className="col-emoji">
                       Emoji
                     </th>
@@ -238,21 +219,6 @@ export default function ShopPanel({
                 <tbody>
                   {sortedDrafts.map(({ item, index }) => (
                     <tr key={`${item.id ?? "new"}-${index}`}>
-                      <td className="col-audience">
-                        <select
-                          value={item.audience}
-                          aria-label="Audience"
-                          onChange={(event) =>
-                            updateShopDraft(index, {
-                              ...item,
-                              audience: event.target.value as ShopItemDraft["audience"],
-                            })
-                          }
-                        >
-                          <option value="GROUP">👥</option>
-                          <option value="INDIVIDUAL">👤</option>
-                        </select>
-                      </td>
                       <td className="col-emoji">
                         <input
                           value={item.emoji}
@@ -282,7 +248,7 @@ export default function ShopPanel({
                         <input
                           type="number"
                           value={item.cost}
-                          aria-label={`Cost in ${item.audience === "GROUP" ? "points" : "currency"}`}
+                          aria-label="Cost in group points"
                           onChange={(event) => updateShopDraft(index, { ...item, cost: Number(event.target.value) })}
                           placeholder="0"
                         />
@@ -374,25 +340,9 @@ export default function ShopPanel({
                   <h3>
                     <span aria-hidden>{item.emoji}</span> {item.name.trim() || "New shop item"}
                   </h3>
-                  <span className="shop-card__audience">{AUDIENCE_LABELS[item.audience]}</span>
+                  <span className="shop-card__audience">Group points</span>
                 </div>
                 <div className="shop-card__grid">
-                  <label className="shop-field">
-                    <span className="shop-field__label">Audience</span>
-                    <select
-                      value={item.audience}
-                      aria-label="Audience"
-                      onChange={(event) =>
-                        updateShopDraft(index, {
-                          ...item,
-                          audience: event.target.value as ShopItemDraft["audience"],
-                        })
-                      }
-                    >
-                      <option value="GROUP">👥</option>
-                      <option value="INDIVIDUAL">👤</option>
-                    </select>
-                  </label>
                   <label className="shop-field">
                     <span className="shop-field__label">Emoji</span>
                     <input
@@ -426,7 +376,7 @@ export default function ShopPanel({
                     <input
                       type="number"
                       value={item.cost}
-                      aria-label={`Cost in ${item.audience === "GROUP" ? "points" : "currency"}`}
+                      aria-label="Cost in group points"
                       onChange={(event) => updateShopDraft(index, { ...item, cost: Number(event.target.value) })}
                       placeholder="0"
                     />
@@ -529,14 +479,8 @@ export default function ShopPanel({
               <dd>The item title shown in the shop and purchase flows.</dd>
               <dt>Description</dt>
               <dd>Short copy explaining what the student or group is buying.</dd>
-              <dt>Audience</dt>
-              <dd>
-                <strong>👤 Personal</strong> items are bought with <code>/buy personal</code> using participant currency.
-                <strong> 👥 Group</strong> items are bought with <code>/buy group</code> using shared group points and
-                approvals.
-              </dd>
               <dt>Cost</dt>
-              <dd>The amount charged per purchase in the selected audience&apos;s economy.</dd>
+              <dd>The group points charged per purchase. All shop items use shared group points and group approvals.</dd>
               <dt>Stock</dt>
               <dd>Leave blank for unlimited supply. Set a number to cap how many times the item can be redeemed.</dd>
               <dt>Fulfilment</dt>

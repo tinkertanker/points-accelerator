@@ -57,7 +57,7 @@ afterEach(() => {
 });
 
 describe("ShopPanel", () => {
-  it("shows audience as the first column and sorts by audience then name by default", () => {
+  it("shows group-point shop columns and sorts by name by default", () => {
     render(
       <ShopPanel
         shopDrafts={shopDrafts}
@@ -65,7 +65,7 @@ describe("ShopPanel", () => {
         createShopDraft={() => ({
           name: "",
           description: "",
-          audience: "INDIVIDUAL",
+          audience: "GROUP",
           cost: 0,
           stock: null,
           enabled: true,
@@ -83,7 +83,6 @@ describe("ShopPanel", () => {
 
     const headers = within(screen.getByRole("table")).getAllByRole("columnheader");
     expect(headers.map((header) => header.textContent?.trim())).toEqual([
-      "Audience",
       "Emoji",
       "Name",
       "Description",
@@ -97,8 +96,8 @@ describe("ShopPanel", () => {
     ]);
 
     const nameInputs = within(screen.getByRole("table")).getAllByLabelText("Item name") as HTMLInputElement[];
-    expect(nameInputs.map((input) => input.value)).toEqual(["Apple crate", "Apple badge", "Zebra sticker"]);
-    expect(screen.getByLabelText("Sort by")).toHaveValue("audience");
+    expect(nameInputs.map((input) => input.value)).toEqual(["Apple badge", "Apple crate", "Zebra sticker"]);
+    expect(screen.getByLabelText("Sort by")).toHaveValue("name");
     expect(screen.getByLabelText("Direction")).toHaveValue("asc");
   });
 
@@ -110,7 +109,7 @@ describe("ShopPanel", () => {
         createShopDraft={() => ({
           name: "",
           description: "",
-          audience: "INDIVIDUAL",
+          audience: "GROUP",
           cost: 0,
           stock: null,
           enabled: true,

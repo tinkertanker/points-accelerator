@@ -656,7 +656,7 @@ describe("points accelerator API", () => {
     await expect(ctx.services.participantCurrencyService.getParticipantBalance(participant.id)).resolves.toBe(0);
   });
 
-  it("transfers currency and redeems from the shop without affecting points", async () => {
+  it("transfers currency and redeems from the shop using group points", async () => {
     await ctx.app.inject({
       method: "PUT",
       url: "/api/capabilities",
@@ -706,6 +706,7 @@ describe("points accelerator API", () => {
 
     const source = sourceResponse.json() as { id: string };
     const target = targetResponse.json() as { id: string };
+    groupMemberCounts.set("role-beta", 1);
     const sourceParticipant = await registerParticipant({
       discordUserId: "user-1",
       discordUsername: "Alpha user",
@@ -768,6 +769,21 @@ describe("points accelerator API", () => {
 
     await ctx.app.inject({
       method: "POST",
+      url: "/api/actions/award",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        actorUserId: "admin",
+        actorUsername: "Admin",
+        actorRoleIds: ["role-admin"],
+        targetGroupIds: [target.id],
+        pointsDelta: 3,
+        currencyDelta: 0,
+        description: "Seed shop points",
+      },
+    });
+
+    await ctx.app.inject({
+      method: "POST",
       url: "/api/actions/redeem",
       headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
       payload: {
@@ -776,6 +792,7 @@ describe("points accelerator API", () => {
         requestedByUserId: "user-2",
         requestedByUsername: "Beta user",
         quantity: 1,
+        purchaseMode: "GROUP",
       },
     });
 
@@ -798,7 +815,7 @@ describe("points accelerator API", () => {
     ]);
 
     await expect(ctx.services.participantCurrencyService.getParticipantBalance(sourceParticipant.id)).resolves.toBe(15);
-    await expect(ctx.services.participantCurrencyService.getParticipantBalance(targetParticipant.id)).resolves.toBe(2);
+    await expect(ctx.services.participantCurrencyService.getParticipantBalance(targetParticipant.id)).resolves.toBe(5);
   });
 
   it("supports currency-only staff awards through the admin API", async () => {
@@ -1127,6 +1144,26 @@ describe("points accelerator API", () => {
   });
 
   it("lists fulfilment queue items and lets staff fulfil or cancel eligible requests", async () => {
+    await ctx.app.inject({
+      method: "PUT",
+      url: "/api/capabilities",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: [
+        {
+          roleId: "role-admin",
+          roleName: "Admin",
+          canManageDashboard: true,
+          canAward: true,
+          maxAward: 1000,
+          canDeduct: true,
+          canMultiAward: true,
+          canSell: true,
+          canReceiveAwards: true,
+          isGroupRole: false,
+        },
+      ],
+    });
+
     const groupResponse = await ctx.app.inject({
       method: "POST",
       url: "/api/groups",
@@ -1156,7 +1193,20 @@ describe("points accelerator API", () => {
       groupId: group.id,
     });
 
-    await seedParticipantCurrency(participant.id, 50);
+    await ctx.app.inject({
+      method: "POST",
+      url: "/api/actions/award",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        actorUserId: "admin",
+        actorUsername: "Admin",
+        actorRoleIds: ["role-admin"],
+        targetGroupIds: [group.id],
+        pointsDelta: 10,
+        currencyDelta: 0,
+        description: "Seed fulfilment points",
+      },
+    });
 
     const personalItemResponse = await ctx.app.inject({
       method: "POST",

@@ -37,6 +37,12 @@ const RESET_MODE_OPTIONS: Array<{
   detail: string;
 }> = [
   {
+    id: "rescale-balances",
+    title: "Rescale balances",
+    summary: "Multiply selected balances by a decimal factor.",
+    detail: "Use this when the economy needs smaller numbers. Example: 10,000 with factor 0.01 becomes 100.",
+  },
+  {
     id: "modulo-balance",
     title: "Keep last digits",
     summary: "Trim huge balances while preserving a small remainder.",
@@ -78,7 +84,7 @@ const ECONOMY_BUCKET_BY_ID = {
     id: "participant-currency",
     title: "Participant wallet currency",
     label: "Student wallet currency",
-    description: "Personal spendable balance used for transfers, personal shop buys, bets and donations.",
+    description: "Personal spendable balance used for transfers, bets and donations.",
   },
   "group-points": {
     id: "group-points",
@@ -154,6 +160,8 @@ type ResetState = {
   applyToParticipantCurrency: boolean;
   applyToGroupPoints: boolean;
   applyToGroupCurrency: boolean;
+  // rescale-balances
+  factor: string;
   // set-balances
   targetParticipantCurrency: string;
   targetGroupPoints: string;
@@ -169,7 +177,7 @@ function defaultState(): ResetState {
   const now = new Date();
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
   return {
-    mode: "modulo-balance",
+    mode: "rescale-balances",
     since: local.toISOString().slice(0, 16),
     participantTypes: new Set<ParticipantLedgerEntryType>(["LUCKYDRAW_WIN"]),
     groupTypes: new Set<GroupLedgerEntryType>(),
@@ -179,7 +187,8 @@ function defaultState(): ResetState {
     modulus: "1000",
     applyToParticipantCurrency: true,
     applyToGroupPoints: true,
-    applyToGroupCurrency: true,
+    applyToGroupCurrency: false,
+    factor: "0.01",
     targetParticipantCurrency: "0",
     targetGroupPoints: "0",
     targetGroupCurrency: "0",
@@ -218,6 +227,17 @@ function buildRequest(state: ResetState, dryRun: boolean): EconomyResetRequest {
     return {
       mode: "modulo-balance",
       modulus: Number(state.modulus),
+      applyToParticipantCurrency: state.applyToParticipantCurrency,
+      applyToGroupPoints: state.applyToGroupPoints,
+      applyToGroupCurrency: state.applyToGroupCurrency,
+      note,
+      dryRun,
+    };
+  }
+  if (state.mode === "rescale-balances") {
+    return {
+      mode: "rescale-balances",
+      factor: Number(state.factor),
       applyToParticipantCurrency: state.applyToParticipantCurrency,
       applyToGroupPoints: state.applyToGroupPoints,
       applyToGroupCurrency: state.applyToGroupCurrency,
@@ -283,6 +303,11 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
   const modulusIsValid =
     state.mode !== "modulo-balance" ||
     (state.modulus.trim() !== "" && Number.isInteger(modulusValue) && modulusValue >= 1);
+  const factorValue = Number(state.factor);
+  const factorIsValid =
+    state.mode !== "rescale-balances" ||
+    (state.factor.trim() !== "" && Number.isFinite(factorValue) && factorValue >= 0);
+  const formIsValid = modulusIsValid && factorIsValid;
   const selectedTargetCount = [
     state.mode === "set-balances" ? state.setParticipantCurrencyEnabled : state.applyToParticipantCurrency,
     state.mode === "set-balances" ? state.setGroupPointsEnabled : state.applyToGroupPoints,
@@ -329,6 +354,10 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
   const run = async (dryRun: boolean) => {
     if (!modulusIsValid) {
       setError("Enter a whole-number modulus of at least 1 before previewing or executing.");
+      return;
+    }
+    if (!factorIsValid) {
+      setError("Enter a non-negative decimal factor before previewing or executing.");
       return;
     }
     setBusy(true);
@@ -410,10 +439,71 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
           <div className="reset-workspace__intro">
             <h3>{selectedMode.title}</h3>
             <p>{selectedMode.detail}</p>
-            {(state.mode === "modulo-balance" || state.mode === "set-balances") && (
+            {(state.mode === "modulo-balance" ||
+              state.mode === "set-balances" ||
+              state.mode === "rescale-balances") && (
               <span className="reset-target-count">{selectedTargetCount} bucket(s) selected</span>
             )}
           </div>
+
+          {state.mode === "rescale-balances" && (
+            <>
+              <div className="reset-control-grid">
+                <label className="field reset-number-field">
+                  <span>Scale factor</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={state.factor}
+                    onChange={(event) => update({ factor: event.target.value })}
+                  />
+                  <small className="field-hint">
+                    Enter 0.01 to divide selected balances by 100. Zero wipes the selected balances.
+                  </small>
+                  {!factorIsValid && (
+                    <small className="field-error">Enter a non-negative decimal factor.</small>
+                  )}
+                </label>
+              </div>
+
+              <div className="reset-target-grid" aria-label="Rescale reset targets">
+                <label className="reset-target-card">
+                  <input
+                    type="checkbox"
+                    checked={state.applyToParticipantCurrency}
+                    onChange={(event) => update({ applyToParticipantCurrency: event.target.checked })}
+                  />
+                  <span>
+                    <strong>{participantCurrencyBucket.label}</strong>
+                    <small>{participantCurrencyBucket.description}</small>
+                  </span>
+                </label>
+                <label className="reset-target-card">
+                  <input
+                    type="checkbox"
+                    checked={state.applyToGroupPoints}
+                    onChange={(event) => update({ applyToGroupPoints: event.target.checked })}
+                  />
+                  <span>
+                    <strong>{groupPointsBucket.label}</strong>
+                    <small>{groupPointsBucket.description}</small>
+                  </span>
+                </label>
+                <label className="reset-target-card">
+                  <input
+                    type="checkbox"
+                    checked={state.applyToGroupCurrency}
+                    onChange={(event) => update({ applyToGroupCurrency: event.target.checked })}
+                  />
+                  <span>
+                    <strong>{groupCurrencyBucket.label}</strong>
+                    <small>{groupCurrencyBucket.description}</small>
+                  </span>
+                </label>
+              </div>
+            </>
+          )}
 
           {state.mode === "modulo-balance" && (
             <>
@@ -674,14 +764,14 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
         </div>
 
         <div className="form-actions">
-          <button type="button" onClick={() => run(true)} disabled={busy || !modulusIsValid}>
+          <button type="button" onClick={() => run(true)} disabled={busy || !formIsValid}>
             {busy ? "Working…" : "Preview (dry run)"}
           </button>
           <button
             type="button"
             className="button button--danger"
             onClick={() => run(false)}
-            disabled={busy || !modulusIsValid}
+            disabled={busy || !formIsValid}
           >
             {busy ? "Working…" : "Execute"}
           </button>
@@ -944,6 +1034,9 @@ function ResetResultView({ result }: { result: EconomyResetResult }) {
           {result.mode === "cap-balances" && <>Capped any balance over the configured maximum.</>}
           {result.mode === "modulo-balance" && (
             <>Trimmed positive balances using modulus {result.modulus}.</>
+          )}
+          {result.mode === "rescale-balances" && (
+            <>Rescaled selected balances by factor {result.factor}.</>
           )}
           {result.mode === "set-balances" && <>Set selected balances to fixed targets.</>}{" "}
           Total currency delta: <strong>{formatDelta(result.totalCurrencyDelta)}</strong>. Total

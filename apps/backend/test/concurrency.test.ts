@@ -61,6 +61,23 @@ async function seedParticipantCurrency(participantId: string, amount: number) {
   });
 }
 
+async function seedGroupPoints(groupId: string, amount: number) {
+  await ctx.services.economyService.awardGroups({
+    guildId: ctx.env.GUILD_ID,
+    actor: {
+      userId: "system",
+      username: "System",
+      roleIds: [],
+    },
+    targetGroupIds: [groupId],
+    pointsDelta: amount,
+    currencyDelta: 0,
+    description: "Test seed",
+    type: "CORRECTION",
+    systemAction: true,
+  });
+}
+
 describe("economy concurrency", () => {
   beforeAll(async () => {
     const managed = ensureTestDatabase();
@@ -115,17 +132,16 @@ describe("economy concurrency", () => {
     expect((balances[firstTarget.id]?.currencyBalance ?? 0) + (balances[secondTarget.id]?.currencyBalance ?? 0)).toBe(7);
   });
 
-  it("keeps redemptions inside stock and wallet limits under concurrency", async () => {
+  it("keeps redemptions inside stock and group point limits under concurrency", async () => {
     const group = await createGroup("Alpha", "role-alpha");
     const firstParticipant = await createParticipant(group.id, "user-1", "S001");
     const secondParticipant = await createParticipant(group.id, "user-2", "S002");
-    await seedParticipantCurrency(firstParticipant.id, 10);
-    await seedParticipantCurrency(secondParticipant.id, 10);
+    await seedGroupPoints(group.id, 10);
 
     const item = await ctx.services.shopService.upsert(ctx.env.GUILD_ID, {
       name: "Limited Prize",
       description: "One only",
-      audience: "INDIVIDUAL",
+      audience: "GROUP",
       cost: 7,
       stock: 1,
       enabled: true,
@@ -140,6 +156,8 @@ describe("economy concurrency", () => {
         requestedByUserId: "user-1",
         requestedByUsername: "Alice",
         quantity: 1,
+        purchaseMode: "GROUP",
+        groupMemberCount: 1,
       }),
       ctx.services.shopService.redeem({
         guildId: ctx.env.GUILD_ID,
@@ -148,6 +166,8 @@ describe("economy concurrency", () => {
         requestedByUserId: "user-2",
         requestedByUsername: "Bob",
         quantity: 1,
+        purchaseMode: "GROUP",
+        groupMemberCount: 1,
       }),
     ]);
 
@@ -159,10 +179,8 @@ describe("economy concurrency", () => {
     const redemptionCount = await ctx.prisma.shopRedemption.count();
 
     expect(refreshedItem.stock).toBe(0);
-    expect(
-      (await ctx.services.participantCurrencyService.getParticipantBalance(firstParticipant.id)) +
-        (await ctx.services.participantCurrencyService.getParticipantBalance(secondParticipant.id)),
-    ).toBe(13);
+    const balances = await ctx.services.groupService.getBalanceMap([group.id]);
+    expect(balances[group.id]?.pointsBalance).toBe(3);
     expect(redemptionCount).toBe(1);
   });
 });
