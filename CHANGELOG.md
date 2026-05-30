@@ -8,6 +8,11 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.9.0] - 2026-05-30
+
+### Added
+- `/kahoot` awards staggered group points to ranked winners, with configurable starting points and per-rank step-downs for up to five winners.
+
 ## [0.8.0] - 2026-05-30
 
 ### Added
