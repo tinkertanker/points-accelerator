@@ -35,7 +35,7 @@ export function createServices(prisma: PrismaClient) {
     auditService,
     participantCurrencyService,
   );
-  const goFundMeService = new GoFundMeService(prisma, economyService, auditService);
+  const goFundMeService = new GoFundMeService(prisma, participantCurrencyService, auditService);
   const bettingService = new BettingService(prisma, configService, participantCurrencyService, roleCapabilityService);
   const shopService = new ShopService(prisma, economyService, participantCurrencyService, auditService);
   const listingService = new ListingService(prisma, roleCapabilityService, auditService);

@@ -8,6 +8,11 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.9.2] - 2026-05-30
+
+### Fixed
+- `/gofundme` donations now use personal wallet points instead of shared group points, and the migration converts existing GoFundMe donations 1:1 by refunding the group and charging the participant wallet.
+
 ## [0.9.1] - 2026-05-30
 
 ### Added

@@ -20,6 +20,8 @@ describe("GoFundMe service", () => {
         guildId: ctx.env.GUILD_ID,
         pointsName: "points",
         pointsSymbol: "🏅",
+        currencyName: "personal points",
+        currencySymbol: "⭐",
       },
     });
   });
@@ -32,7 +34,7 @@ describe("GoFundMe service", () => {
     cleanupDatabase();
   });
 
-  it("deducts donated group points and tracks campaign progress", async () => {
+  it("deducts donated personal points and tracks campaign progress", async () => {
     const group = await ctx.prisma.group.create({
       data: {
         guildId: ctx.env.GUILD_ID,
@@ -51,13 +53,12 @@ describe("GoFundMe service", () => {
       },
     });
 
-    await ctx.services.economyService.awardGroups({
+    await ctx.services.participantCurrencyService.awardParticipants({
       guildId: ctx.env.GUILD_ID,
       actor: { userId: "system", username: "System", roleIds: [] },
-      targetGroupIds: [group.id],
-      pointsDelta: 100,
-      currencyDelta: 0,
-      description: "Seed points",
+      targetParticipantIds: [participant.id],
+      currencyDelta: 100,
+      description: "Seed personal points",
       type: "CORRECTION",
       systemAction: true,
     });
@@ -69,7 +70,7 @@ describe("GoFundMe service", () => {
       goalPoints: 120,
     });
 
-    const result = await ctx.services.goFundMeService.donateGroupPoints({
+    const result = await ctx.services.goFundMeService.donatePersonalCurrency({
       guildId: ctx.env.GUILD_ID,
       actor: { userId: "user-1", username: "Alice", roleIds: [] },
       participantId: participant.id,
@@ -82,15 +83,16 @@ describe("GoFundMe service", () => {
     expect(result.summary.goalPoints).toBe(120);
     expect(result.summary.progress).toBe(0.25);
 
-    const balance = await ctx.services.economyService.getGroupBalance(group.id);
-    expect(balance.pointsBalance).toBe(70);
+    const balance = await ctx.services.participantCurrencyService.getParticipantBalance(participant.id);
+    expect(balance).toBe(70);
 
     const donation = await ctx.prisma.goFundMeDonation.findUnique({
-      where: { ledgerEntryId: result.ledgerEntry.id },
-      include: { ledgerEntry: { include: { splits: true } } },
+      where: { currencyEntryId: result.currencyEntry.id },
+      include: { currencyEntry: { include: { splits: true } } },
     });
     expect(donation?.amount.toString()).toBe("30");
-    expect(donation?.ledgerEntry.type).toBe("GOFUNDME_DONATION");
-    expect(donation?.ledgerEntry.splits[0]?.pointsDelta.toString()).toBe("-30");
+    expect(donation?.ledgerEntryId).toBeNull();
+    expect(donation?.currencyEntry?.type).toBe("DONATION");
+    expect(donation?.currencyEntry?.splits[0]?.currencyDelta.toString()).toBe("-30");
   });
 });

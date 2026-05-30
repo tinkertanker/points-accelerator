@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { AppError } from "../utils/app-error.js";
 import { decimal, decimalToNumber } from "../utils/decimal.js";
 import type { AuditService } from "./audit-service.js";
-import type { EconomyService } from "./economy-service.js";
+import type { ParticipantCurrencyService } from "./participant-currency-service.js";
 
 type Actor = {
   userId?: string;
@@ -18,7 +18,7 @@ export type GoFundMeSummary = Awaited<ReturnType<GoFundMeService["getActiveSumma
 export class GoFundMeService {
   public constructor(
     private readonly prisma: PrismaClient,
-    private readonly economyService: EconomyService,
+    private readonly participantCurrencyService: ParticipantCurrencyService,
     private readonly auditService: AuditService,
   ) {}
 
@@ -98,7 +98,7 @@ export class GoFundMeService {
     return this.buildSummary(campaign, this.prisma);
   }
 
-  public async donateGroupPoints(params: {
+  public async donatePersonalCurrency(params: {
     guildId: string;
     actor: Actor;
     participantId: string;
@@ -127,14 +127,6 @@ export class GoFundMeService {
         throw new AppError("No active GoFundMe campaign. Ask an admin to run /gofundme set first.", 404);
       }
 
-      await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        SELECT id
-        FROM "Group"
-        WHERE id = ${params.groupId}
-          AND "guildId" = ${params.guildId}
-        FOR UPDATE
-      `);
-
       const participant = await tx.participant.findFirst({
         where: {
           id: params.participantId,
@@ -146,22 +138,27 @@ export class GoFundMeService {
         throw new AppError("Participant not found in the donating group.", 404);
       }
 
-      const balance = await this.getGroupPointsBalance(tx, params.groupId);
+      const balance = await this.getParticipantCurrencyBalance(tx, params.participantId);
       if (balance < params.amount) {
-        throw new AppError("Your group does not have enough points to donate.", 409);
+        throw new AppError("You do not have enough personal points to donate.", 409);
       }
 
-      const ledgerEntry = await this.economyService.awardGroups({
+      const currencyEntry = await this.participantCurrencyService.recordEntry({
         guildId: params.guildId,
         actor: params.actor,
-        targetGroupIds: [params.groupId],
-        pointsDelta: -params.amount,
-        currencyDelta: 0,
+        type: "DONATION",
         description: params.description ?? `GoFundMe donation to ${campaign.title}`,
-        type: "GOFUNDME_DONATION",
+        splits: [{ participantId: params.participantId, currencyDelta: -params.amount }],
         systemAction: true,
         executor: tx,
         externalRef: `gofundme:${campaign.id}:${params.participantId}:${Date.now()}`,
+        auditAction: "participant_currency.gofundme_donated",
+        auditPayload: {
+          campaignId: campaign.id,
+          participantId: params.participantId,
+          groupId: params.groupId,
+          amount: params.amount,
+        },
       });
 
       const donation = await tx.goFundMeDonation.create({
@@ -170,7 +167,7 @@ export class GoFundMeService {
           campaignId: campaign.id,
           participantId: params.participantId,
           groupId: params.groupId,
-          ledgerEntryId: ledgerEntry.id,
+          currencyEntryId: currencyEntry.id,
           amount: decimal(params.amount),
           createdByUserId: params.actor.userId,
           createdByUsername: params.actor.username,
@@ -193,7 +190,7 @@ export class GoFundMeService {
           participantId: params.participantId,
           groupId: params.groupId,
           amount: params.amount,
-          ledgerEntryId: ledgerEntry.id,
+          currencyEntryId: currencyEntry.id,
         },
         executor: tx,
       });
@@ -204,18 +201,18 @@ export class GoFundMeService {
           amount: decimalToNumber(donation.amount),
         },
         summary: await this.buildSummary(campaign, tx),
-        ledgerEntry,
+        currencyEntry,
       };
     });
   }
 
-  private async getGroupPointsBalance(executor: PrismaExecutor, groupId: string) {
-    const grouped = await executor.ledgerSplit.groupBy({
-      by: ["groupId"],
-      where: { groupId },
-      _sum: { pointsDelta: true },
+  private async getParticipantCurrencyBalance(executor: PrismaExecutor, participantId: string) {
+    const grouped = await executor.participantCurrencySplit.groupBy({
+      by: ["participantId"],
+      where: { participantId },
+      _sum: { currencyDelta: true },
     });
-    return decimalToNumber(grouped[0]?._sum.pointsDelta);
+    return decimalToNumber(grouped[0]?._sum.currencyDelta);
   }
 
   private async buildSummary(

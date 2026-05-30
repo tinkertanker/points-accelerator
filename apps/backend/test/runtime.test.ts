@@ -74,9 +74,9 @@ function createRuntimeFixture() {
         updatedAt: new Date("2026-04-01T12:00:00.000Z"),
         recentDonations: [],
       }),
-      donateGroupPoints: vi.fn().mockResolvedValue({
+      donatePersonalCurrency: vi.fn().mockResolvedValue({
         donation: { id: "donation-1", amount: 10 },
-        ledgerEntry: { id: "ledger-2" },
+        currencyEntry: { id: "currency-2" },
         summary: {
           id: "campaign-1",
           guildId: "guild-test",
@@ -845,14 +845,14 @@ describe("bot runtime", () => {
     });
     expect(reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: "GoFundMe goal set to 100 blorgshj 🏅.",
+        content: "GoFundMe goal set to 100 bananas 💲.",
       }),
     );
     const embed = reply.mock.calls[0][0].embeds[0].data;
     expect(embed.description).toContain("🟥🟥🟥🟧⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛");
   });
 
-  it("donates group points to GoFundMe from the caller's active group", async () => {
+  it("donates personal points to GoFundMe from the caller's wallet", async () => {
     const { runtime, services } = createRuntimeFixture();
     const reply = vi.fn().mockResolvedValue(undefined);
 
@@ -879,7 +879,7 @@ describe("bot runtime", () => {
       },
     });
 
-    expect(services.goFundMeService.donateGroupPoints).toHaveBeenCalledWith({
+    expect(services.goFundMeService.donatePersonalCurrency).toHaveBeenCalledWith({
       guildId: "guild-test",
       actor: {
         userId: "user-1",
@@ -889,11 +889,11 @@ describe("bot runtime", () => {
       participantId: "participant-1",
       groupId: "group-1",
       amount: 10,
-      description: "alice-user donated 10 blorgshj 🏅 from Gryffindor to GoFundMe",
+      description: "alice-user donated 10 bananas 💲 from their wallet to GoFundMe",
     });
     expect(reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: "<@user-1> donated 10 blorgshj 🏅 from <@&group-role> to GoFundMe.",
+        content: "<@user-1> donated 10 bananas 💲 from their wallet to GoFundMe.",
       }),
     );
     const embed = reply.mock.calls[0][0].embeds[0].data;

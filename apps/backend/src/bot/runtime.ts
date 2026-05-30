@@ -2346,7 +2346,7 @@ export class BotRuntime {
           donation.createdByUserId,
           donation.createdByUsername ?? donation.participant.discordUsername ?? donation.participant.indexId,
         );
-        return `${donor} · ${this.formatPointsAmount(donation.amount, config)} from ${this.formatGroupReference(donation.group)}`;
+        return `${donor} · ${this.formatCurrencyAmount(donation.amount, config)} from ${this.formatGroupReference(donation.group)}`;
       })
       .join("\n");
 
@@ -2356,14 +2356,14 @@ export class BotRuntime {
       .setDescription(
         [
           this.formatGoFundMeProgressBar(summary.progress),
-          `**${this.formatPointsAmount(summary.donatedPoints, config)} / ${this.formatPointsAmount(summary.goalPoints, config)}** (${percent}%)`,
+          `**${this.formatCurrencyAmount(summary.donatedPoints, config)} / ${this.formatCurrencyAmount(summary.goalPoints, config)}** (${percent}%)`,
         ].join("\n"),
       )
       .addFields(
         { name: "Donations", value: `${summary.donationCount}`, inline: true },
-        { name: "Still needed", value: this.formatPointsAmount(remaining, config), inline: true },
+        { name: "Still needed", value: this.formatCurrencyAmount(remaining, config), inline: true },
       )
-      .setFooter({ text: `Donate with /gofundme donate. Group ${config.pointsName} are deducted from your current group.` });
+      .setFooter({ text: `Donate with /gofundme donate. Personal ${config.currencyName} are deducted from your wallet.` });
 
     if (recent) {
       embed.addFields({ name: "Recent donations", value: this.truncateText(recent, 1024), inline: false });
@@ -3901,7 +3901,7 @@ export class BotRuntime {
             goalPoints: goal,
           });
           await interaction.reply({
-            content: `GoFundMe goal set to ${this.formatPointsAmount(goal, config)}.`,
+            content: `GoFundMe goal set to ${this.formatCurrencyAmount(goal, config)}.`,
             embeds: [this.buildGoFundMeEmbed(summary, config)],
           });
           return;
@@ -3924,17 +3924,16 @@ export class BotRuntime {
           });
           if (!guardOk) return;
           const sourceLabel = this.formatUserReference(interaction.user.id, member?.displayName ?? interaction.user.username);
-          const groupLabel = this.formatGroupReference(group);
-          const result = await this.services.goFundMeService.donateGroupPoints({
+          const result = await this.services.goFundMeService.donatePersonalCurrency({
             guildId,
             actor,
             participantId: participant.id,
             groupId: group.id,
             amount,
-            description: `${interaction.user.username} donated ${this.formatPointsAmount(amount, config)} from ${group.displayName} to GoFundMe`,
+            description: `${interaction.user.username} donated ${this.formatCurrencyAmount(amount, config)} from their wallet to GoFundMe`,
           });
           await interaction.reply({
-            content: `${sourceLabel} donated ${this.formatPointsAmount(amount, config)} from ${groupLabel} to GoFundMe.`,
+            content: `${sourceLabel} donated ${this.formatCurrencyAmount(amount, config)} from their wallet to GoFundMe.`,
             embeds: [this.buildGoFundMeEmbed(result.summary, config)],
           });
           return;
@@ -5113,7 +5112,7 @@ export class BotRuntime {
         .setDescription("Show the 10 most recent ledger entries."),
       new SlashCommandBuilder()
         .setName("gofundme")
-        .setDescription("Track and donate group points towards a shared goal.")
+        .setDescription("Track and donate personal points towards a shared goal.")
         .addSubcommand((sub) =>
           sub
             .setName("status")
@@ -5122,11 +5121,11 @@ export class BotRuntime {
         .addSubcommand((sub) =>
           sub
             .setName("donate")
-            .setDescription("Donate points from your current group.")
+            .setDescription("Donate personal points from your wallet.")
             .addNumberOption((option) =>
               option
                 .setName("amount")
-                .setDescription("Group points to donate")
+                .setDescription("Personal points to donate")
                 .setRequired(true)
                 .setMinValue(0.01),
             ),

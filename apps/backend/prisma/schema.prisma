@@ -252,7 +252,7 @@ model LedgerEntry {
   guild             GuildConfig     @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   splits            LedgerSplit[]
   shopRedemption    ShopRedemption?
-  goFundMeDonation  GoFundMeDonation?
+  goFundMeDonation  GoFundMeDonation? @relation("GoFundMeDonationLedgerEntry")
 
   @@index([guildId, createdAt(sort: Desc)])
   @@index([guildId, externalRef])
@@ -405,6 +405,7 @@ model ParticipantCurrencyEntry {
   guild             GuildConfig                  @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   splits            ParticipantCurrencySplit[]
   shopRedemption    ShopRedemption?
+  goFundMeDonation  GoFundMeDonation? @relation("GoFundMeDonationCurrencyEntry")
 
   @@index([guildId, createdAt(sort: Desc)])
   @@index([guildId, externalRef])
@@ -531,7 +532,8 @@ model GoFundMeDonation {
   campaignId        String
   participantId     String
   groupId           String
-  ledgerEntryId     String
+  ledgerEntryId     String?
+  currencyEntryId   String?
   amount            Decimal          @db.Decimal(18, 6)
   createdByUserId   String?
   createdByUsername String?
@@ -540,9 +542,11 @@ model GoFundMeDonation {
   campaign          GoFundMeCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   participant       Participant      @relation(fields: [participantId], references: [id], onDelete: Cascade)
   group             Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  ledgerEntry       LedgerEntry      @relation(fields: [ledgerEntryId], references: [id], onDelete: Cascade)
+  ledgerEntry       LedgerEntry?     @relation("GoFundMeDonationLedgerEntry", fields: [ledgerEntryId], references: [id], onDelete: SetNull)
+  currencyEntry     ParticipantCurrencyEntry? @relation("GoFundMeDonationCurrencyEntry", fields: [currencyEntryId], references: [id], onDelete: SetNull)
 
   @@unique([ledgerEntryId])
+  @@unique([currencyEntryId])
   @@index([guildId, createdAt(sort: Desc)])
   @@index([campaignId, createdAt(sort: Desc)])
   @@index([participantId, createdAt(sort: Desc)])
