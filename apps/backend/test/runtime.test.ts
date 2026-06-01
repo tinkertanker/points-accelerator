@@ -273,7 +273,7 @@ describe("bot runtime", () => {
     expect(roleIds).toEqual(["role-high", "role-mid", "role-low"]);
   });
 
-  it("renders /store personal as an embed without exposing raw shop item ids", async () => {
+  it("renders /store as an embed without exposing raw shop item ids", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.shopService.list.mockResolvedValue([
       {
@@ -307,9 +307,7 @@ describe("bot runtime", () => {
           fetch: vi.fn().mockResolvedValue(null),
         },
       },
-      options: {
-        getSubcommand: () => "personal",
-      },
+      options: {},
       reply,
       user: {
         id: "user-1",
@@ -321,15 +319,15 @@ describe("bot runtime", () => {
     expect(call.ephemeral).toBe(true);
     expect(call.embeds).toHaveLength(1);
     const embed = call.embeds[0].data;
-    expect(embed.title).toBe("Personal store");
+    expect(embed.title).toBe("Store");
     const rendered = JSON.stringify(embed);
     expect(rendered).not.toContain("shop-item-1234567890");
     expect(rendered).not.toContain("group-item-0987654321");
-    expect(rendered).toContain("Bubble Tea");
-    expect(rendered).not.toContain("Pizza Party");
+    expect(rendered).not.toContain("Bubble Tea");
+    expect(rendered).toContain("Pizza Party");
   });
 
-  it("renders /store group with only group items", async () => {
+  it("shows an empty response when /store has no group items", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.shopService.list.mockResolvedValue([
       {
@@ -340,14 +338,6 @@ describe("bot runtime", () => {
         stock: null,
         cost: { toString: () => "3" },
       },
-      {
-        id: "group-item-0987654321",
-        enabled: true,
-        name: "Pizza Party",
-        audience: "GROUP",
-        stock: null,
-        cost: { toString: () => "500" },
-      },
     ]);
     const reply = vi.fn().mockResolvedValue(undefined);
 
@@ -355,17 +345,16 @@ describe("bot runtime", () => {
       guildId: "guild-test",
       commandName: "store",
       guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
-      options: { getSubcommand: () => "group" },
+      options: {},
       reply,
       user: { id: "user-1", username: "Alice" },
     });
 
     const call = reply.mock.calls[0][0];
-    const embed = call.embeds[0].data;
-    expect(embed.title).toBe("Group store");
-    const rendered = JSON.stringify(embed);
-    expect(rendered).toContain("Pizza Party");
-    expect(rendered).not.toContain("Bubble Tea");
+    expect(call).toMatchObject({
+      content: "No group-purchase items are available right now.",
+      ephemeral: true,
+    });
   });
 
   it("renders the first ledger page with a Next button when more entries exist", async () => {
@@ -2923,6 +2912,7 @@ describe("bot runtime", () => {
     const deductCommand = commands.find((command) => command.name === "deduct");
     const forbesCommand = commands.find((command) => command.name === "forbes");
     const goFundMeCommand = commands.find((command) => command.name === "gofundme");
+    const storeCommand = commands.find((command) => command.name === "store");
     const buyCommand = commands.find((command) => command.name === "buy");
     const submitCommand = commands.find((command) => command.name === "submit");
     const kahootCommand = commands.find((command) => command.name === "kahoot");
@@ -2996,6 +2986,8 @@ describe("bot runtime", () => {
     );
     expect(buyCommand?.options?.find((option) => option.name === "personal")).toBeUndefined();
     expect(buyCommand?.options?.find((option) => option.name === "group")).toBeUndefined();
+    expect(storeCommand?.options?.find((option) => option.name === "personal")).toBeUndefined();
+    expect(storeCommand?.options?.find((option) => option.name === "group")).toBeUndefined();
     expect(submitCommand?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "assignment", required: true }),

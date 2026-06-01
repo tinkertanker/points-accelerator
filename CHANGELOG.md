@@ -8,6 +8,11 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.10.2] - 2026-06-01
+
+### Changed
+- `/store` now opens the shared group-point store directly; `/store personal` and `/store group` are retired.
+
 ## [0.10.1] - 2026-06-01
 
 ### Changed

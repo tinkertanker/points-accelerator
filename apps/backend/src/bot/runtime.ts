@@ -120,7 +120,6 @@ const DEFAULT_ROLE_ACTION_COOLDOWN_SECONDS = 10;
 
 type PaginationKind = "inventory" | "store" | "ledger" | "leaderboard" | "forbes" | "assignments";
 type InventoryAudience = "personal" | "group";
-type StoreAudience = "personal" | "group";
 
 type PaginationCustomId = {
   kind: PaginationKind;
@@ -1355,7 +1354,6 @@ export class BotRuntime {
           return this.buildStoreView({
             guildId,
             ownerId: parsed.ownerId,
-            audience: parsed.subkey === "group" ? "group" : "personal",
             page: parsed.page,
           });
         case "ledger":
@@ -1438,25 +1436,22 @@ export class BotRuntime {
   private async buildStoreView(params: {
     guildId: string;
     ownerId: string;
-    audience: StoreAudience;
     page: number;
   }) {
     const [config, items] = await Promise.all([
       this.services.configService.getOrCreate(params.guildId),
       this.services.shopService.list(params.guildId),
     ]);
-    const wantedAudience = params.audience === "group" ? "GROUP" : "INDIVIDUAL";
-    const filtered = items.filter((item) => item.enabled && item.audience === wantedAudience);
+    const filtered = items.filter((item) => item.enabled && item.audience === "GROUP");
     const paged = paginateArray(filtered, params.page);
     const embed = this.buildStoreEmbed({
       config,
-      audience: params.audience,
       totalItems: filtered.length,
       paged,
     });
     const row = this.buildPaginationRow(
       "store",
-      params.audience,
+      "group",
       params.ownerId,
       paged.clampedPage,
       paged.hasPrev,
@@ -2707,8 +2702,8 @@ export class BotRuntime {
     const titleSuffix = audience === "personal" ? "personal inventory" : "group purchases";
     const emptyHint =
       audience === "personal"
-        ? "Nothing yet — try `/store personal` to see what's for sale."
-        : "No group purchases yet — try `/store group` to see what's for sale.";
+        ? "Nothing yet — try `/store` to see what's for sale."
+        : "No group purchases yet — try `/store` to see what's for sale.";
     const description =
       redemptions.length === 0
         ? emptyHint
@@ -2733,22 +2728,16 @@ export class BotRuntime {
 
   private buildStoreEmbed(params: {
     config: GuildConfig;
-    audience: StoreAudience;
     totalItems: number;
     paged: ReturnType<typeof paginateArray<ShopListItem>>;
   }) {
-    const { config, audience, totalItems, paged } = params;
+    const { config, totalItems, paged } = params;
     const priceFormatter = (item: ShopListItem) => this.formatPointsAmount(item.cost.toString(), config);
-    const title = audience === "group" ? "Group store" : "Personal store";
-    const headline =
-      audience === "group"
-        ? `Items buyable with shared ${config.pointsName}.`
-        : `Personal shop purchases are no longer available. Use /store group for shared ${config.pointsName} items.`;
+    const title = "Store";
+    const headline = `Items buyable with shared ${config.pointsName}.`;
     const description =
       totalItems === 0
-        ? audience === "group"
-          ? "No group-purchase items are available right now."
-          : "No personal items are available right now."
+        ? "No group-purchase items are available right now."
         : paged.slice.map((item) => this.formatStoreLine(item, priceFormatter(item))).join("\n");
 
     const fields = [{ name: "Items available", value: `${totalItems}`, inline: true }];
@@ -2756,10 +2745,7 @@ export class BotRuntime {
       fields.push({ name: "Page", value: `${paged.clampedPage}/${paged.totalPages}`, inline: true });
     }
 
-    const footer =
-      audience === "group"
-        ? `/buy spends shared ${config.pointsName} · /donate converts currency into points.`
-        : `/buy spends shared ${config.pointsName} · /donate converts currency into points.`;
+    const footer = `/buy spends shared ${config.pointsName} · /donate converts currency into points.`;
 
     return new EmbedBuilder()
       .setColor(STORE_EMBED_COLOUR)
@@ -4388,14 +4374,10 @@ export class BotRuntime {
         return;
       }
       case "store": {
-        const audience: StoreAudience = interaction.options.getSubcommand() === "group" ? "group" : "personal";
-        const view = await this.buildStoreView({ guildId, ownerId: interaction.user.id, audience, page: 1 });
+        const view = await this.buildStoreView({ guildId, ownerId: interaction.user.id, page: 1 });
         if (view.totalItems === 0) {
           await interaction.reply({
-            content:
-              audience === "group"
-                ? "No group-purchase items are available right now."
-                : "No personal items are available right now.",
+            content: "No group-purchase items are available right now.",
             ephemeral: true,
           });
           return;
@@ -5149,13 +5131,7 @@ export class BotRuntime {
         ),
       new SlashCommandBuilder()
         .setName("store")
-        .setDescription("Browse the custom shop.")
-        .addSubcommand((sub) =>
-          sub.setName("personal").setDescription("Personal store is retired; use /store group."),
-        )
-        .addSubcommand((sub) =>
-          sub.setName("group").setDescription("Items buyable with shared group points."),
-        ),
+        .setDescription("Browse items buyable with shared group points."),
       new SlashCommandBuilder()
         .setName("inventory")
         .setDescription("Show the shop items you've bought.")
