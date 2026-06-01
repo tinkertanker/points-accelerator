@@ -8,7 +8,7 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
-## [0.10.1] - 2026-06-01
+## [0.10.4] - 2026-06-01
 
 ### Added
 - Reaction reward rules can now award group points as either a fixed amount or a count multiplier, while existing participant currency rewards remain available.
