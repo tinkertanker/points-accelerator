@@ -188,9 +188,12 @@ export type ReactionRewardRule = {
   channelId: string;
   botUserId: string;
   emoji: string;
+  payoutTarget: "PARTICIPANT_CURRENCY" | "GROUP_POINTS";
   currencyDelta: number;
+  pointsDelta: number;
   amountMode: "FIXED" | "COUNT_MULTIPLIER";
   maxCurrencyDelta: number | null;
+  maxPointsDelta: number | null;
   description: string | null;
   enabled: boolean;
   createdAt: string;
@@ -202,9 +205,12 @@ export type ReactionRewardRuleDraft = {
   channelId: string;
   botUserId: string;
   emoji: string;
+  payoutTarget: "PARTICIPANT_CURRENCY" | "GROUP_POINTS";
   currencyDelta: number;
+  pointsDelta: number;
   amountMode: "FIXED" | "COUNT_MULTIPLIER";
   maxCurrencyDelta: number | null;
+  maxPointsDelta: number | null;
   description: string | null;
   enabled: boolean;
 };

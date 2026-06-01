@@ -194,6 +194,22 @@ describe("reaction reward rules", () => {
     });
 
     expect(response.statusCode).toBe(400);
+
+    const pointsResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/reaction-rules",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        channelId: "ch-counting",
+        botUserId: "bot-counter",
+        emoji: "⭐",
+        payoutTarget: "GROUP_POINTS",
+        pointsDelta: 10,
+        amountMode: "COUNT_MULTIPLIER",
+      },
+    });
+
+    expect(pointsResponse.statusCode).toBe(400);
   });
 
   it("preserves amount mode and maximum payout when an update omits those fields", async () => {
@@ -287,6 +303,69 @@ describe("reaction reward rules", () => {
     await expect(
       ctx.services.participantCurrencyService.getParticipantBalance(participant.id),
     ).resolves.toBe(1000);
+  });
+
+  it("can award a fixed number of group points when count multiplier is off", async () => {
+    const { group, participant } = await seedGroupAndParticipant();
+    const rule = await ctx.services.reactionRewardService.create({
+      guildId: ctx.env.GUILD_ID,
+      input: {
+        channelId: "ch-counting",
+        botUserId: "bot-counter",
+        emoji: "⭐",
+        payoutTarget: "GROUP_POINTS",
+        pointsDelta: 25,
+      },
+    });
+
+    await ctx.services.reactionRewardService.applyReaction({
+      guildId: ctx.env.GUILD_ID,
+      rule,
+      participantId: participant.id,
+      groupId: group.id,
+      messageId: "msg-fixed-points",
+      messageContent: "100",
+      messageAuthorUserId: "user-counter",
+      messageAuthorUsername: "counter",
+    });
+
+    await expect(ctx.services.economyService.getGroupBalance(group.id)).resolves.toMatchObject({
+      pointsBalance: 25,
+    });
+    await expect(
+      ctx.services.participantCurrencyService.getParticipantBalance(participant.id),
+    ).resolves.toBe(0);
+  });
+
+  it("can multiply group points by the number counted in the message", async () => {
+    const { group, participant } = await seedGroupAndParticipant();
+    const rule = await ctx.services.reactionRewardService.create({
+      guildId: ctx.env.GUILD_ID,
+      input: {
+        channelId: "ch-counting",
+        botUserId: "bot-counter",
+        emoji: "⭐",
+        payoutTarget: "GROUP_POINTS",
+        pointsDelta: 2,
+        amountMode: "COUNT_MULTIPLIER",
+        maxPointsDelta: 500,
+      },
+    });
+
+    await ctx.services.reactionRewardService.applyReaction({
+      guildId: ctx.env.GUILD_ID,
+      rule,
+      participantId: participant.id,
+      groupId: group.id,
+      messageId: "msg-count-points",
+      messageContent: "100",
+      messageAuthorUserId: "user-counter",
+      messageAuthorUsername: "counter",
+    });
+
+    await expect(ctx.services.economyService.getGroupBalance(group.id)).resolves.toMatchObject({
+      pointsBalance: 200,
+    });
   });
 
   it("caps count-multiplier rewards at the configured maximum payout", async () => {

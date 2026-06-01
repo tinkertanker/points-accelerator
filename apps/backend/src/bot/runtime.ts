@@ -3040,6 +3040,7 @@ export class BotRuntime {
       guildId,
       rule,
       participantId: resolved.participant.id,
+      groupId: resolved.group.id,
       messageId: resolvedMessage.id,
       messageContent: resolvedMessage.content,
       messageAuthorUserId: author.id,

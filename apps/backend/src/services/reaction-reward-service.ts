@@ -3,19 +3,25 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { AppError } from "../utils/app-error.js";
 import { decimal, decimalToNumber } from "../utils/decimal.js";
 import type { AuditService } from "./audit-service.js";
+import type { EconomyService } from "./economy-service.js";
 import type { ParticipantCurrencyService } from "./participant-currency-service.js";
 
 const REACTION_REWARD_AMOUNT_MODES = ["FIXED", "COUNT_MULTIPLIER"] as const;
 type ReactionRewardAmountMode = (typeof REACTION_REWARD_AMOUNT_MODES)[number];
+const REACTION_REWARD_PAYOUT_TARGETS = ["PARTICIPANT_CURRENCY", "GROUP_POINTS"] as const;
+type ReactionRewardPayoutTarget = (typeof REACTION_REWARD_PAYOUT_TARGETS)[number];
 const MAX_REACTION_REWARD_MAGNITUDE = 999_999_999_999;
 
 export type ReactionRewardRuleInput = {
   channelId: string;
   botUserId: string;
   emoji: string;
-  currencyDelta: number;
+  payoutTarget?: ReactionRewardPayoutTarget;
+  currencyDelta?: number;
+  pointsDelta?: number;
   amountMode?: ReactionRewardAmountMode;
   maxCurrencyDelta?: number | null;
+  maxPointsDelta?: number | null;
   description?: string | null;
   enabled?: boolean;
 };
@@ -26,9 +32,12 @@ export type ReactionRewardRuleDto = {
   channelId: string;
   botUserId: string;
   emoji: string;
+  payoutTarget: ReactionRewardPayoutTarget;
   currencyDelta: number;
+  pointsDelta: number;
   amountMode: ReactionRewardAmountMode;
   maxCurrencyDelta: number | null;
+  maxPointsDelta: number | null;
   description: string | null;
   enabled: boolean;
   createdAt: Date;
@@ -42,9 +51,12 @@ function serialise(rule: Prisma.ReactionRewardRuleGetPayload<{}>): ReactionRewar
     channelId: rule.channelId,
     botUserId: rule.botUserId,
     emoji: rule.emoji,
+    payoutTarget: rule.payoutTarget,
     currencyDelta: decimalToNumber(rule.currencyDelta),
+    pointsDelta: decimalToNumber(rule.pointsDelta),
     amountMode: rule.amountMode,
     maxCurrencyDelta: rule.maxCurrencyDelta === null ? null : decimalToNumber(rule.maxCurrencyDelta),
+    maxPointsDelta: rule.maxPointsDelta === null ? null : decimalToNumber(rule.maxPointsDelta),
     description: rule.description,
     enabled: rule.enabled,
     createdAt: rule.createdAt,
@@ -62,8 +74,25 @@ function normaliseEmoji(value: string): string {
 
 type ExistingReactionRuleSettings = Pick<
   Prisma.ReactionRewardRuleGetPayload<{}>,
-  "amountMode" | "maxCurrencyDelta" | "description" | "enabled"
+  | "payoutTarget"
+  | "currencyDelta"
+  | "pointsDelta"
+  | "amountMode"
+  | "maxCurrencyDelta"
+  | "maxPointsDelta"
+  | "description"
+  | "enabled"
 >;
+
+function normaliseNonZeroDelta(value: number | undefined, label: string) {
+  if (value === undefined || !Number.isFinite(value) || value === 0) {
+    throw new AppError(`${label} must be a non-zero number.`);
+  }
+  if (Math.abs(value) > MAX_REACTION_REWARD_MAGNITUDE) {
+    throw new AppError(`${label} is too large.`);
+  }
+  return value;
+}
 
 function normaliseInput(input: ReactionRewardRuleInput, existing?: ExistingReactionRuleSettings) {
   const channelId = input.channelId.trim();
@@ -71,13 +100,32 @@ function normaliseInput(input: ReactionRewardRuleInput, existing?: ExistingReact
   const emoji = normaliseEmoji(input.emoji);
   const description =
     input.description === undefined ? existing?.description ?? null : input.description?.trim() || null;
+  const payoutTarget = input.payoutTarget ?? existing?.payoutTarget ?? "PARTICIPANT_CURRENCY";
   const amountMode = input.amountMode ?? existing?.amountMode ?? "FIXED";
+  const currencyDelta =
+    input.currencyDelta === undefined
+      ? existing === undefined
+        ? undefined
+        : decimalToNumber(existing.currencyDelta)
+      : input.currencyDelta;
+  const pointsDelta =
+    input.pointsDelta === undefined
+      ? existing === undefined
+        ? undefined
+        : decimalToNumber(existing.pointsDelta)
+      : input.pointsDelta;
   const maxCurrencyDelta =
     input.maxCurrencyDelta === undefined
       ? existing?.maxCurrencyDelta == null
         ? null
         : decimalToNumber(existing.maxCurrencyDelta)
       : input.maxCurrencyDelta;
+  const maxPointsDelta =
+    input.maxPointsDelta === undefined
+      ? existing?.maxPointsDelta == null
+        ? null
+        : decimalToNumber(existing.maxPointsDelta)
+      : input.maxPointsDelta;
   const enabled = input.enabled ?? existing?.enabled ?? true;
 
   if (!channelId) {
@@ -89,22 +137,32 @@ function normaliseInput(input: ReactionRewardRuleInput, existing?: ExistingReact
   if (!emoji) {
     throw new AppError("Emoji is required.");
   }
-  if (!Number.isFinite(input.currencyDelta) || input.currencyDelta === 0) {
-    throw new AppError("Currency delta must be a non-zero number.");
-  }
-  if (Math.abs(input.currencyDelta) > MAX_REACTION_REWARD_MAGNITUDE) {
-    throw new AppError("Currency delta is too large.");
+  if (!REACTION_REWARD_PAYOUT_TARGETS.includes(payoutTarget)) {
+    throw new AppError("Reaction reward payout target is invalid.");
   }
   if (!REACTION_REWARD_AMOUNT_MODES.includes(amountMode)) {
     throw new AppError("Reaction reward amount mode is invalid.");
   }
+  const normalisedCurrencyDelta =
+    payoutTarget === "PARTICIPANT_CURRENCY" ? normaliseNonZeroDelta(currencyDelta, "Currency delta") : currencyDelta ?? 0;
+  const normalisedPointsDelta =
+    payoutTarget === "GROUP_POINTS" ? normaliseNonZeroDelta(pointsDelta, "Points delta") : pointsDelta ?? 0;
   if (maxCurrencyDelta !== null && (!Number.isFinite(maxCurrencyDelta) || maxCurrencyDelta <= 0)) {
     throw new AppError("Maximum payout must be a positive number.");
   }
   if (maxCurrencyDelta !== null && maxCurrencyDelta > MAX_REACTION_REWARD_MAGNITUDE) {
     throw new AppError("Maximum payout is too large.");
   }
-  if (amountMode === "COUNT_MULTIPLIER" && maxCurrencyDelta === null) {
+  if (maxPointsDelta !== null && (!Number.isFinite(maxPointsDelta) || maxPointsDelta <= 0)) {
+    throw new AppError("Maximum payout must be a positive number.");
+  }
+  if (maxPointsDelta !== null && maxPointsDelta > MAX_REACTION_REWARD_MAGNITUDE) {
+    throw new AppError("Maximum payout is too large.");
+  }
+  if (amountMode === "COUNT_MULTIPLIER" && payoutTarget === "PARTICIPANT_CURRENCY" && maxCurrencyDelta === null) {
+    throw new AppError("Maximum payout is required for count multiplier rules.");
+  }
+  if (amountMode === "COUNT_MULTIPLIER" && payoutTarget === "GROUP_POINTS" && maxPointsDelta === null) {
     throw new AppError("Maximum payout is required for count multiplier rules.");
   }
 
@@ -114,9 +172,12 @@ function normaliseInput(input: ReactionRewardRuleInput, existing?: ExistingReact
     emoji,
     description,
     enabled,
-    currencyDelta: input.currencyDelta,
+    payoutTarget,
+    currencyDelta: normalisedCurrencyDelta,
+    pointsDelta: normalisedPointsDelta,
     amountMode,
-    maxCurrencyDelta,
+    maxCurrencyDelta: payoutTarget === "PARTICIPANT_CURRENCY" ? maxCurrencyDelta : null,
+    maxPointsDelta: payoutTarget === "GROUP_POINTS" ? maxPointsDelta : null,
   };
 }
 
@@ -133,22 +194,22 @@ function parseCountedNumber(content: string): number | null {
   return countedNumber;
 }
 
-function resolveCurrencyDelta(params: {
-  currencyDelta: Prisma.Decimal | number;
+function resolveRewardDelta(params: {
+  amount: Prisma.Decimal | number;
   amountMode?: ReactionRewardAmountMode;
-  maxCurrencyDelta?: Prisma.Decimal | number | null;
+  maxAmount?: Prisma.Decimal | number | null;
   messageContent?: string;
 }) {
   const baseDelta =
-    typeof params.currencyDelta === "number"
-      ? params.currencyDelta
-      : decimalToNumber(params.currencyDelta);
-  const maxCurrencyDelta =
-    params.maxCurrencyDelta === null || params.maxCurrencyDelta === undefined
+    typeof params.amount === "number"
+      ? params.amount
+      : decimalToNumber(params.amount);
+  const maxAmount =
+    params.maxAmount === null || params.maxAmount === undefined
       ? null
-      : typeof params.maxCurrencyDelta === "number"
-        ? params.maxCurrencyDelta
-        : decimalToNumber(params.maxCurrencyDelta);
+      : typeof params.maxAmount === "number"
+        ? params.maxAmount
+        : decimalToNumber(params.maxAmount);
 
   if (params.amountMode !== "COUNT_MULTIPLIER") {
     return { delta: baseDelta, countedNumber: null, wasCapped: false };
@@ -159,18 +220,18 @@ function resolveCurrencyDelta(params: {
     return { delta: 0, countedNumber: null, wasCapped: false };
   }
 
-  if (maxCurrencyDelta === null) {
+  if (maxAmount === null) {
     return { delta: 0, countedNumber, wasCapped: false };
   }
 
   const computedDelta = baseDelta * countedNumber;
   if (!Number.isFinite(computedDelta)) {
-    return { delta: Math.sign(baseDelta) * maxCurrencyDelta, countedNumber, wasCapped: true };
+    return { delta: Math.sign(baseDelta) * maxAmount, countedNumber, wasCapped: true };
   }
 
   const magnitude = Math.abs(computedDelta);
-  if (magnitude > maxCurrencyDelta) {
-    return { delta: Math.sign(computedDelta) * maxCurrencyDelta, countedNumber, wasCapped: true };
+  if (magnitude > maxAmount) {
+    return { delta: Math.sign(computedDelta) * maxAmount, countedNumber, wasCapped: true };
   }
 
   return { delta: computedDelta, countedNumber, wasCapped: false };
@@ -180,6 +241,7 @@ export class ReactionRewardService {
   public constructor(
     private readonly prisma: PrismaClient,
     private readonly participantCurrencyService: ParticipantCurrencyService,
+    private readonly economyService: EconomyService,
     private readonly auditService: AuditService,
   ) {}
 
@@ -227,9 +289,12 @@ export class ReactionRewardService {
         channelId: data.channelId,
         botUserId: data.botUserId,
         emoji: data.emoji,
+        payoutTarget: data.payoutTarget,
         currencyDelta: decimal(data.currencyDelta),
+        pointsDelta: decimal(data.pointsDelta),
         amountMode: data.amountMode,
         maxCurrencyDelta: data.maxCurrencyDelta === null ? null : decimal(data.maxCurrencyDelta),
+        maxPointsDelta: data.maxPointsDelta === null ? null : decimal(data.maxPointsDelta),
         description: data.description,
         enabled: data.enabled,
       },
@@ -276,9 +341,12 @@ export class ReactionRewardService {
           channelId: data.channelId,
           botUserId: data.botUserId,
           emoji: data.emoji,
+          payoutTarget: data.payoutTarget,
           currencyDelta: decimal(data.currencyDelta),
+          pointsDelta: decimal(data.pointsDelta),
           amountMode: data.amountMode,
           maxCurrencyDelta: data.maxCurrencyDelta === null ? null : decimal(data.maxCurrencyDelta),
+          maxPointsDelta: data.maxPointsDelta === null ? null : decimal(data.maxPointsDelta),
           description: data.description,
           enabled: data.enabled,
         },
@@ -332,22 +400,33 @@ export class ReactionRewardService {
     guildId: string;
     rule: {
       id: string;
+      payoutTarget?: ReactionRewardPayoutTarget;
       currencyDelta: Prisma.Decimal | number;
+      pointsDelta?: Prisma.Decimal | number;
       amountMode?: ReactionRewardAmountMode;
       maxCurrencyDelta?: Prisma.Decimal | number | null;
+      maxPointsDelta?: Prisma.Decimal | number | null;
       emoji: string;
       botUserId: string;
     };
     participantId: string;
+    groupId?: string;
     messageId: string;
     messageContent?: string;
     messageAuthorUserId: string;
     messageAuthorUsername?: string;
   }) {
-    const { delta, countedNumber, wasCapped } = resolveCurrencyDelta({
-      currencyDelta: params.rule.currencyDelta,
+    const payoutTarget = params.rule.payoutTarget ?? "PARTICIPANT_CURRENCY";
+    const { delta, countedNumber, wasCapped } = resolveRewardDelta({
+      amount:
+        payoutTarget === "GROUP_POINTS"
+          ? params.rule.pointsDelta ?? 0
+          : params.rule.currencyDelta,
       amountMode: params.rule.amountMode,
-      maxCurrencyDelta: params.rule.maxCurrencyDelta,
+      maxAmount:
+        payoutTarget === "GROUP_POINTS"
+          ? params.rule.maxPointsDelta
+          : params.rule.maxCurrencyDelta,
       messageContent: params.messageContent,
     });
     if (delta === 0) {
@@ -356,11 +435,52 @@ export class ReactionRewardService {
 
     const externalRef = `reaction:${params.messageId}:${params.rule.botUserId}:${params.rule.emoji}`;
 
-    const previous = await this.prisma.participantCurrencyEntry.findFirst({
-      where: { guildId: params.guildId, externalRef },
-    });
-    if (previous) {
+    const [previousCurrencyEntry, previousLedgerEntry] = await Promise.all([
+      this.prisma.participantCurrencyEntry.findFirst({
+        where: { guildId: params.guildId, externalRef },
+      }),
+      this.prisma.ledgerEntry.findFirst({
+        where: { guildId: params.guildId, externalRef },
+      }),
+    ]);
+    if (previousCurrencyEntry || previousLedgerEntry) {
       return null;
+    }
+
+    const description =
+      countedNumber === null
+        ? `Reaction reward (${params.rule.emoji})`
+        : `Reaction reward (${params.rule.emoji}: count ${countedNumber}${wasCapped ? ", capped" : ""})`;
+
+    if (payoutTarget === "GROUP_POINTS") {
+      if (!params.groupId) {
+        return null;
+      }
+      return this.economyService
+        .awardGroups({
+          guildId: params.guildId,
+          actor: {
+            userId: params.messageAuthorUserId,
+            username: params.messageAuthorUsername,
+            roleIds: [],
+          },
+          targetGroupIds: [params.groupId],
+          pointsDelta: delta,
+          currencyDelta: 0,
+          description,
+          type: "REACTION_REWARD",
+          systemAction: true,
+          externalRef,
+        })
+        .catch((error: unknown) => {
+          if (error instanceof AppError && error.statusCode === 409) {
+            return null;
+          }
+          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+            return null;
+          }
+          throw error;
+        });
     }
 
     return this.participantCurrencyService
@@ -373,10 +493,7 @@ export class ReactionRewardService {
         },
         targetParticipantIds: [params.participantId],
         currencyDelta: delta,
-        description:
-          countedNumber === null
-            ? `Reaction reward (${params.rule.emoji})`
-            : `Reaction reward (${params.rule.emoji}: count ${countedNumber}${wasCapped ? ", capped" : ""})`,
+        description,
         type: "REACTION_REWARD",
         systemAction: true,
         externalRef,

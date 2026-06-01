@@ -839,6 +839,7 @@ export default function SettingsPanel({
               rules={reactionRules}
               channels={discordChannels}
               currencyName={settingsDraft.currencyName}
+              pointsName={settingsDraft.pointsName}
               isBusy={isBusy}
               onCreate={onCreateReactionRule}
               onUpdate={onUpdateReactionRule}

@@ -43,7 +43,7 @@ export function createServices(prisma: PrismaClient) {
   const assignmentService = new AssignmentService(prisma);
   const submissionService = new SubmissionService(prisma, economyService, participantCurrencyService, auditService);
   const luckyDrawService = new LuckyDrawService(prisma);
-  const reactionRewardService = new ReactionRewardService(prisma, participantCurrencyService, auditService);
+  const reactionRewardService = new ReactionRewardService(prisma, participantCurrencyService, economyService, auditService);
   const economyResetService = new EconomyResetService(prisma, auditService);
   const sanctionService = new SanctionService(prisma, auditService);
   const channelGuardService = new ChannelGuardService(prisma, auditService);

@@ -287,15 +287,40 @@ const reactionRewardRuleSchema = z.object({
   channelId: z.string().min(1),
   botUserId: z.string().min(1),
   emoji: z.string().min(1),
+  payoutTarget: z.enum(["PARTICIPANT_CURRENCY", "GROUP_POINTS"]).optional(),
   currencyDelta: z
     .number()
-    .refine((value) => Number.isFinite(value) && value !== 0, {
-      message: "currencyDelta must be a non-zero number",
-    }),
+    .refine((value) => Number.isFinite(value), {
+      message: "currencyDelta must be a finite number",
+    })
+    .optional(),
+  pointsDelta: z
+    .number()
+    .refine((value) => Number.isFinite(value), {
+      message: "pointsDelta must be a finite number",
+    })
+    .optional(),
   amountMode: z.enum(["FIXED", "COUNT_MULTIPLIER"]).optional(),
   maxCurrencyDelta: z.number().positive().nullable().optional(),
+  maxPointsDelta: z.number().positive().nullable().optional(),
   description: z.string().nullable().optional(),
   enabled: z.boolean().optional(),
+}).superRefine((value, context) => {
+  const payoutTarget = value.payoutTarget ?? "PARTICIPANT_CURRENCY";
+  if (payoutTarget === "PARTICIPANT_CURRENCY" && value.currencyDelta === 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "currencyDelta must be a non-zero number",
+      path: ["currencyDelta"],
+    });
+  }
+  if (payoutTarget === "GROUP_POINTS" && value.pointsDelta === 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "pointsDelta must be a non-zero number",
+      path: ["pointsDelta"],
+    });
+  }
 });
 
 type SessionRecord = {

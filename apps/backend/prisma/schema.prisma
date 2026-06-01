@@ -21,6 +21,7 @@ enum LedgerEntryType {
   BET_WIN
   BET_LOSS
   LUCKYDRAW_WIN
+  REACTION_REWARD
 }
 
 enum SubmissionStatus {
@@ -82,6 +83,11 @@ enum ReactionRewardAmountMode {
   COUNT_MULTIPLIER
 }
 
+enum ReactionRewardPayoutTarget {
+  PARTICIPANT_CURRENCY
+  GROUP_POINTS
+}
+
 model GuildConfig {
   id                           String                @id @default(cuid())
   guildId                      String                @unique
@@ -138,9 +144,12 @@ model ReactionRewardRule {
   channelId     String
   botUserId     String
   emoji         String
+  payoutTarget  ReactionRewardPayoutTarget @default(PARTICIPANT_CURRENCY)
   currencyDelta Decimal     @db.Decimal(18, 6)
+  pointsDelta   Decimal     @default(0) @db.Decimal(18, 6)
   amountMode    ReactionRewardAmountMode @default(FIXED)
   maxCurrencyDelta Decimal?  @db.Decimal(18, 6)
+  maxPointsDelta Decimal?    @db.Decimal(18, 6)
   description   String?
   enabled       Boolean     @default(true)
   createdAt     DateTime    @default(now())
