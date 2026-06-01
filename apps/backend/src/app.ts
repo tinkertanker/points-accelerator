@@ -11,6 +11,7 @@ import type { DiscordOAuthClient } from "./auth/discord-oauth.js";
 import type { BotRuntimeApi } from "./bot/runtime.js";
 import type { AppServices } from "./services/app-services.js";
 import { MAX_SHOP_PURCHASE_QUANTITY } from "./services/shop-service.js";
+import { buildStoreAnnouncementContent, type StoreAnnouncementKind } from "./services/store-announcements.js";
 import type { StorageService } from "./services/storage-service.js";
 import { resolveCapabilities } from "./domain/permissions.js";
 import { suggestGroupRoles } from "./domain/group-suggestions.js";
@@ -713,6 +714,52 @@ export function createApp(params: {
     };
   };
 
+  const postStoreAnnouncement = async (
+    guildId: string,
+    kind: StoreAnnouncementKind,
+    item: {
+      name: string;
+      description?: string | null;
+      emoji?: string | null;
+      cost: number | string | { toString(): string } | null | undefined;
+      stock: number | null;
+    },
+  ) => {
+    const config = await services.configService.getOrCreate(guildId);
+    const channelIds =
+      config.shopChannelIds.length > 0
+        ? config.shopChannelIds
+        : config.listingChannelId
+          ? [config.listingChannelId]
+          : [];
+
+    if (!params.botRuntime || channelIds.length === 0) {
+      return;
+    }
+
+    const content = buildStoreAnnouncementContent({
+      kind,
+      item: {
+        name: item.name,
+        description: item.description,
+        emoji: item.emoji,
+        cost: typeof item.cost === "number" ? item.cost : item.cost ? Number(item.cost.toString()) : 0,
+        stock: item.stock,
+      },
+      pointsName: config.pointsName,
+      pointsSymbol: config.pointsSymbol,
+    });
+
+    await Promise.all(
+      [...new Set(channelIds)].map((channelId) =>
+        params.botRuntime?.postListing(channelId, content).catch((error: unknown) => {
+          app.log.error({ err: error, guildId, channelId, kind }, "Failed to post store announcement");
+          return null;
+        }),
+      ),
+    );
+  };
+
   app.register(cors, {
     origin: true,
     credentials: true,
@@ -1395,7 +1442,13 @@ export function createApp(params: {
   });
 
   app.post("/api/shop-items", { preHandler: requireMentor }, async (request) => {
-    const item = await services.shopService.upsert(guildIdOf(request), shopItemSchema.parse(request.body));
+    const guildId = guildIdOf(request);
+    const payload = shopItemSchema.parse(request.body);
+    const isNewItem = !payload.id;
+    const item = await services.shopService.upsert(guildId, payload);
+    if (isNewItem && item.enabled) {
+      await postStoreAnnouncement(guildId, "new-item", item);
+    }
     return {
       ...item,
       cost: decimalToNumber(item.cost),
@@ -1569,8 +1622,9 @@ export function createApp(params: {
 
   app.post("/api/actions/redeem", { preHandler: requireAdmin }, async (request) => {
     const payload = redeemSchema.parse(request.body);
-    return services.shopService.redeem({
-      guildId: guildIdOf(request),
+    const guildId = guildIdOf(request);
+    const redemption = await services.shopService.redeem({
+      guildId,
       participantId: payload.participantId,
       shopItemId: payload.shopItemId,
       requestedByUserId: payload.requestedByUserId,
@@ -1578,6 +1632,10 @@ export function createApp(params: {
       quantity: payload.quantity,
       purchaseMode: payload.purchaseMode,
     });
+    if (redemption.shopItem.stock === 0 && (redemption.stockHeld ?? 0) > 0) {
+      await postStoreAnnouncement(guildId, "sold-out", redemption.shopItem);
+    }
+    return redemption;
   });
 
   // --- Economy reset (admin tools) ---

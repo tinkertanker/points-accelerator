@@ -917,6 +917,60 @@ describe("points accelerator API", () => {
     });
   });
 
+  it("announces newly added store items in configured store channels", async () => {
+    await ctx.services.configService.update(ctx.env.GUILD_ID, {
+      pointsName: "beans",
+      pointsSymbol: "🫘",
+      shopChannelIds: ["store-channel"],
+      listingChannelId: "listing-channel",
+    });
+
+    const createResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/shop-items",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        name: "Mystery Box",
+        description: "limited drop",
+        audience: "GROUP",
+        cost: 8,
+        stock: 3,
+        enabled: true,
+        fulfillmentInstructions: null,
+      },
+    });
+    expect(createResponse.statusCode).toBe(200);
+    expect(botRuntime.postListing).toHaveBeenCalledWith(
+      "store-channel",
+      expect.stringContaining("New store item"),
+    );
+    expect(botRuntime.postListing).toHaveBeenCalledWith(
+      "store-channel",
+      expect.stringContaining("Mystery Box"),
+    );
+    expect(botRuntime.postListing).not.toHaveBeenCalledWith("listing-channel", expect.any(String));
+
+    const createdItem = createResponse.json() as { id: string };
+    vi.mocked(botRuntime.postListing).mockClear();
+    const updateResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/shop-items",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        id: createdItem.id,
+        name: "Mystery Box",
+        description: "limited drop",
+        audience: "GROUP",
+        cost: 8,
+        stock: 2,
+        enabled: true,
+        fulfillmentInstructions: null,
+      },
+    });
+    expect(updateResponse.statusCode).toBe(200);
+    expect(botRuntime.postListing).not.toHaveBeenCalled();
+  });
+
   it("archives shop items without deleting their catalogue record", async () => {
     await ctx.services.configService.getOrCreate(ctx.env.GUILD_ID);
 

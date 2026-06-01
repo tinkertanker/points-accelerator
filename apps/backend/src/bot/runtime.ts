@@ -33,6 +33,7 @@ import { resolveCapabilities, type ResolvedCapabilities } from "../domain/permis
 import type { GuardedActivity } from "../services/channel-guard-service.js";
 import type { AppServices } from "../services/app-services.js";
 import { MAX_SHOP_PURCHASE_QUANTITY } from "../services/shop-service.js";
+import { buildStoreAnnouncementContent, type StoreAnnouncementKind } from "../services/store-announcements.js";
 import type { StorageService } from "../services/storage-service.js";
 import { AppError } from "../utils/app-error.js";
 import { decimalToNumber } from "../utils/decimal.js";
@@ -942,6 +943,60 @@ export class BotRuntime {
       channelId: sent.channelId,
       messageId: sent.id,
     };
+  }
+
+  private getStoreAnnouncementChannelIds(config: GuildConfig) {
+    const channelIds =
+      config.shopChannelIds.length > 0
+        ? config.shopChannelIds
+        : config.listingChannelId
+          ? [config.listingChannelId]
+          : [];
+    return [...new Set(channelIds)];
+  }
+
+  private async postStoreAnnouncement(params: {
+    config: GuildConfig;
+    kind: StoreAnnouncementKind;
+    item: {
+      name: string;
+      description?: string | null;
+      emoji?: string | null;
+      cost: number | string | { toString(): string } | null | undefined;
+      stock: number | null;
+    };
+  }) {
+    const channelIds = this.getStoreAnnouncementChannelIds(params.config);
+    if (channelIds.length === 0) {
+      return;
+    }
+
+    const content = buildStoreAnnouncementContent({
+      kind: params.kind,
+      item: {
+        name: params.item.name,
+        description: params.item.description,
+        emoji: params.item.emoji,
+        cost:
+          typeof params.item.cost === "number"
+            ? params.item.cost
+            : params.item.cost
+              ? Number(params.item.cost.toString())
+              : 0,
+        stock: params.item.stock,
+      },
+      pointsName: params.config.pointsName,
+      pointsSymbol: params.config.pointsSymbol,
+    });
+
+    await Promise.all(
+      channelIds.map((channelId) =>
+        this.postListing(channelId, content).catch((error: unknown) => {
+          console.error("Failed to post store announcement", { channelId, kind: params.kind, error });
+          return null;
+        }),
+      ),
+    );
   }
 
   private async announceDeploymentIfNew() {
@@ -4436,6 +4491,14 @@ export class BotRuntime {
           quantity,
           purchaseMode: "GROUP",
         });
+
+        if (redemption.shopItem.stock === 0 && (redemption.stockHeld ?? 0) > 0) {
+          await this.postStoreAnnouncement({
+            config,
+            kind: "sold-out",
+            item: redemption.shopItem,
+          });
+        }
 
         let fulfilmentMessageSuffix = "";
         if (redemption.status === "PENDING") {

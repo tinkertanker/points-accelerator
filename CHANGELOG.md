@@ -8,6 +8,11 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.10.3] - 2026-06-01
+
+### Added
+- Store channels now receive announcements when a new store item is added and when a purchased item runs out of stock.
+
 ## [0.10.2] - 2026-06-01
 
 ### Changed

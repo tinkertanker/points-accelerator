@@ -23,6 +23,8 @@ function createRuntimeFixture() {
     passiveCooldownSeconds: 120,
     pointsName: "blorgshj",
     pointsSymbol: "🏅",
+    shopChannelIds: [],
+    listingChannelId: null,
   };
   const services = {
     prisma: {
@@ -2883,6 +2885,72 @@ describe("bot runtime", () => {
         content: expect.stringMatching(/Purchase created.*Request ID: redemption-12345678/),
       }),
     );
+  });
+
+  it("announces when a /buy purchase runs store stock out", async () => {
+    const { config, runtime, services } = createRuntimeFixture();
+    services.configService.getOrCreate.mockResolvedValue({
+      ...config,
+      shopChannelIds: ["store-channel"],
+      listingChannelId: null,
+    });
+    services.groupService.resolveGroupFromRoleIds.mockResolvedValue({
+      id: "group-1",
+      displayName: "Gryffindor",
+      roleId: "group-role",
+    });
+    services.shopService.redeem.mockResolvedValue({
+      id: "redemption-12345678",
+      approvals: [],
+      approvalThreshold: null,
+      quantity: 1,
+      stockHeld: 1,
+      status: "FULFILLED",
+      shopItem: {
+        audience: "GROUP",
+        cost: { toString: () => "12" },
+        description: "Cold drink",
+        emoji: "🧋",
+        fulfillmentInstructions: null,
+        name: "Bubble Tea",
+        ownerUserId: null,
+        stock: 0,
+      },
+    });
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const postListingSpy = vi.spyOn(runtime as any, "postListing").mockResolvedValue({
+      channelId: "store-channel",
+      messageId: "message-1",
+    });
+
+    await (runtime as any).handleCommand({
+      guildId: "guild-test",
+      commandName: "buy",
+      channelId: "channel-current",
+      guild: {
+        members: {
+          fetch: vi.fn().mockResolvedValue({
+            roles: { cache: new Map([["group-role", {}]]) },
+          }),
+        },
+      },
+      options: {
+        getString: vi.fn((name: string) => (name === "item_id" ? "item-1" : null)),
+        getInteger: vi.fn(() => null),
+      },
+      reply,
+      user: {
+        id: "user-1",
+        username: "Alice",
+      },
+    });
+
+    expect(postListingSpy).toHaveBeenCalledWith(
+      "store-channel",
+      expect.stringContaining("Bubble Tea"),
+    );
+    expect(postListingSpy.mock.calls[0]?.[1]).toContain("now sold out");
+    expect(postListingSpy.mock.calls[0]?.[1]).toContain("/store");
   });
 
   it("registers required award and deduct command options", async () => {
