@@ -157,7 +157,6 @@ describe("economy concurrency", () => {
         requestedByUsername: "Alice",
         quantity: 1,
         purchaseMode: "GROUP",
-        groupMemberCount: 1,
       }),
       ctx.services.shopService.redeem({
         guildId: ctx.env.GUILD_ID,
@@ -167,7 +166,6 @@ describe("economy concurrency", () => {
         requestedByUsername: "Bob",
         quantity: 1,
         purchaseMode: "GROUP",
-        groupMemberCount: 1,
       }),
     ]);
 

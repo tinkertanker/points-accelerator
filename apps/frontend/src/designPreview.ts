@@ -239,7 +239,7 @@ function createInitialBootstrap(): BootstrapPayload {
       {
         id: "shop-2",
         name: "Shared pizza run",
-        description: "Team reward after enough approvals",
+        description: "Team reward for the fulfilment queue",
         audience: "GROUP",
         cost: 50,
         stock: 8,
@@ -258,8 +258,8 @@ function createInitialBootstrap(): BootstrapPayload {
         purchaseMode: "GROUP",
         quantity: 1,
         totalCost: 15,
-        approvalThreshold: 2,
-        status: "AWAITING_APPROVAL",
+        approvalThreshold: null,
+        status: "PENDING",
         notes: null,
         createdAt: new Date(Date.now() - 45 * 60_000).toISOString(),
         updatedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
@@ -295,8 +295,8 @@ function createInitialBootstrap(): BootstrapPayload {
         purchaseMode: "GROUP",
         quantity: 1,
         totalCost: 50,
-        approvalThreshold: 2,
-        status: "AWAITING_APPROVAL",
+        approvalThreshold: null,
+        status: "PENDING",
         notes: null,
         createdAt: new Date(Date.now() - 3 * 60 * 60_000).toISOString(),
         updatedAt: new Date(Date.now() - 75 * 60_000).toISOString(),
@@ -325,23 +325,14 @@ function createInitialBootstrap(): BootstrapPayload {
           discordUsername: "Mika",
           indexId: "B004",
         },
-        approvals: [
-          {
-            participant: {
-              id: "participant-2",
-              discordUserId: "preview-student-2",
-              discordUsername: "Mika",
-              indexId: "B004",
-            },
-          },
-        ],
+        approvals: [],
       },
       {
         id: "redeem-3",
         purchaseMode: "GROUP",
         quantity: 2,
         totalCost: 100,
-        approvalThreshold: 2,
+        approvalThreshold: null,
         status: "FULFILLED",
         notes: null,
         createdAt: new Date(Date.now() - 26 * 60 * 60_000).toISOString(),
@@ -371,24 +362,7 @@ function createInitialBootstrap(): BootstrapPayload {
           discordUsername: "Jordan",
           indexId: "A006",
         },
-        approvals: [
-          {
-            participant: {
-              id: "participant-3",
-              discordUserId: "preview-student-3",
-              discordUsername: "Jordan",
-              indexId: "A006",
-            },
-          },
-          {
-            participant: {
-              id: "participant-4",
-              discordUserId: "preview-student-4",
-              discordUsername: "Noah",
-              indexId: "A009",
-            },
-          },
-        ],
+        approvals: [],
       },
     ],
     listings: [

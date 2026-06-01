@@ -7,6 +7,7 @@ import type { EconomyService } from "./economy-service.js";
 import type { ParticipantCurrencyService } from "./participant-currency-service.js";
 
 export const DEFAULT_SHOP_ITEM_EMOJI = "💸";
+export const MAX_SHOP_PURCHASE_QUANTITY = 4;
 
 export type ShopItemInput = {
   id?: string;
@@ -253,7 +254,6 @@ export class ShopService {
     requestedByUsername?: string;
     quantity?: number;
     purchaseMode?: PurchaseMode;
-    groupMemberCount?: number;
   }) {
     const purchaseMode = params.purchaseMode ?? "GROUP";
 
@@ -262,188 +262,6 @@ export class ShopService {
     }
 
     return this.redeemIndividual(params);
-  }
-
-  public async approveGroupPurchase(params: {
-    guildId: string;
-    redemptionId: string;
-    participantId: string;
-    approvedByUserId: string;
-    approvedByUsername?: string;
-    currentGroupMemberCount?: number;
-    currentGroupMemberDiscordUserIds?: string[];
-  }) {
-    const result = await this.prisma.$transaction(async (tx) => {
-      await this.lockRedemption(tx, params.guildId, params.redemptionId);
-
-      const redemption = await tx.shopRedemption.findUnique({
-        where: { id: params.redemptionId },
-        include: {
-          shopItem: true,
-          group: true,
-          approvals: {
-            include: {
-              participant: {
-                select: {
-                  id: true,
-                  discordUserId: true,
-                  discordUsername: true,
-                  indexId: true,
-                },
-              },
-            },
-            orderBy: { createdAt: "asc" },
-          },
-        },
-      });
-
-      if (!redemption || redemption.guildId !== params.guildId) {
-        throw new AppError("Group purchase request not found.", 404);
-      }
-
-      if (redemption.purchaseMode !== "GROUP") {
-        throw new AppError("This redemption is not a group purchase request.", 409);
-      }
-
-      if (redemption.status !== "AWAITING_APPROVAL") {
-        return {
-          redemption,
-          executed: redemption.status === "PENDING",
-          justExecuted: false,
-          approvalsCount: redemption.approvals.length,
-          threshold: redemption.approvalThreshold ?? 1,
-        };
-      }
-
-      const participant = await tx.participant.findFirst({
-        where: { id: params.participantId, guildId: params.guildId },
-      });
-
-      if (!participant) {
-        throw new AppError("Participant not found.", 404);
-      }
-
-      if (participant.groupId !== redemption.groupId) {
-        throw new AppError("Only members of the same group can approve this purchase.", 403);
-      }
-
-      const existingApproval = await tx.shopRedemptionApproval.findUnique({
-        where: {
-          redemptionId_participantId: {
-            redemptionId: params.redemptionId,
-            participantId: params.participantId,
-          },
-        },
-      });
-
-      if (!existingApproval) {
-        await tx.shopRedemptionApproval.create({
-          data: {
-            redemptionId: params.redemptionId,
-            participantId: params.participantId,
-          },
-        });
-      }
-
-      const approvals = await tx.shopRedemptionApproval.findMany({
-        where: { redemptionId: params.redemptionId },
-        include: {
-          participant: {
-            select: {
-              id: true,
-              discordUserId: true,
-              discordUsername: true,
-              indexId: true,
-            },
-          },
-        },
-        orderBy: { createdAt: "asc" },
-      });
-      const currentMemberIds = new Set(params.currentGroupMemberDiscordUserIds ?? []);
-      const eligibleApprovals =
-        currentMemberIds.size > 0
-          ? approvals.filter((approval) => approval.participant.discordUserId && currentMemberIds.has(approval.participant.discordUserId))
-          : approvals;
-
-      if (!params.currentGroupMemberCount || params.currentGroupMemberCount <= 0) {
-        throw new AppError("Group purchases require the current Discord group membership count.", 409);
-      }
-
-      const threshold = this.getApprovalThreshold(params.currentGroupMemberCount);
-
-      if (threshold !== redemption.approvalThreshold) {
-        await tx.shopRedemption.update({
-          where: { id: redemption.id },
-          data: {
-            approvalThreshold: threshold,
-          },
-        });
-      }
-
-      if (eligibleApprovals.length < threshold) {
-        return {
-          redemption: {
-            ...redemption,
-            approvals: eligibleApprovals,
-          },
-          executed: false,
-          justExecuted: false,
-          approvalsCount: eligibleApprovals.length,
-          threshold,
-        };
-      }
-
-      const executedPurchase = await this.executeGroupPurchase({
-        tx,
-        guildId: params.guildId,
-        redemption,
-        approvals: eligibleApprovals,
-        threshold,
-        actorUserId: params.approvedByUserId,
-        actorUsername: params.approvedByUsername,
-      });
-
-      return {
-        ...executedPurchase,
-        justExecuted: executedPurchase.executed,
-      };
-    });
-
-    await this.auditService.record({
-      guildId: params.guildId,
-      actorUserId: params.approvedByUserId,
-      actorUsername: params.approvedByUsername,
-      action: result.executed ? "shop.group_purchase.approved" : "shop.group_purchase.vote.recorded",
-      entityType: "ShopRedemption",
-      entityId: result.redemption.id,
-      payload: {
-        approvalsCount: result.approvalsCount,
-        threshold: result.threshold,
-        executed: result.executed,
-        blockingGroup: "blockingGroup" in result ? result.blockingGroup : undefined,
-      },
-    });
-
-    return result;
-  }
-
-  public async setApprovalMessage(params: {
-    guildId: string;
-    redemptionId: string;
-    channelId: string;
-    messageId: string;
-  }) {
-    return this.prisma.shopRedemption.updateMany({
-      where: {
-        id: params.redemptionId,
-        guildId: params.guildId,
-        purchaseMode: "GROUP",
-      },
-      data: {
-        approvalMessageChannelId: params.channelId,
-        approvalMessageId: params.messageId,
-      },
-    });
   }
 
   public async setFulfilmentMessage(params: {
@@ -671,7 +489,7 @@ export class ShopService {
     requestedByUsername?: string;
     quantity?: number;
   }): Promise<never> {
-    throw new AppError("Shop items can only be bought with group points. Use /buy group.", 409);
+    throw new AppError("Shop items can only be bought with group points. Use /buy.", 409);
   }
 
   private async createGroupPurchaseRequest(params: {
@@ -681,17 +499,15 @@ export class ShopService {
     requestedByUserId: string;
     requestedByUsername?: string;
     quantity?: number;
-    groupMemberCount?: number;
   }) {
     const quantity = params.quantity ?? 1;
-    const groupMemberCount = params.groupMemberCount;
 
-    if (quantity <= 0) {
+    if (!Number.isInteger(quantity) || quantity <= 0) {
       throw new AppError("Quantity must be greater than zero.");
     }
 
-    if (!groupMemberCount || groupMemberCount <= 0) {
-      throw new AppError("Group purchases require the current Discord group membership count.", 409);
+    if (quantity > MAX_SHOP_PURCHASE_QUANTITY) {
+      throw new AppError(`Quantity cannot be greater than ${MAX_SHOP_PURCHASE_QUANTITY}.`);
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -720,9 +536,8 @@ export class ShopService {
         throw new AppError("Not enough stock available.", 409);
       }
 
-      const approvalThreshold = this.getApprovalThreshold(groupMemberCount);
       if (item.audience !== "GROUP") {
-        throw new AppError("This item can only be purchased with /buy group.", 409);
+        throw new AppError("This item can only be purchased with /buy.", 409);
       }
 
       const totalCostDecimal = item.cost.mul(quantity);
@@ -738,13 +553,8 @@ export class ShopService {
           purchaseMode: "GROUP",
           quantity,
           totalCost: totalCostDecimal,
-          approvalThreshold,
+          approvalThreshold: null,
           status: "AWAITING_APPROVAL",
-          approvals: {
-            create: {
-              participantId: participant.id,
-            },
-          },
         },
         include: {
           shopItem: true,
@@ -772,26 +582,20 @@ export class ShopService {
         },
       });
 
-      if (redemption.approvals.length < approvalThreshold) {
-        return {
-          ...redemption,
-          requiredApprovals: approvalThreshold,
-        };
-      }
-
       const executedPurchase = await this.executeGroupPurchase({
         tx,
         guildId: params.guildId,
         redemption,
-        approvals: redemption.approvals,
-        threshold: approvalThreshold,
+        approvals: [],
+        threshold: 1,
         actorUserId: params.requestedByUserId,
         actorUsername: params.requestedByUsername,
+        failOnInsufficientFunds: true,
       });
 
       return {
         ...executedPurchase.redemption,
-        requiredApprovals: approvalThreshold,
+        requiredApprovals: null,
       };
     });
 
@@ -813,10 +617,6 @@ export class ShopService {
     return result;
   }
 
-  private getApprovalThreshold(groupMembers: number) {
-    return Math.max(1, Math.ceil(groupMembers / 2));
-  }
-
   private async executeGroupPurchase(params: {
     tx: Prisma.TransactionClient;
     guildId: string;
@@ -825,6 +625,7 @@ export class ShopService {
     threshold: number;
     actorUserId: string;
     actorUsername?: string;
+    failOnInsufficientFunds?: boolean;
   }) {
     await this.lockShopItem(params.tx, params.guildId, params.redemption.shopItemId);
 
@@ -844,12 +645,18 @@ export class ShopService {
     }
 
     if (item.audience !== "GROUP") {
-      throw new AppError("Only group shop items can be approved through group purchases.", 409);
+      throw new AppError("Only group shop items can be purchased with /buy.", 409);
     }
 
     const totalCost = decimalToNumber(params.redemption.totalCost);
     const groupBalance = await this.getGroupPointsBalance(params.tx, params.redemption.groupId);
     if (groupBalance < totalCost) {
+      if (params.failOnInsufficientFunds) {
+        throw new AppError(
+          `${params.redemption.group.displayName} does not have enough group points for this purchase.`,
+          409,
+        );
+      }
       return {
         redemption: {
           ...params.redemption,

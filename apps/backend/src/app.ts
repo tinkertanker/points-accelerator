@@ -10,6 +10,7 @@ import type { AppEnv } from "./config/env.js";
 import type { DiscordOAuthClient } from "./auth/discord-oauth.js";
 import type { BotRuntimeApi } from "./bot/runtime.js";
 import type { AppServices } from "./services/app-services.js";
+import { MAX_SHOP_PURCHASE_QUANTITY } from "./services/shop-service.js";
 import type { StorageService } from "./services/storage-service.js";
 import { resolveCapabilities } from "./domain/permissions.js";
 import { suggestGroupRoles } from "./domain/group-suggestions.js";
@@ -154,15 +155,8 @@ const redeemSchema = z.object({
   shopItemId: z.string().min(1),
   requestedByUserId: z.string().min(1),
   requestedByUsername: z.string().optional(),
-  quantity: z.number().int().positive().optional(),
+  quantity: z.number().int().positive().max(MAX_SHOP_PURCHASE_QUANTITY).optional(),
   purchaseMode: z.enum(["INDIVIDUAL", "GROUP"]).optional().default("GROUP"),
-});
-
-const approveGroupPurchaseSchema = z.object({
-  redemptionId: z.string().min(1),
-  participantId: z.string().min(1),
-  approvedByUserId: z.string().min(1),
-  approvedByUsername: z.string().optional(),
 });
 
 const redemptionStatusUpdateSchema = z.object({
@@ -1575,24 +1569,6 @@ export function createApp(params: {
 
   app.post("/api/actions/redeem", { preHandler: requireAdmin }, async (request) => {
     const payload = redeemSchema.parse(request.body);
-    let groupMemberCount: number | undefined;
-    if (payload.purchaseMode === "GROUP") {
-      const participant = await services.participantService.findById(guildIdOf(request), payload.participantId);
-      if (!participant) {
-        throw new AppError("Participant not found.", 404);
-      }
-
-      const group = await services.groupService.findById(guildIdOf(request), participant.groupId);
-      if (!group) {
-        throw new AppError("Group not found.", 404);
-      }
-
-      groupMemberCount = (await params.botRuntime?.getGroupMemberCount(guildIdOf(request), group.roleId)) ?? undefined;
-      if (!groupMemberCount || groupMemberCount <= 0) {
-        throw new AppError("Live Discord group membership is unavailable for this group purchase.", 503);
-      }
-    }
-
     return services.shopService.redeem({
       guildId: guildIdOf(request),
       participantId: payload.participantId,
@@ -1601,35 +1577,6 @@ export function createApp(params: {
       requestedByUsername: payload.requestedByUsername,
       quantity: payload.quantity,
       purchaseMode: payload.purchaseMode,
-      groupMemberCount,
-    });
-  });
-
-  app.post("/api/actions/approve-group-purchase", { preHandler: requireAdmin }, async (request) => {
-    const payload = approveGroupPurchaseSchema.parse(request.body);
-    const redemption = await services.shopService.getRedemption(guildIdOf(request), payload.redemptionId);
-    if (!redemption) {
-      throw new AppError("Group purchase request not found.", 404);
-    }
-
-    let currentGroupMemberCount: number | undefined;
-    let currentGroupMemberDiscordUserIds: string[] | undefined;
-    if (redemption.purchaseMode === "GROUP") {
-      currentGroupMemberCount = (await params.botRuntime?.getGroupMemberCount(guildIdOf(request), redemption.group.roleId)) ?? undefined;
-      currentGroupMemberDiscordUserIds = (await params.botRuntime?.getGroupMemberDiscordUserIds(guildIdOf(request), redemption.group.roleId)) ?? undefined;
-      if (!currentGroupMemberCount || currentGroupMemberCount <= 0) {
-        throw new AppError("Live Discord group membership is unavailable for this group purchase.", 503);
-      }
-    }
-
-    return services.shopService.approveGroupPurchase({
-      guildId: guildIdOf(request),
-      redemptionId: payload.redemptionId,
-      participantId: payload.participantId,
-      approvedByUserId: payload.approvedByUserId,
-      approvedByUsername: payload.approvedByUsername,
-      currentGroupMemberCount,
-      currentGroupMemberDiscordUserIds,
     });
   });
 

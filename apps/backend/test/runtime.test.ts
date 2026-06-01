@@ -119,6 +119,7 @@ function createRuntimeFixture() {
     },
     roleCapabilityService: {
       listForRoleIds: vi.fn().mockResolvedValue([]),
+      listMerchantRoleIds: vi.fn().mockResolvedValue([]),
     },
     shopService: {
       list: vi.fn().mockResolvedValue([]),
@@ -127,12 +128,18 @@ function createRuntimeFixture() {
         .mockResolvedValue({
           id: "redemption-12345678",
           approvals: [],
-          approvalThreshold: 2,
+          approvalThreshold: null,
           quantity: 1,
-          shopItem: { name: "Bubble Tea" },
+          status: "PENDING",
+          shopItem: {
+            audience: "GROUP",
+            emoji: "🧋",
+            fulfillmentInstructions: null,
+            name: "Bubble Tea",
+            ownerUserId: null,
+          },
         }),
-      setApprovalMessage: vi.fn().mockResolvedValue(undefined),
-      approveGroupPurchase: vi.fn().mockResolvedValue({ executed: false, approvalsCount: 1, threshold: 2 }),
+      setFulfilmentMessage: vi.fn().mockResolvedValue(undefined),
       getRedemption: vi.fn().mockResolvedValue(null),
       listPersonalRedemptionsByUser: vi.fn().mockResolvedValue([]),
       listGroupRedemptionsByGroup: vi.fn().mockResolvedValue([]),
@@ -2774,7 +2781,7 @@ describe("bot runtime", () => {
     expect(fetchMember).not.toHaveBeenCalledWith("student-12");
   });
 
-  it("creates a group purchase from /buy group", async () => {
+  it("creates a group purchase from /buy", async () => {
     const { runtime, services } = createRuntimeFixture();
     services.groupService.resolveGroupFromRoleIds.mockImplementation(async (_guildId: string, roleIds: string[]) => {
       if (roleIds.includes("other-group-role")) {
@@ -2785,13 +2792,20 @@ describe("bot runtime", () => {
     });
     services.shopService.redeem.mockResolvedValue({
       id: "redemption-12345678",
-      approvals: [{}],
-      approvalThreshold: 2,
+      approvals: [],
+      approvalThreshold: null,
       quantity: 2,
-      shopItem: { name: "Bubble Tea" },
+      status: "PENDING",
+      shopItem: {
+        audience: "GROUP",
+        emoji: "🧋",
+        fulfillmentInstructions: "Hand over at the desk.",
+        name: "Bubble Tea",
+        ownerUserId: null,
+      },
     });
     const reply = vi.fn().mockResolvedValue(undefined);
-    const postListingSpy = vi.spyOn(runtime, "postListing").mockResolvedValue({
+    const postFulfilmentSpy = vi.spyOn(runtime as any, "postRedemptionFulfilmentNotice").mockResolvedValue({
       channelId: "channel-announce",
       messageId: "message-1",
     });
@@ -2838,7 +2852,6 @@ describe("bot runtime", () => {
         },
       },
       options: {
-        getSubcommand: () => "group",
         getString: vi.fn((name: string) => (name === "item_id" ? "item-1" : null)),
         getInteger: vi.fn((name: string) => (name === "quantity" ? 2 : null)),
       },
@@ -2857,26 +2870,28 @@ describe("bot runtime", () => {
       requestedByUsername: "Alice",
       quantity: 2,
       purchaseMode: "GROUP",
-      groupMemberCount: 2,
     });
-    expect(services.participantService.ensureForGroup).toHaveBeenCalledTimes(3);
-    expect(postListingSpy).toHaveBeenCalledWith(
-      "channel-current",
-      expect.stringContaining("from <@&group-role>, requested by <@user-1>"),
+    expect(services.participantService.ensureForGroup).toHaveBeenCalledTimes(1);
+    expect(postFulfilmentSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: "channel-current",
+        redemptionId: "redemption-12345678",
+        shopItemName: "Bubble Tea",
+        shopItemEmoji: "🧋",
+        buyerUserId: "user-1",
+        groupName: "Gryffindor",
+      }),
     );
-    expect(postListingSpy).toHaveBeenCalledWith(
-      "channel-current",
-      expect.stringContaining("Request ID: `redemption-12345678`"),
-    );
-    expect(services.shopService.setApprovalMessage).toHaveBeenCalledWith({
+    expect(services.shopService.setFulfilmentMessage).toHaveBeenCalledWith({
       guildId: "guild-test",
       redemptionId: "redemption-12345678",
       channelId: "channel-announce",
       messageId: "message-1",
+      ownerUserIdAtPurchase: null,
     });
     expect(reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringMatching(/<@&group-role>.*Request ID: redemption-12345678/),
+        content: expect.stringMatching(/Purchase created.*Request ID: redemption-12345678/),
       }),
     );
   });
@@ -2899,6 +2914,7 @@ describe("bot runtime", () => {
         type?: number;
         required?: boolean;
         min_value?: number;
+        max_value?: number;
         options?: Array<{ name: string; required?: boolean; min_value?: number }>;
       }>;
     }>;
@@ -2907,14 +2923,17 @@ describe("bot runtime", () => {
     const deductCommand = commands.find((command) => command.name === "deduct");
     const forbesCommand = commands.find((command) => command.name === "forbes");
     const goFundMeCommand = commands.find((command) => command.name === "gofundme");
+    const buyCommand = commands.find((command) => command.name === "buy");
     const submitCommand = commands.find((command) => command.name === "submit");
     const kahootCommand = commands.find((command) => command.name === "kahoot");
     const flatAwardPoints = commands.find((command) => command.name === "awardpoints");
     const flatAwardMixed = commands.find((command) => command.name === "awardmixed");
+    const approvePurchaseCommand = commands.find((command) => command.name === "approve_purchase");
 
     expect(forbesCommand).toEqual(expect.objectContaining({ name: "forbes" }));
     expect(flatAwardPoints).toBeUndefined();
     expect(flatAwardMixed).toBeUndefined();
+    expect(approvePurchaseCommand).toBeUndefined();
 
     const awardPointsSub = awardCommand?.options?.find((option) => option.name === "points");
     const awardCurrencySub = awardCommand?.options?.find((option) => option.name === "currency");
@@ -2969,6 +2988,14 @@ describe("bot runtime", () => {
       ]),
     );
     expect(goFundMeLeaderboardSub).toEqual(expect.objectContaining({ name: "leaderboard" }));
+    expect(buyCommand?.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "item_id", required: true }),
+        expect.objectContaining({ name: "quantity", required: false, min_value: 1, max_value: 4 }),
+      ]),
+    );
+    expect(buyCommand?.options?.find((option) => option.name === "personal")).toBeUndefined();
+    expect(buyCommand?.options?.find((option) => option.name === "group")).toBeUndefined();
     expect(submitCommand?.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "assignment", required: true }),
@@ -2985,65 +3012,6 @@ describe("bot runtime", () => {
         expect.objectContaining({ name: "winner5", required: false }),
       ]),
     );
-  });
-
-  it("recomputes group member count when approving a purchase", async () => {
-    const { runtime, services } = createRuntimeFixture();
-    const reply = vi.fn().mockResolvedValue(undefined);
-    const fetchMembers = vi.fn((userId?: string) => {
-      if (userId) {
-        return Promise.resolve({
-          roles: { cache: new Map([["group-role", {}]]) },
-        });
-      }
-
-      return Promise.resolve(
-        new Map([
-          [
-            "user-1",
-            {
-              user: { id: "user-1", username: "Alice", bot: false },
-              roles: { cache: new Map([["group-role", {}]]) },
-            },
-          ],
-          [
-            "user-2",
-            {
-              user: { id: "user-2", username: "Bob", bot: false },
-              roles: { cache: new Map([["group-role", {}]]) },
-            },
-          ],
-        ]),
-      );
-    });
-
-    await (runtime as any).handleCommand({
-      guildId: "guild-test",
-      commandName: "approve_purchase",
-      guild: {
-        members: {
-          fetch: fetchMembers,
-        },
-      },
-      options: {
-        getString: vi.fn((name: string) => (name === "purchase_id" ? "redemption-12345678" : null)),
-      },
-      reply,
-      user: {
-        id: "user-1",
-        username: "Alice",
-      },
-    });
-
-    expect(services.shopService.approveGroupPurchase).toHaveBeenCalledWith({
-      guildId: "guild-test",
-      redemptionId: "redemption-12345678",
-      participantId: "participant-1",
-      approvedByUserId: "user-1",
-      approvedByUsername: "Alice",
-      currentGroupMemberCount: 2,
-      currentGroupMemberDiscordUserIds: ["user-1", "user-2"],
-    });
   });
 
   describe("/kahoot", () => {

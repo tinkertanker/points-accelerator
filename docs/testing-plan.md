@@ -60,9 +60,8 @@ Run locally:
 ### Shop
 
 - Open `/store`
-- Create a `/buy group` request
+- Create a `/buy` request with `quantity:4`
 - Verify stock decreases for limited items
-- Approve it from enough group members with `/approve_purchase`
 - Verify the group's shared points are charged and the request moves to pending fulfilment
 - Mark the group redemption fulfilled from the dashboard queue
 

@@ -92,7 +92,7 @@ export default function GuidePanel() {
                 <code>/balance</code>
                 <code>/transfer member:@harry amount:3</code>
                 <code>/donate amount:2</code>
-                <code>/buy group item_id:pizza quantity:2</code>
+                <code>/buy item_id:pizza quantity:2</code>
                 <code>/luckydraw duration:5m prize:50</code>
                 <code>/leaderboard</code>
                 <code>/forbes</code>
@@ -297,16 +297,10 @@ export default function GuidePanel() {
                       <td>Browse all active store items</td>
                     </tr>
                     <tr>
-                      <td><code>/buy group</code></td>
+                      <td><code>/buy</code></td>
                       <td>Everyone</td>
                       <td><code>item_id</code> <code>quantity</code></td>
-                      <td>Request a group purchase using group points (needs approval)</td>
-                    </tr>
-                    <tr>
-                      <td><code>/approve_purchase</code></td>
-                      <td>Everyone</td>
-                      <td><code>purchase_id</code></td>
-                      <td>Approve a pending group purchase for your team</td>
+                      <td>Buy up to 4 of a group item using shared group points</td>
                     </tr>
                   </tbody>
                 </table>
@@ -340,7 +334,7 @@ export default function GuidePanel() {
                 <dt>Groups</dt>
                 <dd>Manage aliases for synced group roles that can receive points, and review participants.</dd>
                 <dt>Store</dt>
-                <dd>Create and manage items students can buy with points or currency.</dd>
+                <dd>Create and manage items students can buy with shared group points.</dd>
                 <dt>Assignments</dt>
                 <dd>Create prompts with deadlines and rewards. Review student submissions.</dd>
                 <dt>Activity</dt>
@@ -373,16 +367,15 @@ export default function GuidePanel() {
             <div className="guide-prose">
               <h3>Group items</h3>
               <p>
-                Store items cost group points. A student initiates the purchase with <code>/buy group</code>, then
-                other group members approve it with <code>/approve_purchase</code>. The number of approvals required
-                scales with group size. Once the threshold is met, the points are deducted and the request moves into
-                the dashboard&rsquo;s <strong>Fulfilment</strong> queue until staff mark it fulfilled.
+                Store items cost group points. A student purchases up to 4 at a time with <code>/buy</code>, the
+                points are deducted immediately, and the request moves into the dashboard&rsquo;s{" "}
+                <strong>Fulfilment</strong> queue until staff mark it fulfilled.
               </p>
 
               <h3>Stock management</h3>
               <p>
                 Leave stock blank for unlimited supply. Set a number to cap how many times the item can be purchased —
-                stock is deducted on fulfilment.
+                stock is reserved when the purchase is created and restored if the purchase is cancelled.
               </p>
 
               <h3>Marketplace listings</h3>

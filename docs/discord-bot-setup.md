@@ -86,6 +86,5 @@ Run these in the test server before production rollout:
 - `/betstats`
 - `/luckydraw`
 - `/store`
-- `/buy group`
-- `/approve_purchase`
+- `/buy`
 - `/sell`

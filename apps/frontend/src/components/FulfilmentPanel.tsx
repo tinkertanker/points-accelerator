@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { ShopRedemption } from "../types";
 
 const STATUS_LABELS: Record<ShopRedemption["status"], string> = {
-  AWAITING_APPROVAL: "Awaiting approval",
+  AWAITING_APPROVAL: "Legacy request",
   PENDING: "Pending fulfilment",
   FULFILLED: "Fulfilled",
   CANCELED: "Canceled",
@@ -42,15 +42,6 @@ function getRequesterLabel(redemption: ShopRedemption) {
 function getCostLabel(redemption: ShopRedemption) {
   const unit = redemption.purchaseMode === "GROUP" ? "pts" : "wallet";
   return `${redemption.totalCost} ${unit}`;
-}
-
-function getApprovalProgress(redemption: ShopRedemption) {
-  if (redemption.purchaseMode !== "GROUP") {
-    return "Immediate";
-  }
-
-  const threshold = redemption.approvalThreshold ?? 1;
-  return `${redemption.approvals.length}/${threshold}`;
 }
 
 function getPurchaseLabel(redemption: ShopRedemption) {
@@ -95,7 +86,6 @@ export default function FulfilmentPanel({
     });
 
   const pendingCount = redemptions.filter((redemption) => redemption.status === "PENDING").length;
-  const awaitingCount = redemptions.filter((redemption) => redemption.status === "AWAITING_APPROVAL").length;
   const fulfilledRecentCount = redemptions.filter((redemption) => {
     if (redemption.status !== "FULFILLED") {
       return false;
@@ -155,13 +145,12 @@ export default function FulfilmentPanel({
           <div>
             <h2>Run the fulfilment queue</h2>
             <p className="section-help">
-              Pending rows have already charged group points. Awaiting approval rows stay visible so staff
-              can spot stalled requests before they turn into handover work.
+              Pending rows have already charged group points. Use the fulfilment action after staff hand over
+              the reward.
             </p>
           </div>
           <div className="fulfilment-summary">
             <span>{pendingCount} pending</span>
-            <span>{awaitingCount} awaiting approval</span>
             <span>{fulfilledRecentCount} fulfilled in 24h</span>
           </div>
         </header>
@@ -174,7 +163,6 @@ export default function FulfilmentPanel({
           >
             <option value="">All statuses</option>
             <option value="PENDING">Pending fulfilment</option>
-            <option value="AWAITING_APPROVAL">Awaiting approval</option>
             <option value="FULFILLED">Fulfilled</option>
             <option value="CANCELED">Canceled</option>
           </select>
@@ -204,7 +192,6 @@ export default function FulfilmentPanel({
                     <th scope="col">Requested by</th>
                     <th scope="col">Group</th>
                     <th scope="col">Cost</th>
-                    <th scope="col">Approvals</th>
                     <th scope="col">Fulfilment</th>
                     <th scope="col">Updated</th>
                     <th scope="col" className="matrix-table__th--actions">
@@ -227,7 +214,6 @@ export default function FulfilmentPanel({
                       <td>{getRequesterLabel(redemption)}</td>
                       <td>{redemption.group.displayName}</td>
                       <td>{getCostLabel(redemption)}</td>
-                      <td>{getApprovalProgress(redemption)}</td>
                       <td className="fulfilment-notes-cell">{redemption.shopItem.fulfillmentInstructions || "\u2014"}</td>
                       <td>
                         <time dateTime={redemption.updatedAt}>{getUpdatedLabel(redemption)}</time>
@@ -265,10 +251,6 @@ export default function FulfilmentPanel({
                     <div>
                       <dt>Group</dt>
                       <dd>{redemption.group.displayName}</dd>
-                    </div>
-                    <div>
-                      <dt>Approvals</dt>
-                      <dd>{getApprovalProgress(redemption)}</dd>
                     </div>
                     <div>
                       <dt>Fulfilment</dt>

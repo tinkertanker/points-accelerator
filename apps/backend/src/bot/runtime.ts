@@ -32,6 +32,7 @@ import type { AppEnv } from "../config/env.js";
 import { resolveCapabilities, type ResolvedCapabilities } from "../domain/permissions.js";
 import type { GuardedActivity } from "../services/channel-guard-service.js";
 import type { AppServices } from "../services/app-services.js";
+import { MAX_SHOP_PURCHASE_QUANTITY } from "../services/shop-service.js";
 import type { StorageService } from "../services/storage-service.js";
 import { AppError } from "../utils/app-error.js";
 import { decimalToNumber } from "../utils/decimal.js";
@@ -1059,7 +1060,7 @@ export class BotRuntime {
     const header = headerMentions.length > 0 ? `${headerMentions.join(" ")} heads up — ` : "";
     const content = `${header}${subject} purchased ${params.shopItemEmoji} **${params.shopItemName}**${
       params.quantity > 1 ? ` x${params.quantity}` : ""
-    }.\nRedemption ID: \`${params.redemptionId}\`${fulfilmentLine}`;
+    }.\nRedemption ID: \`${params.redemptionId}\`${fulfilmentLine}\nStaff can mark this fulfilled below after handover.`;
 
     const mentionUsers = [params.buyerUserId, ...(validOwnerId ? [validOwnerId] : [])].filter(
       isDiscordSnowflake,
@@ -2325,10 +2326,6 @@ export class BotRuntime {
     return contentType?.startsWith("image/") || contentType?.startsWith("video/");
   }
 
-  private formatGroupPurchaseProgress(approvalsCount: number, threshold: number) {
-    return `${approvalsCount}/${threshold} approval${threshold === 1 ? "" : "s"}`;
-  }
-
   private formatGoFundMeProgressBar(progress: number) {
     const clampedProgress = Math.max(0, Math.min(1, progress));
     const filled = Math.max(0, Math.min(GOFUNDME_BAR_SEGMENTS, Math.round(clampedProgress * GOFUNDME_BAR_SEGMENTS)));
@@ -2549,7 +2546,7 @@ export class BotRuntime {
         `${leaderboard.length} group${leaderboard.length === 1 ? "" : "s"} ranked by shared ${config.pointsName}.`,
       )
       .addFields(fields)
-      .setFooter({ text: `Shared ${config.pointsName} drive the public board and /buy group.` });
+      .setFooter({ text: `Shared ${config.pointsName} drive the public board and /buy.` });
     return embed;
   }
 
@@ -2670,7 +2667,7 @@ export class BotRuntime {
       case "PENDING":
         return "📦 Pending fulfilment";
       case "AWAITING_APPROVAL":
-        return "⏳ Awaiting approval";
+        return "⏳ Legacy request";
       case "CANCELED":
         return "🚫 Canceled";
       default:
@@ -2761,8 +2758,8 @@ export class BotRuntime {
 
     const footer =
       audience === "group"
-        ? `/buy group spends shared ${config.pointsName} · /donate converts currency into points.`
-        : `/buy group spends shared ${config.pointsName} · /donate converts currency into points.`;
+        ? `/buy spends shared ${config.pointsName} · /donate converts currency into points.`
+        : `/buy spends shared ${config.pointsName} · /donate converts currency into points.`;
 
     return new EmbedBuilder()
       .setColor(STORE_EMBED_COLOUR)
@@ -3320,23 +3317,18 @@ export class BotRuntime {
     if (interaction.commandName !== "buy") {
       return;
     }
-    const subcommand = interaction.options.getSubcommand();
-    if (subcommand !== "personal" && subcommand !== "group") {
-      return;
-    }
     const focused = interaction.options.getFocused(true);
     if (focused.name !== "item_id") {
       await interaction.respond([]);
       return;
     }
-    const audience = subcommand === "group" ? "GROUP" : "INDIVIDUAL";
     const [config, items] = await Promise.all([
       this.services.configService.getOrCreate(guildId),
       this.services.shopService.list(guildId),
     ]);
     const query = focused.value.trim().toLowerCase();
     const matches = items
-      .filter((item) => item.enabled && item.audience === audience)
+      .filter((item) => item.enabled && item.audience === "GROUP")
       .filter((item) => (query.length === 0 ? true : item.name.toLowerCase().includes(query)))
       .slice(0, AUTOCOMPLETE_CHOICE_LIMIT)
       .map((item) => {
@@ -3940,7 +3932,7 @@ export class BotRuntime {
             },
           )
           .setFooter({
-            text: `Group ${config.pointsName} fuel /leaderboard and /buy group · Wallet ${config.currencyName} powers /forbes, /transfer, /donate, and /bet.`,
+            text: `Group ${config.pointsName} fuel /leaderboard and /buy · Wallet ${config.currencyName} powers /forbes, /transfer, /donate, and /bet.`,
           });
 
         await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -4433,21 +4425,9 @@ export class BotRuntime {
         return;
       }
       case "buy": {
-        const subcommand = interaction.options.getSubcommand();
-        if (subcommand !== "personal" && subcommand !== "group") {
-          throw new AppError("Unknown /buy subcommand.", 400);
-        }
-        if (subcommand === "personal") {
-          await interaction.reply({
-            content: "Personal shop purchases are retired. Use /buy group to spend shared group points.",
-            ephemeral: true,
-          });
-          return;
-        }
         const config = await this.services.configService.getOrCreate(guildId);
         const itemId = interaction.options.getString("item_id", true);
         const quantity = interaction.options.getInteger("quantity") ?? 1;
-        const purchaseMode = subcommand === "group" ? "GROUP" : "INDIVIDUAL";
         const { group, participant } = await this.resolveActiveParticipant({
           guildId,
           discordUserId: interaction.user.id,
@@ -4465,16 +4445,6 @@ export class BotRuntime {
         await this.services.sanctionService.assertNotSanctioned(participant.id, "CANNOT_BUY", {
           message: "🚫 You are sanctioned and cannot buy from the shop right now.",
         });
-        let groupMemberCount: number | undefined;
-        if (purchaseMode === "GROUP") {
-          const syncedGroupMembers = await this.syncGroupParticipantsFromGuild({
-            guildId,
-            groupId: group.id,
-            roleId: group.roleId,
-            guild: interaction.guild,
-          });
-          groupMemberCount = syncedGroupMembers.count;
-        }
         const redemption = await this.services.shopService.redeem({
           guildId,
           participantId: participant.id,
@@ -4482,31 +4452,10 @@ export class BotRuntime {
           requestedByUserId: interaction.user.id,
           requestedByUsername: interaction.user.username,
           quantity,
-          purchaseMode,
-          groupMemberCount,
+          purchaseMode: "GROUP",
         });
-        let sharedMessageSuffix = "";
-        if (purchaseMode === "GROUP") {
-          const announcementChannelId = config.redemptionChannelId ?? interaction.channelId;
-          const requesterLabel = this.formatUserReference(interaction.user.id, member?.displayName ?? interaction.user.username);
-          const groupLabel = this.formatGroupReference(group);
-          const posted = announcementChannelId
-            ? await this.postListing(
-                announcementChannelId,
-                `Group purchase request for ${redemption.shopItem.emoji} **${redemption.shopItem.name}** x${redemption.quantity} from ${groupLabel}, requested by ${requesterLabel}.\nRequest ID: \`${redemption.id}\`\n${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded.\nApprove with \`/approve_purchase purchase_id:${redemption.id}\`.`,
-              )
-            : null;
-          if (posted) {
-            await this.services.shopService.setApprovalMessage({
-              guildId,
-              redemptionId: redemption.id,
-              channelId: posted.channelId,
-              messageId: posted.messageId,
-            });
-            sharedMessageSuffix = " A shared approval message has been posted for your group.";
-          }
-        }
 
+        let fulfilmentMessageSuffix = "";
         if (redemption.status === "PENDING") {
           const fulfilmentChannelId = config.redemptionChannelId ?? interaction.channelId;
           if (fulfilmentChannelId) {
@@ -4533,94 +4482,17 @@ export class BotRuntime {
                 messageId: posted.messageId,
                 ownerUserIdAtPurchase: redemption.shopItem.ownerUserId,
               });
+              fulfilmentMessageSuffix = " Staff can mark it fulfilled from the posted fulfilment message.";
             }
           }
         }
 
+        const statusSuffix =
+          redemption.status === "FULFILLED"
+            ? " It was fulfilled instantly."
+            : ` It is now pending fulfilment.${fulfilmentMessageSuffix}`;
         await interaction.reply({
-          content: `Group purchase request created for ${this.formatGroupReference(group)} for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase and spend shared ${config.pointsName} if it passes.${sharedMessageSuffix}`,
-          ephemeral: true,
-        });
-        return;
-      }
-      case "approve_purchase": {
-        const config = await this.services.configService.getOrCreate(guildId);
-        const purchaseId = interaction.options.getString("purchase_id", true);
-        const { group, participant } = await this.resolveActiveParticipant({
-          guildId,
-          discordUserId: interaction.user.id,
-          discordUsername: interaction.user.username,
-          roleIds,
-        });
-        const syncedGroupMembers = await this.syncGroupParticipantsFromGuild({
-          guildId,
-          groupId: group.id,
-          roleId: group.roleId,
-          guild: interaction.guild,
-        });
-        const currentGroupMemberCount = syncedGroupMembers.count;
-        const result = await this.services.shopService.approveGroupPurchase({
-          guildId,
-          redemptionId: purchaseId,
-          participantId: participant.id,
-          approvedByUserId: interaction.user.id,
-          approvedByUsername: interaction.user.username,
-          currentGroupMemberCount,
-          currentGroupMemberDiscordUserIds: syncedGroupMembers.discordUserIds,
-        });
-
-        const progress = this.formatGroupPurchaseProgress(result.approvalsCount, result.threshold);
-        const blockingSuffix =
-          "blockingGroup" in result && result.blockingGroup
-            ? ` ${this.formatGroupReference(group)} does not currently have enough ${config.pointsName}, so the request stays open until more are earned or donated.`
-            : "";
-
-        const fullRedemption = result.justExecuted
-          ? await this.services.shopService.getRedemption(guildId, result.redemption.id)
-          : null;
-
-        if (fullRedemption && fullRedemption.status === "PENDING") {
-          const fulfilmentChannelId = config.redemptionChannelId ?? interaction.channelId;
-          if (fulfilmentChannelId) {
-            const buyerUserId = fullRedemption.requestedByUserId;
-            const merchantRoleIds = await this.services.roleCapabilityService.listMerchantRoleIds(guildId);
-            const posted = await this.postRedemptionFulfilmentNotice({
-              channelId: fulfilmentChannelId,
-              ownerUserId: fullRedemption.shopItem.ownerUserId,
-              merchantRoleIds,
-              buyerUserId,
-              buyerMention: `<@${buyerUserId}>`,
-              shopItemName: fullRedemption.shopItem.name,
-              shopItemEmoji: fullRedemption.shopItem.emoji,
-              quantity: fullRedemption.quantity,
-              redemptionId: fullRedemption.id,
-              audience: fullRedemption.shopItem.audience,
-              groupName: fullRedemption.group.displayName,
-              fulfillmentInstructions: fullRedemption.shopItem.fulfillmentInstructions,
-            });
-            if (posted) {
-              await this.services.shopService.setFulfilmentMessage({
-                guildId,
-                redemptionId: fullRedemption.id,
-                channelId: posted.channelId,
-                messageId: posted.messageId,
-                ownerUserIdAtPurchase: fullRedemption.shopItem.ownerUserId,
-              });
-            }
-          }
-        }
-
-        const autoFulfilled = fullRedemption?.status === "FULFILLED";
-        const fulfilmentNotes = autoFulfilled
-          ? fullRedemption?.shopItem.fulfillmentInstructions ?? null
-          : null;
-        const fulfilmentSuffix = autoFulfilled
-          ? ` Fulfilled instantly.${fulfilmentNotes ? ` ${fulfilmentNotes}` : ""}`
-          : " The group purchase is now funded and pending fulfilment.";
-        await interaction.reply({
-          content: result.executed
-            ? `Approval recorded for ${this.formatGroupReference(group)}. ${progress}.${fulfilmentSuffix}${blockingSuffix}`
-            : `Approval recorded for ${this.formatGroupReference(group)}. ${progress}.${blockingSuffix}`,
+          content: `Purchase created for ${this.formatGroupReference(group)} for ${quantity} item(s). Request ID: ${redemption.id}. Shared ${config.pointsName} have been charged.${statusSuffix}`,
           ephemeral: true,
         });
         return;
@@ -5295,38 +5167,21 @@ export class BotRuntime {
         ),
       new SlashCommandBuilder()
         .setName("buy")
-        .setDescription("Buy a shop item.")
-        .addSubcommand((sub) =>
-          sub
-            .setName("personal")
-            .setDescription("Personal buys are retired; use /buy group.")
-            .addStringOption((option) =>
-              option
-                .setName("item_id")
-                .setDescription("Item to buy — start typing to search by name")
-                .setRequired(true)
-                .setAutocomplete(true),
-            )
-            .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
-        )
-        .addSubcommand((sub) =>
-          sub
-            .setName("group")
-            .setDescription("Start a group purchase request paid from shared group points.")
-            .addStringOption((option) =>
-              option
-                .setName("item_id")
-                .setDescription("Item to buy — start typing to search by name")
-                .setRequired(true)
-                .setAutocomplete(true),
-            )
-            .addIntegerOption((option) => option.setName("quantity").setDescription("Quantity").setRequired(false)),
-        ),
-      new SlashCommandBuilder()
-        .setName("approve_purchase")
-        .setDescription("Approve a pending group shop purchase.")
+        .setDescription("Start a group purchase request paid from shared group points.")
         .addStringOption((option) =>
-          option.setName("purchase_id").setDescription("Full purchase ID shared by /buy group").setRequired(true),
+          option
+            .setName("item_id")
+            .setDescription("Item to buy — start typing to search by name")
+            .setRequired(true)
+            .setAutocomplete(true),
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName("quantity")
+            .setDescription(`Quantity, up to ${MAX_SHOP_PURCHASE_QUANTITY}`)
+            .setRequired(false)
+            .setMinValue(1)
+            .setMaxValue(MAX_SHOP_PURCHASE_QUANTITY),
         ),
       new SlashCommandBuilder()
         .setName("fulfil")

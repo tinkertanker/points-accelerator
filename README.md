@@ -2,7 +2,7 @@
 
 `points accelerator` is a group-first Discord economy bot for class communities.
 
-It tracks group `points` that drive the leaderboard and also fund shared group purchases, separate spendable personal `currency` for wallet transfers and personal purchases, and a role-driven capability system so each Discord role can be configured for what it can award, deduct, sell, or receive.
+It tracks group `points` that drive the leaderboard and fund shared group purchases, separate spendable personal `currency` for wallet transfers, donations, and betting, and a role-driven capability system so each Discord role can be configured for what it can award, deduct, sell, or receive.
 
 It also includes a Discord OAuth dashboard, marketplace listings, and a submission workflow for class use: students are auto-provisioned from their Discord identity and active group role, staff publish assignments, students submit work, and approved submissions award group points plus personal currency.
 
@@ -43,8 +43,8 @@ The bot also supports participant-wallet betting: students can place double-or-n
 - Discord ledger command with paging for recent transactions
 - Discord-login leaderboard view for any guild member
 - Participant wallet transfers plus wallet-to-group point donations
-- Custom shop with majority-approved purchases using shared group points
-- Staff fulfilment queue for recorded and approved store redemptions
+- Custom shop purchases using shared group points
+- Staff fulfilment queue for recorded store redemptions
 - Participant wallet betting with configurable win chance
 - Lucky-draw giveaways: button-entry, random winner picking, automatic currency payout
 - Marketplace listings with optional Discord channel posting
@@ -58,7 +58,7 @@ The bot also supports participant-wallet betting: students can place double-or-n
 ## Command set
 
 - Staff roles such as admins or alumni: `/award points`, `/award currency`, `/award currencygroup`, `/award currencybulk`, `/deduct group`, `/deduct member`, `/deduct mixed`, `/luckydraw`
-- Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buy group`, `/approve_purchase`, `/bet`, `/betstats`
+- Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buy`, `/bet`, `/betstats`
 
 The award and deduct flows are split into subcommands so Discord enforces the required fields:
 

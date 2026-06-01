@@ -488,7 +488,7 @@ export default function ShopPanel({
               <dt>Description</dt>
               <dd>Short copy explaining what the student or group is buying.</dd>
               <dt>Cost</dt>
-              <dd>The group points charged per purchase. All store items use shared group points and group approvals.</dd>
+              <dd>The group points charged per item. Students can buy up to 4 at a time, using shared group points.</dd>
               <dt>Stock</dt>
               <dd>Leave blank for unlimited supply. Set a number to cap how many times the item can be redeemed.</dd>
               <dt>Fulfilment</dt>

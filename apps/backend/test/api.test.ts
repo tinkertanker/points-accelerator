@@ -6,7 +6,6 @@ import { ensureTestDatabase } from "./helpers/test-database.js";
 
 let cleanupDatabase = () => undefined;
 let ctx: Awaited<ReturnType<typeof createTestApp>>;
-const groupMemberCounts = new Map<string, number>();
 const botRuntime: BotRuntimeApi = {
   listBotGuilds: vi.fn().mockResolvedValue([{ id: "guild-test", name: "Test Guild", iconUrl: null }]),
   getRoles: vi.fn().mockResolvedValue([]),
@@ -14,11 +13,8 @@ const botRuntime: BotRuntimeApi = {
   getMembers: vi.fn().mockResolvedValue([]),
   getRoleMembership: vi.fn().mockResolvedValue({ roles: [], totalHumanMembers: 0 }),
   getDashboardMember: vi.fn().mockResolvedValue(null),
-  getGroupMemberCount: vi.fn(async (_guildId: string, roleId: string) => groupMemberCounts.get(roleId) ?? null),
-  getGroupMemberDiscordUserIds: vi.fn(async (_guildId: string, roleId: string) => {
-    const count = groupMemberCounts.get(roleId);
-    return count ? Array.from({ length: count }, (_, index) => `${roleId}-member-${index + 1}`) : null;
-  }),
+  getGroupMemberCount: vi.fn().mockResolvedValue(null),
+  getGroupMemberDiscordUserIds: vi.fn().mockResolvedValue(null),
   postListing: vi.fn().mockResolvedValue(null),
   clearRedemptionButtons: vi.fn().mockResolvedValue(undefined),
 };
@@ -59,7 +55,6 @@ describe("points accelerator API", () => {
   });
 
   beforeEach(async () => {
-    groupMemberCounts.clear();
     vi.clearAllMocks();
     await resetDatabase(ctx.prisma);
   });
@@ -706,7 +701,6 @@ describe("points accelerator API", () => {
 
     const source = sourceResponse.json() as { id: string };
     const target = targetResponse.json() as { id: string };
-    groupMemberCounts.set("role-beta", 1);
     const sourceParticipant = await registerParticipant({
       discordUserId: "user-1",
       discordUsername: "Alpha user",
@@ -1072,7 +1066,7 @@ describe("points accelerator API", () => {
     });
   });
 
-  it("allows unfunded group purchase requests to be created before points are available", async () => {
+  it("rejects group purchases when the group cannot afford them", async () => {
     await ctx.app.inject({
       method: "PUT",
       url: "/api/capabilities",
@@ -1107,7 +1101,6 @@ describe("points accelerator API", () => {
       },
     });
     const group = groupResponse.json() as { id: string };
-    groupMemberCounts.set("role-hufflepuff", 1);
     const participant = await registerParticipant({
       discordUserId: "user-huff",
       discordUsername: "Hufflepuff user",
@@ -1145,15 +1138,13 @@ describe("points accelerator API", () => {
       },
     });
 
-    expect(redeemResponse.statusCode).toBe(200);
+    expect(redeemResponse.statusCode).toBe(409);
     expect(redeemResponse.json()).toMatchObject({
-      purchaseMode: "GROUP",
-      status: "AWAITING_APPROVAL",
-      approvalThreshold: 1,
+      message: expect.stringMatching(/does not have enough group points/i),
     });
   });
 
-  it("auto-executes funded quorum-1 group purchases on creation", async () => {
+  it("charges funded group purchases on creation", async () => {
     await ctx.app.inject({
       method: "PUT",
       url: "/api/capabilities",
@@ -1188,8 +1179,6 @@ describe("points accelerator API", () => {
       },
     });
     const group = groupResponse.json() as { id: string };
-    groupMemberCounts.set("role-slytherin", 1);
-
     const participant = await registerParticipant({
       discordUserId: "user-sly",
       discordUsername: "Sly user",
@@ -1207,7 +1196,7 @@ describe("points accelerator API", () => {
         actorRoleIds: ["role-admin"],
         targetGroupIds: [group.id],
         targetParticipantId: participant.id,
-        pointsDelta: 30,
+        pointsDelta: 40,
         currencyDelta: 0,
         description: "Seed points",
       },
@@ -1238,7 +1227,7 @@ describe("points accelerator API", () => {
         shopItemId: item.id,
         requestedByUserId: "user-sly",
         requestedByUsername: "Sly user",
-        quantity: 1,
+        quantity: 4,
         purchaseMode: "GROUP",
       },
     });
@@ -1247,8 +1236,26 @@ describe("points accelerator API", () => {
     expect(redeemResponse.json()).toMatchObject({
       purchaseMode: "GROUP",
       status: "PENDING",
-      approvalThreshold: 1,
+      quantity: 4,
+      totalCost: "40",
+      approvalThreshold: null,
     });
+
+    const overLimitResponse = await ctx.app.inject({
+      method: "POST",
+      url: "/api/actions/redeem",
+      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
+      payload: {
+        participantId: participant.id,
+        shopItemId: item.id,
+        requestedByUserId: "user-sly",
+        requestedByUsername: "Sly user",
+        quantity: 5,
+        purchaseMode: "GROUP",
+      },
+    });
+
+    expect(overLimitResponse.statusCode).toBe(400);
   });
 
   it("lists fulfilment queue items and lets staff fulfil or cancel eligible requests", async () => {
@@ -1286,8 +1293,6 @@ describe("points accelerator API", () => {
       },
     });
     const group = groupResponse.json() as { id: string };
-    groupMemberCounts.set("role-ravenclaw", 2);
-
     const participant = await registerParticipant({
       discordUserId: "user-raven",
       discordUsername: "Raven user",
@@ -1310,7 +1315,7 @@ describe("points accelerator API", () => {
         actorUsername: "Admin",
         actorRoleIds: ["role-admin"],
         targetGroupIds: [group.id],
-        pointsDelta: 10,
+        pointsDelta: 40,
         currencyDelta: 0,
         description: "Seed fulfilment points",
       },
@@ -1390,7 +1395,7 @@ describe("points accelerator API", () => {
         }),
         expect.objectContaining({
           id: groupRedemption.id,
-          status: "AWAITING_APPROVAL",
+          status: "PENDING",
           shopItem: expect.objectContaining({ name: "Team snacks" }),
         }),
       ]),
@@ -1431,118 +1436,6 @@ describe("points accelerator API", () => {
       id: groupRedemption.id,
       status: "CANCELED",
     });
-  });
-
-  it("ignores approvals from members who have left the group", async () => {
-    const groupAlphaResponse = await ctx.app.inject({
-      method: "POST",
-      url: "/api/groups",
-      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
-      payload: {
-        displayName: "Alpha",
-        slug: "alpha",
-        mentorName: null,
-        roleId: "role-alpha",
-        aliases: [],
-        active: true,
-      },
-    });
-    const alphaGroup = groupAlphaResponse.json() as { id: string };
-
-    const groupBetaResponse = await ctx.app.inject({
-      method: "POST",
-      url: "/api/groups",
-      headers: { "x-admin-token": ctx.env.ADMIN_TOKEN },
-      payload: {
-        displayName: "Beta",
-        slug: "beta",
-        mentorName: null,
-        roleId: "role-beta",
-        aliases: [],
-        active: true,
-      },
-    });
-    const betaGroup = groupBetaResponse.json() as { id: string };
-
-    const requester = await registerParticipant({
-      discordUserId: "user-a1",
-      discordUsername: "Alpha One",
-      indexId: "A001",
-      groupId: alphaGroup.id,
-    });
-    const approver = await registerParticipant({
-      discordUserId: "user-a2",
-      discordUsername: "Alpha Two",
-      indexId: "A002",
-      groupId: alphaGroup.id,
-    });
-    await registerParticipant({
-      discordUserId: "user-a3",
-      discordUsername: "Alpha Three",
-      indexId: "A003",
-      groupId: alphaGroup.id,
-    });
-    await registerParticipant({
-      discordUserId: "user-a4",
-      discordUsername: "Alpha Four",
-      indexId: "A004",
-      groupId: alphaGroup.id,
-    });
-
-    await ctx.services.economyService.awardGroups({
-      guildId: ctx.env.GUILD_ID,
-      actor: {
-        userId: "system",
-        username: "System",
-        roleIds: [],
-      },
-      targetGroupIds: [alphaGroup.id],
-      pointsDelta: 20,
-      currencyDelta: 0,
-      description: "Seed points",
-      type: "CORRECTION",
-      systemAction: true,
-    });
-
-    const item = await ctx.services.shopService.upsert(ctx.env.GUILD_ID, {
-      name: "Shared feast",
-      description: "Group reward",
-      audience: "GROUP",
-      cost: 10,
-      stock: 5,
-      enabled: true,
-      fulfillmentInstructions: null,
-    });
-
-    const redemption = await ctx.services.shopService.redeem({
-      guildId: ctx.env.GUILD_ID,
-      participantId: requester.id,
-      shopItemId: item.id,
-      requestedByUserId: requester.discordUserId,
-      requestedByUsername: requester.discordUsername ?? undefined,
-      quantity: 1,
-      purchaseMode: "GROUP",
-      groupMemberCount: 4,
-    });
-
-    await ctx.prisma.participant.update({
-      where: { id: requester.id },
-      data: { groupId: betaGroup.id },
-    });
-
-    const approvalResult = await ctx.services.shopService.approveGroupPurchase({
-      guildId: ctx.env.GUILD_ID,
-      redemptionId: redemption.id,
-      participantId: approver.id,
-      approvedByUserId: approver.discordUserId,
-      approvedByUsername: approver.discordUsername ?? undefined,
-      currentGroupMemberCount: 3,
-      currentGroupMemberDiscordUserIds: ["user-a2", "user-a3", "user-a4"],
-    });
-
-    expect(approvalResult.executed).toBe(false);
-    expect(approvalResult.approvalsCount).toBe(1);
-    expect(approvalResult.threshold).toBe(2);
   });
 
   it("applies the classroom preset with staff role mappings", async () => {
