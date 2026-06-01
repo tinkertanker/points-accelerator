@@ -1854,7 +1854,7 @@ button.reset-mode-card[aria-checked="true"] {
 .shop-table .col-actions {
   text-align: right;
   white-space: nowrap;
-  width: 5rem;
+  width: 7rem;
 }
 
 .shop-table .col-actions .shop-icon-button {

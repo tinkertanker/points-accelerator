@@ -477,6 +477,32 @@ describe("App", () => {
     expect(screen.queryByRole("tab", { name: /groups/i })).not.toBeInTheDocument();
   });
 
+  it("warns instead of refreshing away partially filled store rows", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(mentorSession), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(bootstrapPayload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    render(<App />);
+
+    expect(await screen.findByRole("tab", { name: /store/i })).toBeInTheDocument();
+    fireEvent.change(screen.getAllByLabelText("Item name")[0]!, { target: { value: "Sticker pack" } });
+    fireEvent.click(screen.getByRole("button", { name: /save store/i }));
+
+    expect(screen.getByText("Add a description for Sticker pack before saving.")).toBeInTheDocument();
+    expect(screen.getAllByDisplayValue("Sticker pack").length).toBeGreaterThan(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("shows only the leaderboard tab for a guild viewer", async () => {
     fetchMock
       .mockResolvedValueOnce(

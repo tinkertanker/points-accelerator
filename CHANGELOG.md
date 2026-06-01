@@ -8,6 +8,14 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.10.0] - 2026-06-01
+
+### Added
+- Store catalogue rows now have a duplicate action before archive, making it faster to create similar rewards.
+
+### Fixed
+- Store saves now warn about incomplete item rows instead of refreshing away partially filled entries.
+
 ## [0.9.4] - 2026-05-30
 
 ### Added

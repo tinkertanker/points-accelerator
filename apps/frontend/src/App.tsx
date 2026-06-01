@@ -650,9 +650,24 @@ export default function App() {
   };
 
   const handleSaveShop = async () => {
-    const validItems = shopDrafts.filter(
-      (item) => item.name.trim().length > 0 && item.description.trim().length > 0,
+    const draftItems = shopDrafts.filter(
+      (item) => item.name.trim().length > 0 || item.description.trim().length > 0,
     );
+    const incompleteItem = draftItems.find(
+      (item) => item.name.trim().length === 0 || item.description.trim().length === 0,
+    );
+
+    if (incompleteItem) {
+      const itemLabel = incompleteItem.name.trim() || "this store item";
+      const missingFields = [
+        incompleteItem.name.trim().length === 0 ? "name" : null,
+        incompleteItem.description.trim().length === 0 ? "description" : null,
+      ].filter(Boolean);
+      setStatus(`Add a ${missingFields.join(" and ")} for ${itemLabel} before saving.`);
+      return;
+    }
+
+    const validItems = draftItems;
     await withMutation(
       () => Promise.all(validItems.map((item) => api.saveShopItem({ ...item, fulfillerRoleId: null }))),
       `Saved ${validItems.length} store item${validItems.length === 1 ? "" : "s"}.`,

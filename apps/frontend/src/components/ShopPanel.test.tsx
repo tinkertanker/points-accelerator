@@ -85,6 +85,11 @@ describe("ShopPanel", () => {
 
     expect(screen.getByRole("heading", { name: "Active store items" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Archived items" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "+ Add store item" }).compareDocumentPosition(
+        screen.getByRole("heading", { name: "Archived items" }),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
     const activeTable = screen.getAllByRole("table")[0]!;
     const headers = within(activeTable).getAllByRole("columnheader");
@@ -144,7 +149,8 @@ describe("ShopPanel", () => {
     expect(nameInputs.map((input) => input.value)).toEqual(["Zebra sticker", "Apple crate"]);
   });
 
-  it("offers archive and delete actions for each catalogue row", () => {
+  it("offers duplicate, archive, and delete actions for each catalogue row", () => {
+    const onShopDraftsChange = vi.fn();
     const onArchiveShopItem = vi.fn(async () => true);
     const onDeleteShopItem = vi.fn(async () => true);
 
@@ -166,7 +172,7 @@ describe("ShopPanel", () => {
           fulfillerRoleId: null,
           autoFulfil: false,
         })}
-        onShopDraftsChange={vi.fn()}
+        onShopDraftsChange={onShopDraftsChange}
         onSaveShop={vi.fn(async () => undefined)}
         onArchiveShopItem={onArchiveShopItem}
         onDeleteShopItem={onDeleteShopItem}
@@ -176,9 +182,16 @@ describe("ShopPanel", () => {
     const activeTable = screen.getAllByRole("table")[0]!;
     const rows = within(activeTable).getAllByRole("row").slice(1);
     const firstEnabledRow = rows[0]!;
+    fireEvent.click(within(firstEnabledRow).getByRole("button", { name: "Duplicate Apple crate" }));
     fireEvent.click(within(firstEnabledRow).getByRole("button", { name: "Archive Apple crate" }));
     fireEvent.click(within(firstEnabledRow).getByRole("button", { name: "Delete Apple crate" }));
 
+    expect(onShopDraftsChange).toHaveBeenCalledWith([
+      shopDrafts[0],
+      shopDrafts[1],
+      { ...shopDrafts[1], id: undefined, name: "Apple crate copy", enabled: true },
+      shopDrafts[2],
+    ]);
     expect(onArchiveShopItem).toHaveBeenCalledWith(shopDrafts[1], 1);
     expect(onDeleteShopItem).toHaveBeenCalledWith(shopDrafts[1], 1);
   });

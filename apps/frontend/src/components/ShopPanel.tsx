@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Archive, Trash2, Zap } from "lucide-react";
+import { Archive, Copy, Trash2, Zap } from "lucide-react";
 
 import type { DiscordOption, Participant, ShopItemDraft } from "../types";
 
@@ -133,6 +133,18 @@ export default function ShopPanel({
     onShopDraftsChange(next);
   };
 
+  const duplicateShopDraft = (item: ShopItemDraft, index: number) => {
+    const duplicate: ShopItemDraft = {
+      ...item,
+      id: undefined,
+      name: item.name.trim() ? `${item.name.trim()} copy` : "",
+      enabled: true,
+    };
+    const next = [...shopDrafts];
+    next.splice(index + 1, 0, duplicate);
+    onShopDraftsChange(next);
+  };
+
   const sortedDrafts = shopDrafts
     .map((item, index) => ({ item, index }))
     .sort((left, right) => {
@@ -161,6 +173,16 @@ export default function ShopPanel({
 
   const renderItemActions = (item: ShopItemDraft, index: number) => (
     <div className="shop-row-actions">
+      <button
+        type="button"
+        className="shop-icon-button"
+        disabled={isBusy}
+        onClick={() => duplicateShopDraft(item, index)}
+        aria-label={`Duplicate ${getItemLabel(item)}`}
+        title="Duplicate"
+      >
+        <Copy aria-hidden="true" size={16} strokeWidth={2} />
+      </button>
       <button
         type="button"
         className="shop-icon-button"
@@ -444,15 +466,17 @@ export default function ShopPanel({
                   </div>
                 </>
               )}
+              {section.title === "Active store items" ? (
+                <button
+                  type="button"
+                  className="matrix-add-row"
+                  onClick={() => onShopDraftsChange([...shopDrafts, createShopDraft()])}
+                >
+                  + Add store item
+                </button>
+              ) : null}
             </section>
           ))}
-          <button
-            type="button"
-            className="matrix-add-row"
-            onClick={() => onShopDraftsChange([...shopDrafts, createShopDraft()])}
-          >
-            + Add store item
-          </button>
 
           <details className="capability-help">
             <summary>What do these store columns mean?</summary>
