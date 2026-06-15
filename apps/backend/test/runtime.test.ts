@@ -882,6 +882,30 @@ describe("bot runtime", () => {
     expect(reply).toHaveBeenCalledWith("<@user-1> transferred 5 bananas 💲 to <@student-2>.");
   });
 
+  it("rejects /transfer to a bot recipient before provisioning a wallet", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      (runtime as any).handleCommand({
+        guildId: "guild-test",
+        commandName: "transfer",
+        guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
+        options: {
+          getNumber: vi.fn((name: string) => (name === "amount" ? 5 : null)),
+          getUser: vi.fn((name: string) =>
+            name === "member" ? { id: "bot-1", username: "helper-bot", bot: true } : null,
+          ),
+        },
+        reply,
+        user: { id: "user-1", username: "alice-user" },
+      }),
+    ).rejects.toThrow("You can't transfer currency to a bot.");
+
+    expect(services.participantService.ensureParticipant).not.toHaveBeenCalled();
+    expect(services.participantCurrencyService.transferCurrency).not.toHaveBeenCalled();
+  });
+
   it("mentions the student and group in /donate replies", async () => {
     const { runtime } = createRuntimeFixture();
     const reply = vi.fn().mockResolvedValue(undefined);

@@ -3807,7 +3807,9 @@ export class BotRuntime {
     for (const winner of result.winners) {
       try {
         const guildMember = guild ? await guild.members.fetch(winner.userId).catch(() => null) : null;
-        const { participant } = await this.resolveActiveParticipant({
+        // Prizes are wallet currency, so a winner only needs a participant, not a
+        // group — resolveWalletParticipant lets group-less entrants collect.
+        const { participant } = await this.resolveWalletParticipant({
           guildId,
           discordUserId: winner.userId,
           discordUsername: winner.username ?? guildMember?.user?.username,
@@ -4086,6 +4088,9 @@ export class BotRuntime {
       }
       case "transfer": {
         const targetUser = interaction.options.getUser("member", true);
+        if (targetUser.bot) {
+          throw new AppError("You can't transfer currency to a bot.", 400);
+        }
         const amount = interaction.options.getNumber("amount", true);
         const config = await this.services.configService.getOrCreate(guildId);
         const sourceLabel = this.formatUserReference(interaction.user.id, member?.displayName ?? interaction.user.username);
