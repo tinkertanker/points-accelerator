@@ -206,53 +206,63 @@ export class EconomyService {
       return null;
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      let entry: Awaited<ReturnType<typeof tx.ledgerEntry.create>> | null = null;
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        let entry: Awaited<ReturnType<typeof tx.ledgerEntry.create>> | null = null;
 
-      if (params.groupId) {
-        entry = await tx.ledgerEntry.create({
-          data: {
-            guildId: params.guildId,
-            type: "MESSAGE_REWARD",
-            description: "Passive message reward",
-            createdByUserId: params.userId,
-            createdByUsername: params.username,
-            externalRef: params.messageId,
-            splits: {
-              create: {
-                groupId: params.groupId,
-                pointsDelta: config.passivePointsReward,
-                currencyDelta: decimal(0),
+        if (params.groupId) {
+          entry = await tx.ledgerEntry.create({
+            data: {
+              guildId: params.guildId,
+              type: "MESSAGE_REWARD",
+              description: "Passive message reward",
+              createdByUserId: params.userId,
+              createdByUsername: params.username,
+              externalRef: params.messageId,
+              splits: {
+                create: {
+                  groupId: params.groupId,
+                  pointsDelta: config.passivePointsReward,
+                  currencyDelta: decimal(0),
+                },
               },
             },
-          },
-        });
+          });
+        }
+
+        let currencyEntry: Awaited<
+          ReturnType<ParticipantCurrencyService["awardParticipants"]>
+        > | null = null;
+
+        if (params.participantId && awardsCurrency) {
+          currencyEntry = await this.participantCurrencyService.awardParticipants({
+            guildId: params.guildId,
+            actor: {
+              userId: params.userId,
+              username: params.username,
+              roleIds: [],
+            },
+            targetParticipantIds: [params.participantId],
+            currencyDelta: currencyReward,
+            description: "Passive message reward",
+            type: "MESSAGE_REWARD",
+            systemAction: true,
+            executor: tx,
+            externalRef: params.messageId,
+          });
+        }
+
+        return entry ?? currencyEntry;
+      });
+    } catch (error) {
+      // The partial unique indexes on (guildId, externalRef) for MESSAGE_REWARD
+      // entries are the source of truth for dedupe: if a concurrent delivery of
+      // the same message already paid out, treat this one as a no-op.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return null;
       }
-
-      let currencyEntry: Awaited<
-        ReturnType<ParticipantCurrencyService["awardParticipants"]>
-      > | null = null;
-
-      if (params.participantId && awardsCurrency) {
-        currencyEntry = await this.participantCurrencyService.awardParticipants({
-          guildId: params.guildId,
-          actor: {
-            userId: params.userId,
-            username: params.username,
-            roleIds: [],
-          },
-          targetParticipantIds: [params.participantId],
-          currencyDelta: currencyReward,
-          description: "Passive message reward",
-          type: "MESSAGE_REWARD",
-          systemAction: true,
-          executor: tx,
-          externalRef: params.messageId,
-        });
-      }
-
-      return entry ?? currencyEntry;
-    });
+      throw error;
+    }
   }
 
   public async transferCurrency(params: {

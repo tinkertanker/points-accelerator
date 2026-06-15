@@ -266,6 +266,11 @@ model LedgerEntry {
 
   @@index([guildId, createdAt(sort: Desc)])
   @@index([guildId, externalRef])
+  // Also maintained via raw SQL: a partial UNIQUE index
+  // "LedgerEntry_message_reward_dedupe_key" on (guildId, externalRef) WHERE
+  // type = 'MESSAGE_REWARD'. Prisma cannot model partial indexes; see migration
+  // 20260615130000_passive_reward_dedupe. Do not "fix" the resulting drift by
+  // dropping it.
 }
 
 model LedgerSplit {
@@ -419,6 +424,11 @@ model ParticipantCurrencyEntry {
 
   @@index([guildId, createdAt(sort: Desc)])
   @@index([guildId, externalRef])
+  // Also maintained via raw SQL: a partial UNIQUE index
+  // "ParticipantCurrencyEntry_message_reward_dedupe_key" on (guildId,
+  // externalRef) WHERE type = 'MESSAGE_REWARD'. Prisma cannot model partial
+  // indexes; see migration 20260615130000_passive_reward_dedupe. Do not "fix"
+  // the resulting drift by dropping it.
 }
 
 model ParticipantCurrencySplit {
