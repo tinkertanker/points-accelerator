@@ -235,6 +235,7 @@ describe("bot runtime", () => {
     nowSpy.mockReturnValueOnce(1_000).mockReturnValueOnce(61_000);
 
     await (runtime as any).handlePassiveMessage({
+      guildId: "guild-test",
       memberId: "user-1",
       roleIds: ["role-1"],
       userId: "user-1",
@@ -244,6 +245,7 @@ describe("bot runtime", () => {
       channelId: "channel-1",
     });
     await (runtime as any).handlePassiveMessage({
+      guildId: "guild-test",
       memberId: "user-1",
       roleIds: ["role-1"],
       userId: "user-1",

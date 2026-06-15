@@ -3807,13 +3807,20 @@ export class BotRuntime {
     for (const winner of result.winners) {
       try {
         const guildMember = guild ? await guild.members.fetch(winner.userId).catch(() => null) : null;
+        // Only pay winners who are still in the server. Without this, a winner
+        // who left before settlement would resolve to an empty role list and,
+        // with group-less earning on, be provisioned and paid anyway.
+        if (!guildMember) {
+          skippedWinnerUserIds.push(winner.userId);
+          continue;
+        }
         // Prizes are wallet currency, so a winner only needs a participant, not a
         // group — resolveWalletParticipant lets group-less entrants collect.
         const { participant } = await this.resolveWalletParticipant({
           guildId,
           discordUserId: winner.userId,
-          discordUsername: winner.username ?? guildMember?.user?.username,
-          roleIds: this.getOrderedRoleIds(guildMember ?? null),
+          discordUsername: winner.username ?? guildMember.user?.username,
+          roleIds: this.getOrderedRoleIds(guildMember),
         });
         const sanctioned = await this.services.sanctionService.getActiveFlags(participant.id);
         if (sanctioned.has("CANNOT_RECEIVE_REWARDS")) {
