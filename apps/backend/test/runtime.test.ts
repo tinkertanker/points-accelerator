@@ -23,6 +23,7 @@ function createRuntimeFixture() {
     passiveCooldownSeconds: 120,
     pointsName: "blorgshj",
     pointsSymbol: "🏅",
+    allowGrouplessEarning: true,
   };
   const services = {
     prisma: {
@@ -147,6 +148,13 @@ function createRuntimeFixture() {
         groupId: "group-1",
         group: { id: "group-1", displayName: "Gryffindor", slug: "gryffindor" },
       }),
+      ensureParticipant: vi.fn().mockResolvedValue({
+        id: "participant-1",
+        indexId: "AUTOUSER1",
+        discordUsername: "Alice",
+        groupId: "group-1",
+        group: { id: "group-1", displayName: "Gryffindor", slug: "gryffindor" },
+      }),
     },
     participantCurrencyService: {
       getParticipantBalance: vi.fn().mockResolvedValue(7),
@@ -248,6 +256,60 @@ describe("bot runtime", () => {
         config,
       }),
     );
+  });
+
+  it("rewards group-less members with personal currency when the toggle is on", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.groupService.resolveGroupFromRoleIds.mockRejectedValue(
+      new Error("not mapped to a group"),
+    );
+    services.participantService.ensureParticipant.mockResolvedValue({
+      id: "participant-9",
+      indexId: "AUTOUSER9",
+      discordUsername: "Nomad",
+      groupId: null,
+      group: null,
+    });
+
+    await (runtime as any).handlePassiveMessage({
+      guildId: "guild-test",
+      memberId: "user-9",
+      roleIds: ["role-unmapped"],
+      userId: "user-9",
+      username: "Nomad",
+      messageId: "message-9",
+      content: "hello without a group",
+      channelId: "channel-1",
+    });
+
+    expect(services.participantService.ensureParticipant).toHaveBeenCalledWith(
+      expect.objectContaining({ groupId: null }),
+    );
+    expect(services.economyService.rewardPassiveMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ groupId: null, participantId: "participant-9" }),
+    );
+  });
+
+  it("skips group-less earning when the toggle is off", async () => {
+    const { config, runtime, services } = createRuntimeFixture();
+    config.allowGrouplessEarning = false;
+    services.groupService.resolveGroupFromRoleIds.mockRejectedValue(
+      new Error("not mapped to a group"),
+    );
+
+    await (runtime as any).handlePassiveMessage({
+      guildId: "guild-test",
+      memberId: "user-9",
+      roleIds: ["role-unmapped"],
+      userId: "user-9",
+      username: "Nomad",
+      messageId: "message-9",
+      content: "hello without a group",
+      channelId: "channel-1",
+    });
+
+    expect(services.participantService.ensureParticipant).not.toHaveBeenCalled();
+    expect(services.economyService.rewardPassiveMessage).not.toHaveBeenCalled();
   });
 
   it("orders member role ids by Discord hierarchy before resolving a group", () => {
@@ -2502,7 +2564,7 @@ describe("bot runtime", () => {
       },
     });
 
-    expect(services.participantService.ensureForGroup).toHaveBeenCalledWith({
+    expect(services.participantService.ensureParticipant).toHaveBeenCalledWith({
       guildId: "guild-test",
       discordUserId: "user-1",
       discordUsername: "Alice",

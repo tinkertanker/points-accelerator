@@ -252,7 +252,7 @@ export default function GroupsPanel({
                     <tr key={participant.id}>
                       <td>{participant.indexId}</td>
                       <td>{participant.discordUsername ?? participant.discordUserId}</td>
-                      <td>{participant.group.displayName}</td>
+                      <td>{participant.group?.displayName ?? "No group"}</td>
                       <td>{participant.currencyBalance}</td>
                       <td>
                         <time dateTime={participant.createdAt}>{new Date(participant.createdAt).toLocaleDateString()}</time>

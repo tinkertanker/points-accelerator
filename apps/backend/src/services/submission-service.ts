@@ -116,6 +116,9 @@ export class SubmissionService {
     if (!participant) {
       throw new AppError("Participant not found.", 404);
     }
+    if (!participant.groupId) {
+      throw new AppError("You need to be in a group before you can submit work.", 409);
+    }
 
     try {
       const submission = await this.prisma.submission.create({
@@ -362,12 +365,18 @@ export class SubmissionService {
     if (!participant) {
       throw new AppError("Participant not found.", 404);
     }
+    if (!participant.groupId) {
+      throw new AppError("You need to be in a group before you can submit work.", 409);
+    }
+    // Capture as a non-null local so the narrowing survives into the nested
+    // replacePendingSubmission closure below.
+    const groupId = participant.groupId;
 
     const data = {
       guildId: params.guildId,
       assignmentId: params.assignmentId,
       participantId: params.participantId,
-      groupId: participant.groupId,
+      groupId,
       text,
       imageUrl: params.imageUrl ?? null,
       imageKey: params.imageKey ?? null,
@@ -396,7 +405,7 @@ export class SubmissionService {
         const claim = await tx.submission.updateMany({
           where: { id: pendingSubmission.id, guildId: params.guildId, status: "PENDING" },
           data: {
-            groupId: participant.groupId,
+            groupId,
             text,
             imageUrl: data.imageUrl,
             imageKey: data.imageKey,
@@ -636,6 +645,13 @@ export class SubmissionService {
       }),
     ]);
 
+    // Group-less members are not on any class roster, so assignment completion
+    // tracking only considers participants who belong to a group.
+    const rosteredParticipants = participants.filter(
+      (participant): participant is typeof participant & { group: NonNullable<typeof participant.group> } =>
+        participant.group !== null,
+    );
+
     return assignments.map((assignment) => {
       const submitted = new Set(
         submissions
@@ -643,12 +659,12 @@ export class SubmissionService {
           .map((sub) => sub.participantId),
       );
 
-      const missing = participants.filter((participant) => !submitted.has(participant.id));
+      const missing = rosteredParticipants.filter((participant) => !submitted.has(participant.id));
 
       return {
         assignmentId: assignment.id,
         assignmentTitle: assignment.title,
-        totalParticipants: participants.length,
+        totalParticipants: rosteredParticipants.length,
         submittedCount: submitted.size,
         missingParticipants: missing.map((participant) => ({
           id: participant.id,

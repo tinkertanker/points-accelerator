@@ -42,6 +42,7 @@ const settingsSchema = z.object({
   passiveMinimumCharacters: z.number().int().nonnegative(),
   passiveAllowedChannelIds: z.array(z.string()),
   passiveDeniedChannelIds: z.array(z.string()),
+  allowGrouplessEarning: z.boolean().default(true),
   bettingChannelIds: z.array(z.string()).default([]),
   luckyDrawChannelIds: z.array(z.string()).default([]),
   pointsChannelIds: z.array(z.string()).default([]),
@@ -662,6 +663,7 @@ export function createApp(params: {
     passiveMinimumCharacters: settings.passiveMinimumCharacters,
     passiveAllowedChannelIds: settings.passiveAllowedChannelIds,
     passiveDeniedChannelIds: settings.passiveDeniedChannelIds,
+    allowGrouplessEarning: settings.allowGrouplessEarning,
     bettingChannelIds: settings.bettingChannelIds,
     luckyDrawChannelIds: settings.luckyDrawChannelIds,
     pointsChannelIds: settings.pointsChannelIds,
@@ -1605,6 +1607,9 @@ export function createApp(params: {
       const participant = await services.participantService.findById(guildIdOf(request), payload.participantId);
       if (!participant) {
         throw new AppError("Participant not found.", 404);
+      }
+      if (!participant.groupId) {
+        throw new AppError("This participant is not in a group and cannot make group purchases.", 409);
       }
 
       const group = await services.groupService.findById(guildIdOf(request), participant.groupId);

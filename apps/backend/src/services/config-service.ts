@@ -16,6 +16,7 @@ export type GuildConfigUpdateInput = {
   passiveMinimumCharacters?: number;
   passiveAllowedChannelIds?: string[];
   passiveDeniedChannelIds?: string[];
+  allowGrouplessEarning?: boolean;
   bettingChannelIds?: string[];
   luckyDrawChannelIds?: string[];
   pointsChannelIds?: string[];
@@ -67,6 +68,7 @@ export class ConfigService {
         passiveMinimumCharacters: input.passiveMinimumCharacters,
         passiveAllowedChannelIds: input.passiveAllowedChannelIds,
         passiveDeniedChannelIds: input.passiveDeniedChannelIds,
+        allowGrouplessEarning: input.allowGrouplessEarning,
         bettingChannelIds: input.bettingChannelIds,
         luckyDrawChannelIds: input.luckyDrawChannelIds,
         pointsChannelIds: input.pointsChannelIds,

@@ -105,6 +105,7 @@ model GuildConfig {
   passiveMinimumCharacters     Int                   @default(4)
   passiveAllowedChannelIds     String[]              @default([])
   passiveDeniedChannelIds      String[]              @default([])
+  allowGrouplessEarning        Boolean               @default(true)
   bettingChannelIds            String[]              @default([])
   luckyDrawChannelIds          String[]              @default([])
   pointsChannelIds             String[]              @default([])
@@ -384,11 +385,11 @@ model Participant {
   discordUserId   String
   discordUsername  String?
   indexId         String
-  groupId         String
+  groupId         String?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   guild           GuildConfig  @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
-  group           Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group           Group?       @relation(fields: [groupId], references: [id], onDelete: SetNull)
   submissions     Submission[]
   currencySplits  ParticipantCurrencySplit[]
   requestedShopRedemptions ShopRedemption[]

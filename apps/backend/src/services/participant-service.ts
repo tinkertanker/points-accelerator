@@ -131,12 +131,29 @@ export class ParticipantService {
     discordUsername?: string;
     groupId: string;
   }) {
-    const group = await this.prisma.group.findFirst({
-      where: { id: params.groupId, guildId: params.guildId, active: true },
-    });
+    return this.ensureParticipant(params);
+  }
 
-    if (!group) {
-      throw new AppError("The specified group does not exist or is inactive.", 404);
+  /**
+   * Ensure a participant record exists for a Discord user, with or without a
+   * group. Passing `groupId: null` provisions a group-less participant so they
+   * can start earning personal currency before being mapped to a group. An
+   * existing participant is never downgraded to group-less by a `null` here.
+   */
+  public async ensureParticipant(params: {
+    guildId: string;
+    discordUserId: string;
+    discordUsername?: string;
+    groupId: string | null;
+  }) {
+    if (params.groupId) {
+      const group = await this.prisma.group.findFirst({
+        where: { id: params.groupId, guildId: params.guildId, active: true },
+      });
+
+      if (!group) {
+        throw new AppError("The specified group does not exist or is inactive.", 404);
+      }
     }
 
     const existing = await this.prisma.participant.findUnique({
@@ -150,14 +167,17 @@ export class ParticipantService {
     });
 
     if (existing) {
-      if (existing.groupId === params.groupId && existing.discordUsername === params.discordUsername) {
+      // Keep an existing group when the caller could not resolve one so we never
+      // strip a mapped member back to group-less on a stray message.
+      const nextGroupId = params.groupId ?? existing.groupId;
+      if (existing.groupId === nextGroupId && existing.discordUsername === params.discordUsername) {
         return existing;
       }
 
       return this.prisma.participant.update({
         where: { id: existing.id },
         data: {
-          groupId: params.groupId,
+          groupId: nextGroupId,
           discordUsername: params.discordUsername,
         },
         include: { group: { select: { id: true, displayName: true, slug: true } } },
