@@ -36,6 +36,9 @@ function createRuntimeFixture() {
       resolveGroupFromRoleIds: vi
         .fn()
         .mockResolvedValue({ id: "group-1", displayName: "Gryffindor", roleId: "group-role" }),
+      findGroupFromRoleIds: vi
+        .fn()
+        .mockResolvedValue({ id: "group-1", displayName: "Gryffindor", roleId: "group-role" }),
       resolveGroupByIdentifier: vi
         .fn()
         .mockResolvedValue({ id: "group-1", displayName: "Gryffindor", roleId: "group-role" }),
@@ -260,9 +263,7 @@ describe("bot runtime", () => {
 
   it("rewards group-less members with personal currency when the toggle is on", async () => {
     const { runtime, services } = createRuntimeFixture();
-    services.groupService.resolveGroupFromRoleIds.mockRejectedValue(
-      new Error("not mapped to a group"),
-    );
+    services.groupService.findGroupFromRoleIds.mockResolvedValue(null);
     services.participantService.ensureParticipant.mockResolvedValue({
       id: "participant-9",
       indexId: "AUTOUSER9",
@@ -293,9 +294,7 @@ describe("bot runtime", () => {
   it("skips group-less earning when the toggle is off", async () => {
     const { config, runtime, services } = createRuntimeFixture();
     config.allowGrouplessEarning = false;
-    services.groupService.resolveGroupFromRoleIds.mockRejectedValue(
-      new Error("not mapped to a group"),
-    );
+    services.groupService.findGroupFromRoleIds.mockResolvedValue(null);
 
     await (runtime as any).handlePassiveMessage({
       guildId: "guild-test",
@@ -309,6 +308,26 @@ describe("bot runtime", () => {
     });
 
     expect(services.participantService.ensureParticipant).not.toHaveBeenCalled();
+    expect(services.economyService.rewardPassiveMessage).not.toHaveBeenCalled();
+  });
+
+  it("propagates a real group lookup failure instead of earning as group-less", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.groupService.findGroupFromRoleIds.mockRejectedValue(new Error("db down"));
+
+    await expect(
+      (runtime as any).handlePassiveMessage({
+        guildId: "guild-test",
+        memberId: "user-1",
+        roleIds: ["role-1"],
+        userId: "user-1",
+        username: "Alice",
+        messageId: "message-3",
+        content: "hello world",
+        channelId: "channel-1",
+      }),
+    ).rejects.toThrow("db down");
+
     expect(services.economyService.rewardPassiveMessage).not.toHaveBeenCalled();
   });
 

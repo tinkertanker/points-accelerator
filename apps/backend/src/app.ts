@@ -42,7 +42,7 @@ const settingsSchema = z.object({
   passiveMinimumCharacters: z.number().int().nonnegative(),
   passiveAllowedChannelIds: z.array(z.string()),
   passiveDeniedChannelIds: z.array(z.string()),
-  allowGrouplessEarning: z.boolean().default(true),
+  allowGrouplessEarning: z.boolean().optional(),
   bettingChannelIds: z.array(z.string()).default([]),
   luckyDrawChannelIds: z.array(z.string()).default([]),
   pointsChannelIds: z.array(z.string()).default([]),

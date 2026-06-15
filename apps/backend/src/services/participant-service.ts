@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { AppError } from "../utils/app-error.js";
 import { decimalToNumber } from "../utils/decimal.js";
@@ -156,19 +156,24 @@ export class ParticipantService {
       }
     }
 
-    const existing = await this.prisma.participant.findUnique({
-      where: {
-        guildId_discordUserId: {
-          guildId: params.guildId,
-          discordUserId: params.discordUserId,
+    // Reconcile an existing participant: keep their current group when the caller
+    // could not resolve one, so we never strip a mapped member back to group-less
+    // on a stray message. Returns null when no participant exists yet.
+    const reconcileExisting = async () => {
+      const existing = await this.prisma.participant.findUnique({
+        where: {
+          guildId_discordUserId: {
+            guildId: params.guildId,
+            discordUserId: params.discordUserId,
+          },
         },
-      },
-      include: { group: { select: { id: true, displayName: true, slug: true } } },
-    });
+        include: { group: { select: { id: true, displayName: true, slug: true } } },
+      });
 
-    if (existing) {
-      // Keep an existing group when the caller could not resolve one so we never
-      // strip a mapped member back to group-less on a stray message.
+      if (!existing) {
+        return null;
+      }
+
       const nextGroupId = params.groupId ?? existing.groupId;
       if (existing.groupId === nextGroupId && existing.discordUsername === params.discordUsername) {
         return existing;
@@ -182,18 +187,35 @@ export class ParticipantService {
         },
         include: { group: { select: { id: true, displayName: true, slug: true } } },
       });
+    };
+
+    const existing = await reconcileExisting();
+    if (existing) {
+      return existing;
     }
 
-    return this.prisma.participant.create({
-      data: {
-        guildId: params.guildId,
-        discordUserId: params.discordUserId,
-        discordUsername: params.discordUsername,
-        groupId: params.groupId,
-        indexId: buildAutomaticIndexId(params.discordUserId),
-      },
-      include: { group: { select: { id: true, displayName: true, slug: true } } },
-    });
+    try {
+      return await this.prisma.participant.create({
+        data: {
+          guildId: params.guildId,
+          discordUserId: params.discordUserId,
+          discordUsername: params.discordUsername,
+          groupId: params.groupId,
+          indexId: buildAutomaticIndexId(params.discordUserId),
+        },
+        include: { group: { select: { id: true, displayName: true, slug: true } } },
+      });
+    } catch (error) {
+      // A concurrent first message/command can create the participant between our
+      // findUnique and create; reconcile against the winner instead of throwing.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const raced = await reconcileExisting();
+        if (raced) {
+          return raced;
+        }
+      }
+      throw error;
+    }
   }
 
   public async findRequiredByDiscordUser(guildId: string, discordUserId: string) {

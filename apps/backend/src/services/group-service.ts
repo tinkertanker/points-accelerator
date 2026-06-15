@@ -166,6 +166,20 @@ export class GroupService {
   }
 
   public async resolveGroupFromRoleIds(guildId: string, roleIds: string[]): Promise<ResolvedGroup> {
+    const group = await this.findGroupFromRoleIds(guildId, roleIds);
+    if (!group) {
+      throw new AppError("You are not mapped to an active group.", 403);
+    }
+    return group;
+  }
+
+  /**
+   * Resolve the active group for a member's roles, returning `null` when none of
+   * their roles map to a group. Unlike {@link resolveGroupFromRoleIds} this does
+   * NOT throw for the no-group case, so callers can distinguish "genuinely
+   * group-less" from a real lookup failure (which still propagates).
+   */
+  public async findGroupFromRoleIds(guildId: string, roleIds: string[]): Promise<ResolvedGroup | null> {
     const awardableRoleIds = await this.syncAwardableRoleGroups(guildId);
     const matchingRoleIds = roleIds.filter((roleId) => awardableRoleIds.includes(roleId));
 
@@ -180,7 +194,7 @@ export class GroupService {
     });
 
     if (groups.length === 0) {
-      throw new AppError("You are not mapped to an active group.", 403);
+      return null;
     }
 
     const groupsByRoleId = new Map(groups.map((group) => [group.roleId, group]));

@@ -389,7 +389,7 @@ model Participant {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   guild           GuildConfig  @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
-  group           Group?       @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  group           Group?       @relation(fields: [groupId], references: [id], onDelete: Cascade)
   submissions     Submission[]
   currencySplits  ParticipantCurrencySplit[]
   requestedShopRedemptions ShopRedemption[]

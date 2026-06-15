@@ -487,16 +487,20 @@ export class BotRuntime {
         return;
       }
 
-      await this.handlePassiveMessage({
-        guildId: message.guild.id,
-        memberId: member.id,
-        roleIds: this.getOrderedRoleIds(member),
-        userId: message.author.id,
-        username: message.author.username,
-        messageId: message.id,
-        content: message.content,
-        channelId: message.channelId,
-      });
+      try {
+        await this.handlePassiveMessage({
+          guildId: message.guild.id,
+          memberId: member.id,
+          roleIds: this.getOrderedRoleIds(member),
+          userId: message.author.id,
+          username: message.author.username,
+          messageId: message.id,
+          content: message.content,
+          channelId: message.channelId,
+        });
+      } catch (error) {
+        console.error("passive message handling failed", error);
+      }
     });
 
     this.client.on("messageReactionAdd", async (reaction, user) => {
@@ -2839,9 +2843,7 @@ export class BotRuntime {
     discordUsername?: string;
     roleIds: string[];
   }) {
-    const group = await this.services.groupService
-      .resolveGroupFromRoleIds(params.guildId, params.roleIds)
-      .catch(() => null);
+    const group = await this.services.groupService.findGroupFromRoleIds(params.guildId, params.roleIds);
 
     if (!group) {
       const config = await this.services.configService.getOrCreate(params.guildId);
@@ -2962,27 +2964,25 @@ export class BotRuntime {
 
     // A member without a mapped group can still earn personal currency when the
     // admin toggle is on; group points are simply skipped until they join one.
-    const group = await this.services.groupService
-      .resolveGroupFromRoleIds(params.guildId, params.roleIds)
-      .catch(() => null);
+    // findGroupFromRoleIds returns null only for the genuine no-group case — a
+    // real lookup failure propagates and is logged by the caller rather than
+    // being silently mistaken for group-less.
+    const group = await this.services.groupService.findGroupFromRoleIds(params.guildId, params.roleIds);
 
     if (!group && !config.allowGrouplessEarning) {
       return;
     }
 
-    const participant = await this.services.participantService
-      .ensureParticipant({
-        guildId: params.guildId,
-        discordUserId: params.userId,
-        discordUsername: params.username,
-        groupId: group?.id ?? null,
-      })
-      .catch(() => null);
-    if (!participant) {
-      return;
-    }
+    const participant = await this.services.participantService.ensureParticipant({
+      guildId: params.guildId,
+      discordUserId: params.userId,
+      discordUsername: params.username,
+      groupId: group?.id ?? null,
+    });
 
-    const cooldownKey = `${params.guildId}:${params.memberId}:${group?.id ?? "no-group"}`;
+    // Rate-limit passive earning per member, independent of group, so flipping
+    // group membership cannot mint a fresh cooldown bucket and double-earn.
+    const cooldownKey = `${params.guildId}:${params.memberId}`;
     const now = Date.now();
     const previous = this.passiveCooldowns.get(cooldownKey);
     if (previous && now - previous.seenAt < config.passiveCooldownSeconds * 1000) {
