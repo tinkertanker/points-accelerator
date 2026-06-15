@@ -39,6 +39,7 @@ function createRuntimeFixture() {
       findGroupFromRoleIds: vi
         .fn()
         .mockResolvedValue({ id: "group-1", displayName: "Gryffindor", roleId: "group-role" }),
+      hasGroupRole: vi.fn().mockResolvedValue(false),
       resolveGroupByIdentifier: vi
         .fn()
         .mockResolvedValue({ id: "group-1", displayName: "Gryffindor", roleId: "group-role" }),
@@ -291,6 +292,26 @@ describe("bot runtime", () => {
     expect(services.economyService.rewardPassiveMessage).toHaveBeenCalledWith(
       expect.objectContaining({ groupId: null, participantId: "participant-9" }),
     );
+  });
+
+  it("does not pay a member whose mapped group is non-awardable as group-less", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.groupService.findGroupFromRoleIds.mockResolvedValue(null);
+    services.groupService.hasGroupRole.mockResolvedValue(true);
+
+    await (runtime as any).handlePassiveMessage({
+      guildId: "guild-test",
+      memberId: "user-9",
+      roleIds: ["role-nonawardable"],
+      userId: "user-9",
+      username: "Blocked",
+      messageId: "message-block",
+      content: "hello without awards",
+      channelId: "channel-1",
+    });
+
+    expect(services.participantService.ensureParticipant).not.toHaveBeenCalled();
+    expect(services.economyService.rewardPassiveMessage).not.toHaveBeenCalled();
   });
 
   it("skips group-less earning when the toggle is off", async () => {

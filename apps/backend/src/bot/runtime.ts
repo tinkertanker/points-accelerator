@@ -2845,11 +2845,8 @@ export class BotRuntime {
   }) {
     const group = await this.services.groupService.findGroupFromRoleIds(params.guildId, params.roleIds);
 
-    if (!group) {
-      const config = await this.services.configService.getOrCreate(params.guildId);
-      if (!config.allowGrouplessEarning) {
-        throw new AppError("You are not mapped to an active group.", 403);
-      }
+    if (!group && !(await this.isGrouplessEarner(params.guildId, params.roleIds))) {
+      throw new AppError("You are not mapped to an active group.", 403);
     }
 
     const participant = await this.services.participantService.ensureParticipant({
@@ -2863,6 +2860,20 @@ export class BotRuntime {
       group,
       participant,
     };
+  }
+
+  /**
+   * A member earns as group-less only when the toggle is on AND they are not
+   * mapped to any group role. A member whose mapped group is non-awardable or
+   * inactive is intentionally blocked, not treated as group-less, so disabling a
+   * group's awards still stops its members from earning.
+   */
+  private async isGrouplessEarner(guildId: string, roleIds: string[], config?: GuildConfig) {
+    const resolvedConfig = config ?? (await this.services.configService.getOrCreate(guildId));
+    if (!resolvedConfig.allowGrouplessEarning) {
+      return false;
+    }
+    return !(await this.services.groupService.hasGroupRole(guildId, roleIds));
   }
 
   private async getEligibleGroupMembers(params: {
@@ -2969,7 +2980,7 @@ export class BotRuntime {
     // being silently mistaken for group-less.
     const group = await this.services.groupService.findGroupFromRoleIds(params.guildId, params.roleIds);
 
-    if (!group && !config.allowGrouplessEarning) {
+    if (!group && !(await this.isGrouplessEarner(params.guildId, params.roleIds, config))) {
       return;
     }
 

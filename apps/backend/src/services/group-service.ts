@@ -208,6 +208,30 @@ export class GroupService {
     return groups[0];
   }
 
+  /**
+   * Whether any of the given roles is a group role at all, regardless of whether
+   * its group is currently awardable or active. Lets callers tell a genuinely
+   * unmapped member (no group role) apart from one whose mapped group is
+   * non-awardable/inactive, so disabling a group's awards still stops its
+   * members from earning.
+   */
+  public async hasGroupRole(guildId: string, roleIds: string[]): Promise<boolean> {
+    if (roleIds.length === 0) {
+      return false;
+    }
+
+    const match = await this.prisma.discordRoleCapability.findFirst({
+      where: {
+        guildId,
+        isGroupRole: true,
+        roleId: { in: roleIds },
+      },
+      select: { id: true },
+    });
+
+    return match !== null;
+  }
+
   public async findById(guildId: string, groupId: string) {
     return this.prisma.group.findFirst({
       where: {
