@@ -496,7 +496,8 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("tab", { name: /store/i })).toBeInTheDocument();
-    fireEvent.change(screen.getAllByLabelText("Item name")[0]!, { target: { value: "Sticker pack" } });
+    const itemNameInputs = await screen.findAllByLabelText("Item name");
+    fireEvent.change(itemNameInputs[0]!, { target: { value: "Sticker pack" } });
     fireEvent.click(screen.getByRole("button", { name: /save store/i }));
 
     expect(screen.getByText("Add a description for Sticker pack before saving.")).toBeInTheDocument();

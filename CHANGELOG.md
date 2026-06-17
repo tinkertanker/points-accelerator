@@ -8,6 +8,11 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.11.1] - 2026-06-17
+
+### Fixed
+- `/kahoot` now awards ranked winners personal wallet currency instead of shared group points.
+
 ## [0.11.0] - 2026-06-15
 
 ### Added

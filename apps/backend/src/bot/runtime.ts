@@ -3447,9 +3447,17 @@ export class BotRuntime {
       const starting = interaction.options.getInteger("starting", true);
       const quantum = interaction.options.getInteger("quantum", true);
       const winnerUsers = [interaction.options.getUser("winner1", true)];
+      let sawWinnerGap = false;
       for (let index = 2; index <= KAHOOT_WINNER_COUNT_MAX; index++) {
         const user = interaction.options.getUser(`winner${index}`);
-        if (user) winnerUsers.push(user);
+        if (!user) {
+          sawWinnerGap = true;
+          continue;
+        }
+        if (sawWinnerGap) {
+          throw new AppError("Kahoot winners must be entered without gaps.", 400);
+        }
+        winnerUsers.push(user);
       }
 
       const duplicateUserIds = winnerUsers
@@ -3462,13 +3470,27 @@ export class BotRuntime {
       const payouts = winnerUsers.map((user, index) => ({
         user,
         rank: index + 1,
-        points: starting - quantum * index,
+        currency: starting - quantum * index,
       }));
-      const nonPositivePayout = payouts.find((payout) => payout.points <= 0);
+      const nonPositivePayout = payouts.find((payout) => payout.currency <= 0);
       if (nonPositivePayout) {
         throw new AppError(
-          `Winner ${nonPositivePayout.rank} would receive ${nonPositivePayout.points} points. Reduce the quantum or raise the starting amount.`,
+          `Winner ${nonPositivePayout.rank} would receive ${nonPositivePayout.currency} currency. Reduce the quantum or raise the starting amount.`,
           400,
+        );
+      }
+
+      const capabilities = await this.services.roleCapabilityService.listForRoleIds(guildId, roleIds);
+      const resolvedCapabilities = resolveCapabilities(capabilities);
+      if (!resolvedCapabilities.canAward) {
+        throw new AppError("This role cannot award currency.", 403);
+      }
+
+      const largestPayout = Math.max(...payouts.map((payout) => payout.currency));
+      if (Number.isFinite(resolvedCapabilities.maxAward) && largestPayout > resolvedCapabilities.maxAward) {
+        throw new AppError(
+          `Largest Kahoot payout (${largestPayout}) exceeds your role's maximum award of ${resolvedCapabilities.maxAward}. Reduce the starting amount or quantum.`,
+          403,
         );
       }
 
@@ -3478,7 +3500,7 @@ export class BotRuntime {
           if (!guildMember) {
             throw new AppError(`Winner ${payout.rank} is not in this server.`, 404);
           }
-          const { group } = await this.resolveActiveParticipant({
+          const { participant } = await this.resolveActiveParticipant({
             guildId,
             discordUserId: payout.user.id,
             discordUsername: payout.user.username,
@@ -3486,38 +3508,23 @@ export class BotRuntime {
           });
           return {
             ...payout,
-            group,
+            participant,
             memberLabel: guildMember.displayName || payout.user.globalName || payout.user.username,
           };
         }),
       );
 
-      const capabilities = await this.services.roleCapabilityService.listForRoleIds(guildId, roleIds);
-      const resolvedCapabilities = resolveCapabilities(capabilities);
-      if (!resolvedCapabilities.canAward) {
-        throw new AppError("This role cannot award groups.", 403);
-      }
-
-      const totalPayout = resolvedWinnerAwards.reduce((sum, award) => sum + award.points, 0);
-      if (Number.isFinite(resolvedCapabilities.maxAward) && totalPayout > resolvedCapabilities.maxAward) {
-        throw new AppError(
-          `Total Kahoot payout (${totalPayout}) exceeds your role's maximum award of ${resolvedCapabilities.maxAward}. Reduce the starting amount, quantum, or winner count.`,
-          403,
-        );
-      }
-
       await this.services.prisma.$transaction(async (tx) => {
         for (const award of resolvedWinnerAwards) {
-          await this.services.economyService.awardGroups({
+          await this.services.participantCurrencyService.awardParticipants({
             guildId,
             actor: {
               userId: interaction.user.id,
               username: interaction.user.username,
               roleIds,
             },
-            targetGroupIds: [award.group.id],
-            pointsDelta: award.points,
-            currencyDelta: 0,
+            targetParticipantIds: [award.participant.id],
+            currencyDelta: award.currency,
             description: `Kahoot #${award.rank}: ${award.memberLabel}`,
             executor: tx,
           });
@@ -3527,10 +3534,13 @@ export class BotRuntime {
       const summary = resolvedWinnerAwards
         .map(
           (award) =>
-            `#${award.rank} ${this.formatUserReference(award.user.id, award.memberLabel)} earned ${this.formatPointsAmount(award.points, config)} for ${this.formatGroupReference(award.group)}`,
+            `#${award.rank} ${this.formatUserReference(award.user.id, award.memberLabel)} earned ${this.formatCurrencyAmount(award.currency, config)}`,
         )
         .join("\n");
-      await interaction.reply(`Kahoot awarded:\n${summary}`);
+      await interaction.reply({
+        content: `Kahoot awarded:\n${summary}`,
+        allowedMentions: { users: resolvedWinnerAwards.map((award) => award.user.id) },
+      });
     } catch (error) {
       rollbackCooldown?.();
       throw error;
@@ -5524,18 +5534,18 @@ export class BotRuntime {
         ),
       new SlashCommandBuilder()
         .setName("kahoot")
-        .setDescription("Award staggered group points to ranked Kahoot winners.")
+        .setDescription("Award staggered wallet currency to ranked Kahoot winners.")
         .addIntegerOption((option) =>
           option
             .setName("starting")
-            .setDescription("Points awarded to winner1.")
+            .setDescription("Currency awarded to winner1.")
             .setRequired(true)
             .setMinValue(1),
         )
         .addIntegerOption((option) =>
           option
             .setName("quantum")
-            .setDescription("Points subtracted for each lower rank.")
+            .setDescription("Currency subtracted for each lower rank.")
             .setRequired(true)
             .setMinValue(1),
         )
