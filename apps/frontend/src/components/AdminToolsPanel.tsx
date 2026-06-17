@@ -799,7 +799,7 @@ function defaultSanctionDraft(participantId: string): SanctionDraft {
 }
 
 function describeParticipant(p: Participant): string {
-  return `${p.discordUsername ?? p.discordUserId} · ${p.group.displayName}`;
+  return `${p.discordUsername ?? p.discordUserId} · ${p.group?.displayName ?? "No group"}`;
 }
 
 function isSanctionActive(s: ParticipantSanction, now = Date.now()): boolean {

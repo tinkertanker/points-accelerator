@@ -712,6 +712,11 @@ export class ShopService {
         throw new AppError("Participant not found.", 404);
       }
 
+      if (!participant.groupId) {
+        throw new AppError("You need to be in a group before you can buy group items.", 409);
+      }
+      const participantGroupId = participant.groupId;
+
       if (!item.enabled) {
         throw new AppError("This item is disabled.", 409);
       }
@@ -731,7 +736,7 @@ export class ShopService {
         data: {
           guildId: params.guildId,
           shopItemId: item.id,
-          groupId: participant.groupId,
+          groupId: participantGroupId,
           requestedByParticipantId: participant.id,
           requestedByUserId: params.requestedByUserId,
           requestedByUsername: params.requestedByUsername,

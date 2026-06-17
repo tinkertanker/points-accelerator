@@ -12,6 +12,7 @@ export type Settings = {
   passiveMinimumCharacters: number;
   passiveAllowedChannelIds: string[];
   passiveDeniedChannelIds: string[];
+  allowGrouplessEarning: boolean;
   bettingChannelIds: string[];
   luckyDrawChannelIds: string[];
   pointsChannelIds: string[];
@@ -515,13 +516,13 @@ export type Participant = {
   discordUserId: string;
   discordUsername: string | null;
   indexId: string;
-  groupId: string;
+  groupId: string | null;
   currencyBalance: number;
   group: {
     id: string;
     displayName: string;
     slug: string;
-  };
+  } | null;
   createdAt: string;
 };
 

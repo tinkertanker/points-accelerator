@@ -38,6 +38,7 @@ The bot also supports participant-wallet betting: students can place double-or-n
 ## Feature focus
 
 - Group-based passive message points with participant wallet rewards
+- Optional group-less earning so members without a group still build a personal wallet from messages
 - Configurable award/deduct cooldowns in the role matrix with admin bypass
 - Manual awards and deductions with per-role caps
 - Discord ledger command with paging for recent transactions

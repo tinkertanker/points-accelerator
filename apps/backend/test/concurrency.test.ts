@@ -183,4 +183,41 @@ describe("economy concurrency", () => {
     expect(balances[group.id]?.pointsBalance).toBe(3);
     expect(redemptionCount).toBe(1);
   });
+
+  it("does not double-pay passive rewards for the same message under concurrency", async () => {
+    const group = await createGroup("Alpha", "role-alpha");
+    const participant = await createParticipant(group.id, "user-1", "S001");
+
+    const reward = () =>
+      ctx.services.economyService.rewardPassiveMessage({
+        guildId: ctx.env.GUILD_ID,
+        groupId: group.id,
+        participantId: participant.id,
+        userId: "user-1",
+        username: "Alice",
+        messageId: "dup-message-1",
+        content: "hello world this is long enough",
+        channelId: "channel-1",
+      });
+
+    const results = await Promise.all([reward(), reward()]);
+
+    // Exactly one of the racing calls pays out; the other is deduped (either by
+    // the in-process pre-read or the partial unique index via a caught P2002).
+    expect(results.filter((entry) => entry !== null)).toHaveLength(1);
+
+    const ledgerCount = await ctx.prisma.ledgerEntry.count({
+      where: { guildId: ctx.env.GUILD_ID, type: "MESSAGE_REWARD", externalRef: "dup-message-1" },
+    });
+    const currencyCount = await ctx.prisma.participantCurrencyEntry.count({
+      where: { guildId: ctx.env.GUILD_ID, type: "MESSAGE_REWARD", externalRef: "dup-message-1" },
+    });
+    expect(ledgerCount).toBe(1);
+    expect(currencyCount).toBe(1);
+
+    const walletBalance = await ctx.services.participantCurrencyService.getParticipantBalance(participant.id);
+    expect(walletBalance).toBe(1);
+    const groupBalance = await ctx.services.groupService.getBalanceMap([group.id]);
+    expect(groupBalance[group.id]?.pointsBalance).toBe(1);
+  });
 });

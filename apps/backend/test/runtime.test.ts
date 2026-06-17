@@ -23,6 +23,7 @@ function createRuntimeFixture() {
     passiveCooldownSeconds: 120,
     pointsName: "blorgshj",
     pointsSymbol: "🏅",
+    allowGrouplessEarning: true,
   };
   const services = {
     prisma: {
@@ -35,6 +36,10 @@ function createRuntimeFixture() {
       resolveGroupFromRoleIds: vi
         .fn()
         .mockResolvedValue({ id: "group-1", displayName: "Gryffindor", roleId: "group-role" }),
+      findGroupFromRoleIds: vi
+        .fn()
+        .mockResolvedValue({ id: "group-1", displayName: "Gryffindor", roleId: "group-role" }),
+      hasGroupRole: vi.fn().mockResolvedValue(false),
       resolveGroupByIdentifier: vi
         .fn()
         .mockResolvedValue({ id: "group-1", displayName: "Gryffindor", roleId: "group-role" }),
@@ -147,6 +152,13 @@ function createRuntimeFixture() {
         groupId: "group-1",
         group: { id: "group-1", displayName: "Gryffindor", slug: "gryffindor" },
       }),
+      ensureParticipant: vi.fn().mockResolvedValue({
+        id: "participant-1",
+        indexId: "AUTOUSER1",
+        discordUsername: "Alice",
+        groupId: "group-1",
+        group: { id: "group-1", displayName: "Gryffindor", slug: "gryffindor" },
+      }),
     },
     participantCurrencyService: {
       getParticipantBalance: vi.fn().mockResolvedValue(7),
@@ -224,6 +236,7 @@ describe("bot runtime", () => {
     nowSpy.mockReturnValueOnce(1_000).mockReturnValueOnce(61_000);
 
     await (runtime as any).handlePassiveMessage({
+      guildId: "guild-test",
       memberId: "user-1",
       roleIds: ["role-1"],
       userId: "user-1",
@@ -233,6 +246,7 @@ describe("bot runtime", () => {
       channelId: "channel-1",
     });
     await (runtime as any).handlePassiveMessage({
+      guildId: "guild-test",
       memberId: "user-1",
       roleIds: ["role-1"],
       userId: "user-1",
@@ -248,6 +262,96 @@ describe("bot runtime", () => {
         config,
       }),
     );
+  });
+
+  it("rewards group-less members with personal currency when the toggle is on", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.groupService.findGroupFromRoleIds.mockResolvedValue(null);
+    services.participantService.ensureParticipant.mockResolvedValue({
+      id: "participant-9",
+      indexId: "AUTOUSER9",
+      discordUsername: "Nomad",
+      groupId: null,
+      group: null,
+    });
+
+    await (runtime as any).handlePassiveMessage({
+      guildId: "guild-test",
+      memberId: "user-9",
+      roleIds: ["role-unmapped"],
+      userId: "user-9",
+      username: "Nomad",
+      messageId: "message-9",
+      content: "hello without a group",
+      channelId: "channel-1",
+    });
+
+    expect(services.participantService.ensureParticipant).toHaveBeenCalledWith(
+      expect.objectContaining({ groupId: null }),
+    );
+    expect(services.economyService.rewardPassiveMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ groupId: null, participantId: "participant-9" }),
+    );
+  });
+
+  it("does not pay a member whose mapped group is non-awardable as group-less", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.groupService.findGroupFromRoleIds.mockResolvedValue(null);
+    services.groupService.hasGroupRole.mockResolvedValue(true);
+
+    await (runtime as any).handlePassiveMessage({
+      guildId: "guild-test",
+      memberId: "user-9",
+      roleIds: ["role-nonawardable"],
+      userId: "user-9",
+      username: "Blocked",
+      messageId: "message-block",
+      content: "hello without awards",
+      channelId: "channel-1",
+    });
+
+    expect(services.participantService.ensureParticipant).not.toHaveBeenCalled();
+    expect(services.economyService.rewardPassiveMessage).not.toHaveBeenCalled();
+  });
+
+  it("skips group-less earning when the toggle is off", async () => {
+    const { config, runtime, services } = createRuntimeFixture();
+    config.allowGrouplessEarning = false;
+    services.groupService.findGroupFromRoleIds.mockResolvedValue(null);
+
+    await (runtime as any).handlePassiveMessage({
+      guildId: "guild-test",
+      memberId: "user-9",
+      roleIds: ["role-unmapped"],
+      userId: "user-9",
+      username: "Nomad",
+      messageId: "message-9",
+      content: "hello without a group",
+      channelId: "channel-1",
+    });
+
+    expect(services.participantService.ensureParticipant).not.toHaveBeenCalled();
+    expect(services.economyService.rewardPassiveMessage).not.toHaveBeenCalled();
+  });
+
+  it("propagates a real group lookup failure instead of earning as group-less", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.groupService.findGroupFromRoleIds.mockRejectedValue(new Error("db down"));
+
+    await expect(
+      (runtime as any).handlePassiveMessage({
+        guildId: "guild-test",
+        memberId: "user-1",
+        roleIds: ["role-1"],
+        userId: "user-1",
+        username: "Alice",
+        messageId: "message-3",
+        content: "hello world",
+        channelId: "channel-1",
+      }),
+    ).rejects.toThrow("db down");
+
+    expect(services.economyService.rewardPassiveMessage).not.toHaveBeenCalled();
   });
 
   it("orders member role ids by Discord hierarchy before resolving a group", () => {
@@ -799,6 +903,30 @@ describe("bot runtime", () => {
     });
 
     expect(reply).toHaveBeenCalledWith("<@user-1> transferred 5 bananas 💲 to <@student-2>.");
+  });
+
+  it("rejects /transfer to a bot recipient before provisioning a wallet", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const reply = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      (runtime as any).handleCommand({
+        guildId: "guild-test",
+        commandName: "transfer",
+        guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
+        options: {
+          getNumber: vi.fn((name: string) => (name === "amount" ? 5 : null)),
+          getUser: vi.fn((name: string) =>
+            name === "member" ? { id: "bot-1", username: "helper-bot", bot: true } : null,
+          ),
+        },
+        reply,
+        user: { id: "user-1", username: "alice-user" },
+      }),
+    ).rejects.toThrow("You can't transfer currency to a bot.");
+
+    expect(services.participantService.ensureParticipant).not.toHaveBeenCalled();
+    expect(services.participantCurrencyService.transferCurrency).not.toHaveBeenCalled();
   });
 
   it("mentions the student and group in /donate replies", async () => {
@@ -2502,7 +2630,7 @@ describe("bot runtime", () => {
       },
     });
 
-    expect(services.participantService.ensureForGroup).toHaveBeenCalledWith({
+    expect(services.participantService.ensureParticipant).toHaveBeenCalledWith({
       guildId: "guild-test",
       discordUserId: "user-1",
       discordUsername: "Alice",

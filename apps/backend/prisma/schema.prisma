@@ -105,6 +105,7 @@ model GuildConfig {
   passiveMinimumCharacters     Int                   @default(4)
   passiveAllowedChannelIds     String[]              @default([])
   passiveDeniedChannelIds      String[]              @default([])
+  allowGrouplessEarning        Boolean               @default(true)
   bettingChannelIds            String[]              @default([])
   luckyDrawChannelIds          String[]              @default([])
   pointsChannelIds             String[]              @default([])
@@ -265,6 +266,11 @@ model LedgerEntry {
 
   @@index([guildId, createdAt(sort: Desc)])
   @@index([guildId, externalRef])
+  // Also maintained via raw SQL: a partial UNIQUE index
+  // "LedgerEntry_message_reward_dedupe_key" on (guildId, externalRef) WHERE
+  // type = 'MESSAGE_REWARD'. Prisma cannot model partial indexes; see migration
+  // 20260615130000_passive_reward_dedupe. Do not "fix" the resulting drift by
+  // dropping it.
 }
 
 model LedgerSplit {
@@ -384,11 +390,11 @@ model Participant {
   discordUserId   String
   discordUsername  String?
   indexId         String
-  groupId         String
+  groupId         String?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   guild           GuildConfig  @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
-  group           Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group           Group?       @relation(fields: [groupId], references: [id], onDelete: Cascade)
   submissions     Submission[]
   currencySplits  ParticipantCurrencySplit[]
   requestedShopRedemptions ShopRedemption[]
@@ -418,6 +424,11 @@ model ParticipantCurrencyEntry {
 
   @@index([guildId, createdAt(sort: Desc)])
   @@index([guildId, externalRef])
+  // Also maintained via raw SQL: a partial UNIQUE index
+  // "ParticipantCurrencyEntry_message_reward_dedupe_key" on (guildId,
+  // externalRef) WHERE type = 'MESSAGE_REWARD'. Prisma cannot model partial
+  // indexes; see migration 20260615130000_passive_reward_dedupe. Do not "fix"
+  // the resulting drift by dropping it.
 }
 
 model ParticipantCurrencySplit {

@@ -8,6 +8,11 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.11.0] - 2026-06-15
+
+### Added
+- Members who are not mapped to a group can now start earning personal wallet currency from messages right away. Group points still require a group, and admins can turn this off with the new "Let members without a group earn" setting (on by default). Group-less members can also check `/balance`, send `/transfer`, and place `/bet` from their wallet.
+
 ## [0.10.4] - 2026-06-01
 
 ### Added

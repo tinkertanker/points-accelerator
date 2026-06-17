@@ -355,6 +355,18 @@ export default function SettingsPanel({
                   />
                 </label>
               </div>
+              <label className="settings-field settings-field--toggle span-full">
+                <input
+                  type="checkbox"
+                  checked={settingsDraft.allowGrouplessEarning}
+                  onChange={(event) =>
+                    onSettingsChange({ ...settingsDraft, allowGrouplessEarning: event.target.checked })
+                  }
+                />
+                <span>
+                  Let members without a group earn personal {settingsDraft.currencyName} from messages
+                </span>
+              </label>
             </fieldset>
             <fieldset className="settings-section span-full">
               <legend>Betting</legend>

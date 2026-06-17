@@ -487,16 +487,20 @@ export class BotRuntime {
         return;
       }
 
-      await this.handlePassiveMessage({
-        guildId: message.guild.id,
-        memberId: member.id,
-        roleIds: this.getOrderedRoleIds(member),
-        userId: message.author.id,
-        username: message.author.username,
-        messageId: message.id,
-        content: message.content,
-        channelId: message.channelId,
-      });
+      try {
+        await this.handlePassiveMessage({
+          guildId: message.guild.id,
+          memberId: member.id,
+          roleIds: this.getOrderedRoleIds(member),
+          userId: message.author.id,
+          username: message.author.username,
+          messageId: message.id,
+          content: message.content,
+          channelId: message.channelId,
+        });
+      } catch (error) {
+        console.error("passive message handling failed", error);
+      }
     });
 
     this.client.on("messageReactionAdd", async (reaction, user) => {
@@ -2446,7 +2450,10 @@ export class BotRuntime {
     return discordUserId ? `<@${discordUserId}>` : fallbackLabel;
   }
 
-  private formatGroupReference(group: { roleId?: string | null; displayName: string }) {
+  private formatGroupReference(group: { roleId?: string | null; displayName: string } | null | undefined) {
+    if (!group) {
+      return "No group";
+    }
     return group.roleId ? `<@&${group.roleId}>` : group.displayName;
   }
 
@@ -2825,6 +2832,50 @@ export class BotRuntime {
     };
   }
 
+  /**
+   * Resolve a participant for wallet-only commands. Members who are not mapped
+   * to a group can still use their personal wallet when group-less earning is
+   * enabled; otherwise this falls back to the strict group-required behaviour.
+   */
+  private async resolveWalletParticipant(params: {
+    guildId: string;
+    discordUserId: string;
+    discordUsername?: string;
+    roleIds: string[];
+  }) {
+    const group = await this.services.groupService.findGroupFromRoleIds(params.guildId, params.roleIds);
+
+    if (!group && !(await this.isGrouplessEarner(params.guildId, params.roleIds))) {
+      throw new AppError("You are not mapped to an active group.", 403);
+    }
+
+    const participant = await this.services.participantService.ensureParticipant({
+      guildId: params.guildId,
+      discordUserId: params.discordUserId,
+      discordUsername: params.discordUsername,
+      groupId: group?.id ?? null,
+    });
+
+    return {
+      group,
+      participant,
+    };
+  }
+
+  /**
+   * A member earns as group-less only when the toggle is on AND they are not
+   * mapped to any group role. A member whose mapped group is non-awardable or
+   * inactive is intentionally blocked, not treated as group-less, so disabling a
+   * group's awards still stops its members from earning.
+   */
+  private async isGrouplessEarner(guildId: string, roleIds: string[], config?: GuildConfig) {
+    const resolvedConfig = config ?? (await this.services.configService.getOrCreate(guildId));
+    if (!resolvedConfig.allowGrouplessEarning) {
+      return false;
+    }
+    return !(await this.services.groupService.hasGroupRole(guildId, roleIds));
+  }
+
   private async getEligibleGroupMembers(params: {
     guildId?: string;
     groupId: string;
@@ -2920,33 +2971,44 @@ export class BotRuntime {
     content: string;
     channelId: string;
   }) {
-    const resolved = await this.resolveActiveParticipant({
-      guildId: params.guildId,
-      discordUserId: params.userId,
-      discordUsername: params.username,
-      roleIds: params.roleIds,
-    }).catch(() => null);
-    if (!resolved) {
+    const config = await this.services.configService.getOrCreate(params.guildId);
+
+    // A member without a mapped group can still earn personal currency when the
+    // admin toggle is on; group points are simply skipped until they join one.
+    // findGroupFromRoleIds returns null only for the genuine no-group case — a
+    // real lookup failure propagates and is logged by the caller rather than
+    // being silently mistaken for group-less.
+    const group = await this.services.groupService.findGroupFromRoleIds(params.guildId, params.roleIds);
+
+    if (!group && !(await this.isGrouplessEarner(params.guildId, params.roleIds, config))) {
       return;
     }
 
-    const config = await this.services.configService.getOrCreate(params.guildId);
-    const cooldownKey = `${params.guildId}:${params.memberId}:${resolved.group.id}`;
+    const participant = await this.services.participantService.ensureParticipant({
+      guildId: params.guildId,
+      discordUserId: params.userId,
+      discordUsername: params.username,
+      groupId: group?.id ?? null,
+    });
+
+    // Rate-limit passive earning per member, independent of group, so flipping
+    // group membership cannot mint a fresh cooldown bucket and double-earn.
+    const cooldownKey = `${params.guildId}:${params.memberId}`;
     const now = Date.now();
     const previous = this.passiveCooldowns.get(cooldownKey);
     if (previous && now - previous.seenAt < config.passiveCooldownSeconds * 1000) {
       return;
     }
 
-    const sanctioned = await this.services.sanctionService.getActiveFlags(resolved.participant.id);
+    const sanctioned = await this.services.sanctionService.getActiveFlags(participant.id);
     if (sanctioned.has("CANNOT_EARN_PASSIVE") || sanctioned.has("CANNOT_RECEIVE_REWARDS")) {
       return;
     }
 
     const entry = await this.services.economyService.rewardPassiveMessage({
       guildId: params.guildId,
-      groupId: resolved.group.id,
-      participantId: resolved.participant.id,
+      groupId: group?.id ?? null,
+      participantId: participant.id,
       userId: params.userId,
       username: params.username,
       messageId: params.messageId,
@@ -3756,11 +3818,20 @@ export class BotRuntime {
     for (const winner of result.winners) {
       try {
         const guildMember = guild ? await guild.members.fetch(winner.userId).catch(() => null) : null;
-        const { participant } = await this.resolveActiveParticipant({
+        // Only pay winners who are still in the server. Without this, a winner
+        // who left before settlement would resolve to an empty role list and,
+        // with group-less earning on, be provisioned and paid anyway.
+        if (!guildMember) {
+          skippedWinnerUserIds.push(winner.userId);
+          continue;
+        }
+        // Prizes are wallet currency, so a winner only needs a participant, not a
+        // group — resolveWalletParticipant lets group-less entrants collect.
+        const { participant } = await this.resolveWalletParticipant({
           guildId,
           discordUserId: winner.userId,
-          discordUsername: winner.username ?? guildMember?.user?.username,
-          roleIds: this.getOrderedRoleIds(guildMember ?? null),
+          discordUsername: winner.username ?? guildMember.user?.username,
+          roleIds: this.getOrderedRoleIds(guildMember),
         });
         const sanctioned = await this.services.sanctionService.getActiveFlags(participant.id);
         if (sanctioned.has("CANNOT_RECEIVE_REWARDS")) {
@@ -3884,7 +3955,7 @@ export class BotRuntime {
 
     switch (interaction.commandName) {
       case "balance": {
-        const { group, participant } = await this.resolveActiveParticipant({
+        const { group, participant } = await this.resolveWalletParticipant({
           guildId,
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
@@ -3892,13 +3963,15 @@ export class BotRuntime {
         });
         const [config, balance, walletBalance, groupLeaderboard, currencyLeaderboard] = await Promise.all([
           this.services.configService.getOrCreate(guildId),
-          this.services.economyService.getGroupBalance(group.id),
+          group
+            ? this.services.economyService.getGroupBalance(group.id)
+            : Promise.resolve({ pointsBalance: 0, currencyBalance: 0 }),
           this.services.participantCurrencyService.getParticipantBalance(participant.id),
           this.services.economyService.getLeaderboard(guildId),
           this.services.participantService.getCurrencyLeaderboard(guildId),
         ]);
 
-        const groupRankIndex = groupLeaderboard.findIndex((entry) => entry.id === group.id);
+        const groupRankIndex = group ? groupLeaderboard.findIndex((entry) => entry.id === group.id) : -1;
         const walletRankIndex = currencyLeaderboard.findIndex((entry) => entry.id === participant.id);
         const formatRankOf = (index: number, total: number) =>
           index >= 0
@@ -3918,16 +3991,20 @@ export class BotRuntime {
           })
           .setTitle("Your Balance")
           .setDescription(
-            `Snapshot of your shared ${config.pointsName} and personal ${config.currencyName}.`,
+            group
+              ? `Snapshot of your shared ${config.pointsName} and personal ${config.currencyName}.`
+              : `Snapshot of your personal ${config.currencyName}. Join a group to start earning shared ${config.pointsName}.`,
           )
           .addFields(
             {
               name: `Group ${config.pointsName}`,
-              value: [
-                `**${group.displayName}**`,
-                this.formatPointsAmount(balance.pointsBalance, config),
-                `Rank ${formatRankOf(groupRankIndex, groupLeaderboard.length)}`,
-              ].join("\n"),
+              value: group
+                ? [
+                    `**${group.displayName}**`,
+                    this.formatPointsAmount(balance.pointsBalance, config),
+                    `Rank ${formatRankOf(groupRankIndex, groupLeaderboard.length)}`,
+                  ].join("\n")
+                : "_No group yet_",
               inline: true,
             },
             {
@@ -4029,10 +4106,13 @@ export class BotRuntime {
       }
       case "transfer": {
         const targetUser = interaction.options.getUser("member", true);
+        if (targetUser.bot) {
+          throw new AppError("You can't transfer currency to a bot.", 400);
+        }
         const amount = interaction.options.getNumber("amount", true);
         const config = await this.services.configService.getOrCreate(guildId);
         const sourceLabel = this.formatUserReference(interaction.user.id, member?.displayName ?? interaction.user.username);
-        const { participant: sourceParticipant } = await this.resolveActiveParticipant({
+        const { participant: sourceParticipant } = await this.resolveWalletParticipant({
           guildId,
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
@@ -4059,7 +4139,7 @@ export class BotRuntime {
           targetUser.id,
           targetMember.displayName || targetUser.globalName || targetUser.username,
         );
-        const { participant: targetParticipant } = await this.resolveActiveParticipant({
+        const { participant: targetParticipant } = await this.resolveWalletParticipant({
           guildId,
           discordUserId: targetUser.id,
           discordUsername: targetUser.username,
@@ -4879,7 +4959,7 @@ export class BotRuntime {
           return;
         }
 
-        const { participant } = await this.resolveActiveParticipant({
+        const { participant } = await this.resolveWalletParticipant({
           guildId,
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,
@@ -4917,7 +4997,7 @@ export class BotRuntime {
       }
       case "betstats": {
         const config = await this.services.configService.getOrCreate(guildId);
-        const { participant: invokerParticipant } = await this.resolveActiveParticipant({
+        const { participant: invokerParticipant } = await this.resolveWalletParticipant({
           guildId,
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.username,

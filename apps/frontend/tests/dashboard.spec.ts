@@ -15,6 +15,7 @@ const bootstrapPayload = {
     passiveMinimumCharacters: 4,
     passiveAllowedChannelIds: [],
     passiveDeniedChannelIds: [],
+    allowGrouplessEarning: true,
     bettingChannelIds: [],
     luckyDrawChannelIds: [],
     pointsChannelIds: [],
