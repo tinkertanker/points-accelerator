@@ -3189,19 +3189,29 @@ describe("bot runtime", () => {
           actionCooldownSeconds: 0,
         },
       ]);
-      services.groupService.resolveGroupFromRoleIds.mockImplementation(async (_guildId: string, roleIds: string[]) => {
+      services.groupService.findGroupFromRoleIds.mockImplementation(async (_guildId: string, roleIds: string[]) => {
         if (roleIds.includes("blue-role")) {
           return { id: "group-blue", displayName: "Blue", roleId: "blue-role" };
         }
         if (roleIds.includes("red-role")) {
           return { id: "group-red", displayName: "Red", roleId: "red-role" };
         }
+        if (roleIds.includes("no-group-role")) {
+          return null;
+        }
         return { id: "group-staff", displayName: "Staff", roleId: "staff-role" };
       });
+      services.participantService.ensureParticipant.mockImplementation(async ({ discordUserId, discordUsername, groupId }) => ({
+        id: `participant-${discordUserId}`,
+        indexId: discordUserId.toUpperCase(),
+        discordUsername,
+        groupId,
+        group: groupId ? { id: groupId, displayName: groupId, slug: groupId } : null,
+      }));
       return fixture;
     }
 
-    it("awards staggered group points to ranked winners", async () => {
+    it("awards staggered wallet currency to ranked winners", async () => {
       const { runtime, services } = setupKahootFixture();
       const reply = vi.fn().mockResolvedValue(undefined);
       const fetchMember = vi.fn(async (userId: string) => {
@@ -3258,41 +3268,129 @@ describe("bot runtime", () => {
         user: { id: "staff-1", username: "Mentor" },
       });
 
-      expect(services.economyService.awardGroups).toHaveBeenNthCalledWith(1, {
+      expect(services.participantCurrencyService.awardParticipants).toHaveBeenNthCalledWith(1, {
         guildId: "guild-test",
         actor: { userId: "staff-1", username: "Mentor", roleIds: ["staff-role"] },
-        targetGroupIds: ["group-red"],
-        pointsDelta: 10_000,
-        currencyDelta: 0,
+        targetParticipantIds: ["participant-winner-1"],
+        currencyDelta: 10_000,
         description: "Kahoot #1: Alex",
         executor: {},
       });
-      expect(services.economyService.awardGroups).toHaveBeenNthCalledWith(2, {
+      expect(services.participantCurrencyService.awardParticipants).toHaveBeenNthCalledWith(2, {
         guildId: "guild-test",
         actor: { userId: "staff-1", username: "Mentor", roleIds: ["staff-role"] },
-        targetGroupIds: ["group-blue"],
-        pointsDelta: 8_000,
-        currencyDelta: 0,
+        targetParticipantIds: ["participant-winner-2"],
+        currencyDelta: 8_000,
         description: "Kahoot #2: Bailey",
         executor: {},
       });
-      expect(services.economyService.awardGroups).toHaveBeenNthCalledWith(3, {
+      expect(services.participantCurrencyService.awardParticipants).toHaveBeenNthCalledWith(3, {
         guildId: "guild-test",
         actor: { userId: "staff-1", username: "Mentor", roleIds: ["staff-role"] },
-        targetGroupIds: ["group-red"],
-        pointsDelta: 6_000,
-        currencyDelta: 0,
+        targetParticipantIds: ["participant-winner-3"],
+        currencyDelta: 6_000,
         description: "Kahoot #3: Casey",
         executor: {},
       });
+      expect(services.economyService.awardGroups).not.toHaveBeenCalled();
       expect(reply).toHaveBeenCalledWith(
-        [
-          "Kahoot awarded:",
-          "#1 <@winner-1> earned 10000 blorgshj 🏅 for <@&red-role>",
-          "#2 <@winner-2> earned 8000 blorgshj 🏅 for <@&blue-role>",
-          "#3 <@winner-3> earned 6000 blorgshj 🏅 for <@&red-role>",
-        ].join("\n"),
+        {
+          content: [
+            "Kahoot awarded:",
+            "#1 <@winner-1> earned 10000 bananas 💲",
+            "#2 <@winner-2> earned 8000 bananas 💲",
+            "#3 <@winner-3> earned 6000 bananas 💲",
+          ].join("\n"),
+          allowedMentions: { users: ["winner-1", "winner-2", "winner-3"] },
+        },
       );
+    });
+
+    it("awards wallet currency to groupless winners when groupless earning is enabled", async () => {
+      const { runtime, services } = setupKahootFixture();
+      const fetchMember = vi.fn(async (userId: string) => {
+        if (userId === "staff-1") {
+          return {
+            displayName: "Mentor",
+            roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 10 }]]) },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          };
+        }
+        return {
+          displayName: "Jordan",
+          user: { id: "winner-1", username: "jordan", globalName: "Jordan Tan" },
+          roles: { cache: new Map([["no-group-role", { id: "no-group-role", rawPosition: 1 }]]) },
+        };
+      });
+
+      await (runtime as any).handleCommand({
+        guildId: "guild-test",
+        commandName: "kahoot",
+        guild: { members: { fetch: fetchMember } },
+        channelId: "channel-1",
+        options: {
+          getInteger: vi.fn((name: string) => (name === "starting" ? 500 : name === "quantum" ? 100 : null)),
+          getUser: vi.fn((name: string) => {
+            if (name === "winner1") return { id: "winner-1", username: "jordan", globalName: "Jordan Tan" };
+            return null;
+          }),
+        },
+        reply: vi.fn(),
+        user: { id: "staff-1", username: "Mentor" },
+      });
+
+      expect(services.participantService.ensureParticipant).toHaveBeenCalledWith({
+        guildId: "guild-test",
+        discordUserId: "winner-1",
+        discordUsername: "jordan",
+        groupId: null,
+      });
+      expect(services.participantCurrencyService.awardParticipants).toHaveBeenCalledWith({
+        guildId: "guild-test",
+        actor: { userId: "staff-1", username: "Mentor", roleIds: ["staff-role"] },
+        targetParticipantIds: ["participant-winner-1"],
+        currencyDelta: 500,
+        description: "Kahoot #1: Jordan",
+        executor: {},
+      });
+    });
+
+    it("rejects sanctioned Kahoot winners before awarding currency", async () => {
+      const { runtime, services } = setupKahootFixture();
+      services.sanctionService.getActiveFlags.mockResolvedValueOnce(new Set(["CANNOT_RECEIVE_REWARDS"]));
+      const fetchMember = vi.fn(async (userId: string) => {
+        if (userId === "staff-1") {
+          return {
+            roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 10 }]]) },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          };
+        }
+        return {
+          displayName: "Alex",
+          user: { id: "winner-1", username: "alex", globalName: "Alex Carter" },
+          roles: { cache: new Map([["red-role", { id: "red-role", rawPosition: 1 }]]) },
+        };
+      });
+
+      await expect(
+        (runtime as any).handleCommand({
+          guildId: "guild-test",
+          commandName: "kahoot",
+          guild: { members: { fetch: fetchMember } },
+          channelId: "channel-1",
+          options: {
+            getInteger: vi.fn((name: string) => (name === "starting" ? 500 : name === "quantum" ? 100 : null)),
+            getUser: vi.fn((name: string) => {
+              if (name === "winner1") return { id: "winner-1", username: "alex", globalName: "Alex Carter" };
+              return null;
+            }),
+          },
+          reply: vi.fn(),
+          user: { id: "staff-1", username: "Mentor" },
+        }),
+      ).rejects.toThrow(/cannot receive rewards/i);
+
+      expect(services.participantCurrencyService.awardParticipants).not.toHaveBeenCalled();
     });
 
     it("rejects duplicate winners", async () => {
@@ -3322,10 +3420,119 @@ describe("bot runtime", () => {
         }),
       ).rejects.toThrow(/different member/i);
 
-      expect(services.economyService.awardGroups).not.toHaveBeenCalled();
+      expect(services.participantCurrencyService.awardParticipants).not.toHaveBeenCalled();
     });
 
-    it("rejects total payouts above the caller's maxAward", async () => {
+    it("rejects winner gaps instead of compacting later winners into higher ranks", async () => {
+      const { runtime, services } = setupKahootFixture();
+      const fetchMember = vi.fn(async () => ({
+        roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 10 }]]) },
+        permissions: { has: vi.fn().mockReturnValue(false) },
+      }));
+
+      await expect(
+        (runtime as any).handleCommand({
+          guildId: "guild-test",
+          commandName: "kahoot",
+          guild: { members: { fetch: fetchMember } },
+          channelId: "channel-1",
+          options: {
+            getInteger: vi.fn((name: string) => (name === "starting" ? 100 : name === "quantum" ? 10 : null)),
+            getUser: vi.fn((name: string) => {
+              if (name === "winner1") return { id: "winner-1", username: "alex", globalName: "Alex Carter" };
+              if (name === "winner3") return { id: "winner-3", username: "casey", globalName: "Casey Lim" };
+              return null;
+            }),
+          },
+          reply: vi.fn(),
+          user: { id: "staff-1", username: "Mentor" },
+        }),
+      ).rejects.toThrow(/without gaps/i);
+
+      expect(services.participantCurrencyService.awardParticipants).not.toHaveBeenCalled();
+    });
+
+    it("rejects nonpositive ranked currency payouts", async () => {
+      const { runtime, services } = setupKahootFixture();
+      const fetchMember = vi.fn(async () => ({
+        roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 10 }]]) },
+        permissions: { has: vi.fn().mockReturnValue(false) },
+      }));
+
+      await expect(
+        (runtime as any).handleCommand({
+          guildId: "guild-test",
+          commandName: "kahoot",
+          guild: { members: { fetch: fetchMember } },
+          channelId: "channel-1",
+          options: {
+            getInteger: vi.fn((name: string) => (name === "starting" ? 5 : name === "quantum" ? 5 : null)),
+            getUser: vi.fn((name: string) => {
+              if (name === "winner1") return { id: "winner-1", username: "alex", globalName: "Alex Carter" };
+              if (name === "winner2") return { id: "winner-2", username: "bailey", globalName: "Bailey Kim" };
+              return null;
+            }),
+          },
+          reply: vi.fn(),
+          user: { id: "staff-1", username: "Mentor" },
+        }),
+      ).rejects.toThrow(/0 currency/i);
+
+      expect(services.participantCurrencyService.awardParticipants).not.toHaveBeenCalled();
+    });
+
+    it("allows total Kahoot currency above maxAward when each winner is within the cap", async () => {
+      const { runtime, services } = setupKahootFixture();
+      services.roleCapabilityService.listForRoleIds.mockResolvedValue([
+        {
+          canAward: true,
+          canDeduct: false,
+          canManageDashboard: false,
+          canMultiAward: true,
+          canSell: false,
+          maxAward: { toString: () => "10000" },
+          actionCooldownSeconds: 0,
+        },
+      ]);
+      const fetchMember = vi.fn(async (userId: string) => {
+        if (userId === "staff-1") {
+          return {
+            roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 10 }]]) },
+            permissions: { has: vi.fn().mockReturnValue(false) },
+          };
+        }
+        return {
+          displayName: userId,
+          user: { id: userId, username: userId, globalName: userId },
+          roles: { cache: new Map([["red-role", { id: "red-role", rawPosition: 1 }]]) },
+        };
+      });
+
+      await (runtime as any).handleCommand({
+        guildId: "guild-test",
+        commandName: "kahoot",
+        guild: { members: { fetch: fetchMember } },
+        channelId: "channel-1",
+        options: {
+          getInteger: vi.fn((name: string) => {
+            if (name === "starting") return 10_000;
+            if (name === "quantum") return 2_000;
+            return null;
+          }),
+          getUser: vi.fn((name: string) => {
+            if (name === "winner1") return { id: "winner-1", username: "winner-1", globalName: "winner-1" };
+            if (name === "winner2") return { id: "winner-2", username: "winner-2", globalName: "winner-2" };
+            return null;
+          }),
+        },
+        reply: vi.fn(),
+        user: { id: "staff-1", username: "Mentor" },
+      });
+
+      expect(services.participantCurrencyService.awardParticipants).toHaveBeenCalledTimes(2);
+    });
+
+    it("rejects individual Kahoot currency payouts above the caller's maxAward", async () => {
       const { runtime, services } = setupKahootFixture();
       services.roleCapabilityService.listForRoleIds.mockResolvedValue([
         {
@@ -3360,7 +3567,7 @@ describe("bot runtime", () => {
           channelId: "channel-1",
           options: {
             getInteger: vi.fn((name: string) => {
-              if (name === "starting") return 10_000;
+              if (name === "starting") return 16_000;
               if (name === "quantum") return 2_000;
               return null;
             }),
@@ -3373,9 +3580,54 @@ describe("bot runtime", () => {
           reply: vi.fn(),
           user: { id: "staff-1", username: "Mentor" },
         }),
-      ).rejects.toThrow(/total kahoot payout/i);
+      ).rejects.toThrow(/largest kahoot payout/i);
 
-      expect(services.economyService.awardGroups).not.toHaveBeenCalled();
+      expect(services.participantCurrencyService.awardParticipants).not.toHaveBeenCalled();
+    });
+
+    it("checks award capability before auto-provisioning winner participants", async () => {
+      const { runtime, services } = setupKahootFixture();
+      services.roleCapabilityService.listForRoleIds.mockResolvedValue([
+        {
+          canAward: false,
+          canDeduct: false,
+          canManageDashboard: false,
+          canMultiAward: false,
+          canSell: false,
+          maxAward: null,
+          actionCooldownSeconds: 0,
+        },
+      ]);
+      const fetchMember = vi.fn(async (userId: string) => {
+        if (userId !== "staff-1") {
+          throw new Error("winner member should not be fetched before permission fails");
+        }
+        return {
+          roles: { cache: new Map([["staff-role", { id: "staff-role", rawPosition: 10 }]]) },
+          permissions: { has: vi.fn().mockReturnValue(false) },
+        };
+      });
+
+      await expect(
+        (runtime as any).handleCommand({
+          guildId: "guild-test",
+          commandName: "kahoot",
+          guild: { members: { fetch: fetchMember } },
+          channelId: "channel-1",
+          options: {
+            getInteger: vi.fn((name: string) => (name === "starting" ? 100 : name === "quantum" ? 10 : null)),
+            getUser: vi.fn((name: string) => {
+              if (name === "winner1") return { id: "winner-1", username: "alex", globalName: "Alex Carter" };
+              return null;
+            }),
+          },
+          reply: vi.fn(),
+          user: { id: "staff-1", username: "Mentor" },
+        }),
+      ).rejects.toThrow(/cannot award currency/i);
+
+      expect(services.participantService.ensureParticipant).not.toHaveBeenCalled();
+      expect(services.participantCurrencyService.awardParticipants).not.toHaveBeenCalled();
     });
   });
 
