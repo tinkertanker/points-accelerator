@@ -3500,16 +3500,21 @@ export class BotRuntime {
           if (!guildMember) {
             throw new AppError(`Winner ${payout.rank} is not in this server.`, 404);
           }
-          const { participant } = await this.resolveActiveParticipant({
+          const memberLabel = guildMember.displayName || payout.user.globalName || payout.user.username;
+          const { participant } = await this.resolveWalletParticipant({
             guildId,
             discordUserId: payout.user.id,
             discordUsername: payout.user.username,
             roleIds: this.getOrderedRoleIds(guildMember),
           });
+          const sanctioned = await this.services.sanctionService.getActiveFlags(participant.id);
+          if (sanctioned.has("CANNOT_RECEIVE_REWARDS")) {
+            throw new AppError(`${memberLabel} cannot receive rewards right now.`, 403);
+          }
           return {
             ...payout,
             participant,
-            memberLabel: guildMember.displayName || payout.user.globalName || payout.user.username,
+            memberLabel,
           };
         }),
       );
