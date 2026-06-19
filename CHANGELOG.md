@@ -8,6 +8,11 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.11.2] - 2026-06-19
+
+### Changed
+- Lucky draws can now run for as little as 10 seconds (previously the minimum was 5 minutes).
+
 ## [0.11.1] - 2026-06-17
 
 ### Fixed

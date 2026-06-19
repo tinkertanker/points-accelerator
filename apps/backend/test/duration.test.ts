@@ -52,11 +52,10 @@ describe("parseDuration", () => {
     expect(() => parseDuration("5 weeks")).toThrow(/unknown time unit/i);
   });
 
-  it("enforces the lower bound (5 minutes)", () => {
-    expect(parseDuration("5m")).toBe(MIN_LUCKY_DRAW_DURATION_MS);
-    expect(() => parseDuration("4m")).toThrow(/at least 5 minutes/);
-    expect(() => parseDuration("10s")).toThrow(/at least 5 minutes/);
-    expect(() => parseDuration("299s")).toThrow(/at least 5 minutes/);
+  it("enforces the lower bound (10 seconds)", () => {
+    expect(parseDuration("10s")).toBe(MIN_LUCKY_DRAW_DURATION_MS);
+    expect(() => parseDuration("9s")).toThrow(/at least 10 seconds/);
+    expect(() => parseDuration("5s")).toThrow(/at least 10 seconds/);
   });
 
   it("enforces the upper bound (7 days)", () => {
