@@ -29,10 +29,10 @@ Prerequisite: Node.js 22 with npm.
 To verify the production web bundle instead of running the dev server:
 
 1. Install dependencies with `npm install`.
-2. Build the dashboard with `npm run build:frontend`.
+2. Build the sample-data dashboard with `npm run build:frontend:design`.
 3. Preview the built files with `npm --workspace apps/frontend run preview`, or deploy `apps/frontend/dist` to any static host.
 
-The design preview uses bundled sample data. For a dashboard connected to a backend, put `VITE_API_BASE_URL=http://localhost:3001` in `apps/frontend/.env.local` and run `npm run dev:frontend`.
+The design preview uses bundled sample data. For a dashboard connected to a backend, put `VITE_API_BASE_URL=http://localhost:3001` in `apps/frontend/.env.local` and run `npm run dev:frontend`, or build the connected dashboard with `npm run build:frontend`.
 
 ### Full bot stack
 

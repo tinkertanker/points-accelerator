@@ -14,6 +14,7 @@
     "build": "npm-run-all build:*",
     "build:backend": "npm --workspace apps/backend run build",
     "build:frontend": "npm --workspace apps/frontend run build",
+    "build:frontend:design": "npm --workspace apps/frontend run build:design",
     "test": "npm-run-all test:*",
     "test:backend": "npm --workspace apps/backend run test",
     "test:frontend": "npm --workspace apps/frontend run test",
