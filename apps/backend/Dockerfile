@@ -3,12 +3,13 @@ FROM node:22-alpine AS build
 WORKDIR /app
 
 COPY package.json package.json
+COPY package-lock.json package-lock.json
 COPY tsconfig.base.json tsconfig.base.json
 COPY apps/backend/package.json apps/backend/package.json
 COPY apps/backend/prisma apps/backend/prisma
 COPY apps/frontend/package.json apps/frontend/package.json
 
-RUN npm install
+RUN npm ci
 
 COPY . .
 
