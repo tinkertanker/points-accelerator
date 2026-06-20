@@ -16,6 +16,26 @@ The bot also supports participant-wallet betting: students can place double-or-n
 
 ## Quick start
 
+### Web app only
+
+Use this path when you only want to run or build the Vite dashboard without PostgreSQL, Discord credentials, or the API.
+
+Prerequisite: Node.js 22 with npm.
+
+1. Install dependencies with `npm install`.
+2. Start the dashboard preview with `npm run dev:design`.
+3. Open the local URL printed by Vite, usually `http://localhost:5173`.
+
+To verify the production web bundle instead of running the dev server:
+
+1. Install dependencies with `npm install`.
+2. Build the dashboard with `npm run build:frontend`.
+3. Preview the built files with `npm --workspace apps/frontend run preview`, or deploy `apps/frontend/dist` to any static host.
+
+The design preview uses bundled sample data. For a dashboard connected to a backend, put `VITE_API_BASE_URL=http://localhost:3001` in `apps/frontend/.env.local` and run `npm run dev:frontend`.
+
+### Full bot stack
+
 1. Copy `.env.example` to `.env`.
 2. Install dependencies with `npm install`.
 3. Start PostgreSQL and the apps with `docker compose up --build` or run the services separately.

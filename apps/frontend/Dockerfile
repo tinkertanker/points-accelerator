@@ -6,11 +6,11 @@ ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 COPY package.json package.json
+COPY package-lock.json package-lock.json
 COPY tsconfig.base.json tsconfig.base.json
-COPY apps/backend/package.json apps/backend/package.json
 COPY apps/frontend/package.json apps/frontend/package.json
 
-RUN npm install
+RUN npm ci --workspace apps/frontend
 
 COPY . .
 
@@ -19,4 +19,3 @@ RUN npm --workspace apps/frontend run build
 FROM nginx:alpine
 
 COPY --from=build /app/apps/frontend/dist /usr/share/nginx/html
-
