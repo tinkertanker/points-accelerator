@@ -32,7 +32,19 @@ function withPoolParams(databaseUrl: string | undefined): string | undefined {
     return databaseUrl;
   }
 
-  const parsed = new URL(databaseUrl);
+  // Prisma's connection-string parser is more lenient than the WHATWG URL parser
+  // used here — e.g. it tolerates some unencoded characters in passwords that
+  // new URL() would reject. If a DATABASE_URL that Prisma itself could parse
+  // fails this transform, fall back to the raw string (no pool params) rather
+  // than crashing the process at boot. Operators wanting pool tuning should use
+  // a properly percent-encoded DATABASE_URL.
+  let parsed: URL;
+  try {
+    parsed = new URL(databaseUrl);
+  } catch {
+    return databaseUrl;
+  }
+
   const existing = Object.fromEntries(parsed.searchParams.entries());
 
   // Only set a param if the operator hasn't already pinned it in DATABASE_URL,
