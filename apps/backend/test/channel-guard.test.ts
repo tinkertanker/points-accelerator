@@ -23,7 +23,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await resetDatabase(ctx.prisma);
+  await resetDatabase(ctx.prisma, ctx.services);
   await ctx.services.configService.getOrCreate(GUILD_ID);
 });
 

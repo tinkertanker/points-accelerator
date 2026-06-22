@@ -49,7 +49,10 @@ export async function createTestApp(
   };
 }
 
-export async function resetDatabase(prisma: ReturnType<typeof createPrismaClient>) {
+export async function resetDatabase(
+  prisma: ReturnType<typeof createPrismaClient>,
+  services?: ReturnType<typeof createServices>,
+) {
   await prisma.luckyDrawEntry.deleteMany();
   await prisma.luckyDraw.deleteMany();
   await prisma.goFundMeDonation.deleteMany();
@@ -72,4 +75,11 @@ export async function resetDatabase(prisma: ReturnType<typeof createPrismaClient
   await prisma.discordRoleCapability.deleteMany();
   await prisma.reactionRewardRule.deleteMany();
   await prisma.guildConfig.deleteMany();
+
+  // The ConfigService and GroupService caches outlive a raw table wipe (the
+  // caches don't observe deletes done straight through Prisma), so clear them
+  // or a stale entry would mask a missing GuildConfig/Group row and starve a
+  // foreign key on the next create.
+  services?.configService.clearCache();
+  services?.groupService.clearAwardableRoleCache();
 }

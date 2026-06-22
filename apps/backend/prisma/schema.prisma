@@ -248,6 +248,13 @@ model DiscordRoleCapability {
   guild               GuildConfig @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
 
   @@unique([guildId, roleId])
+  // Also maintained via raw SQL: a partial index
+  // "DiscordRoleCapability_group_receive_index" on (guildId) WHERE
+  // "isGroupRole" = true AND "canReceiveAwards" = true. Backs the
+  // syncAwardableRoleGroups query (role capabilities -> awardable group roles)
+  // which runs once per passive message and on cold cache fills. Prisma cannot
+  // model partial indexes; see migration 20260623120000_add_hot_path_indexes.
+  // Do not "fix" the resulting drift by dropping it.
 }
 
 model LedgerEntry {
@@ -475,6 +482,13 @@ model ParticipantSanction {
 
   @@index([guildId, participantId, flag])
   @@index([guildId, revokedAt, expiresAt])
+  // Also maintained via raw SQL: a partial index
+  // "ParticipantSanction_participant_active_index" on (participantId, expiresAt)
+  // WHERE "revokedAt" IS NULL. Backs getActiveFlags, which runs on every passive
+  // message and reaction and filters by participantId (not guildId, so the two
+  // indexes above don't help). Prisma cannot model partial indexes; see
+  // migration 20260623120000_add_hot_path_indexes. Do not "fix" the resulting
+  // drift by dropping it.
 }
 
 model Assignment {

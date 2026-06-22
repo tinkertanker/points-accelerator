@@ -23,7 +23,44 @@ type ResolvedGroup = {
 };
 
 export class GroupService {
+  /**
+   * In-process cache of the awardable role-id list per guild.
+   *
+   * `syncAwardableRoleGroups` was firing on every group lookup — i.e. on every
+   * passive message (via findGroupFromRoleIds) and N times inside
+   * getEligibleGroupMembers. Each call did a role-capability read + a group read
+   * + a transaction of `group.upsert` for every awardable role, even when nothing
+   * had changed since the last call a few milliseconds ago.
+   *
+   * The cache holds just the role-id list (the reconciliation upsert still runs
+   * on a cold fill so a newly-enabled group role gets its Group row). It is
+   * busted explicitly on the two writers that change it —
+   * RoleCapabilityService.replaceAll and this service's upsert — via
+   * invalidateAwardableRoleCache, plus a short TTL as a backstop. Single process
+   * (src/index.ts) means no cross-process invalidation.
+   */
+  private static readonly AWARDABLE_CACHE_TTL_MS = 5 * 60_000;
+  private readonly awardableCache = new Map<string, { roleIds: string[]; fetchedAt: number }>();
+
   public constructor(private readonly prisma: PrismaClient) {}
+
+  /**
+   * Drop the cached awardable role list for a guild. Callers are the mutation
+   * paths that change which roles are awardable group roles:
+   * RoleCapabilityService.replaceAll (toggling isGroupRole/canReceiveAwards) and
+   * GroupService.upsert (changing a group's roleId/active).
+   */
+  public invalidateAwardableRoleCache(guildId: string) {
+    this.awardableCache.delete(guildId);
+  }
+
+  /**
+   * Drop every cached awardable list. Used by the test harness when it wipes
+   * tables directly, so a stale entry can't resurrect deleted groups.
+   */
+  public clearAwardableRoleCache() {
+    this.awardableCache.clear();
+  }
 
   public async list(guildId: string, options: { includeInactive?: boolean } = {}) {
     const awardableRoleIds = await this.syncAwardableRoleGroups(guildId);
@@ -129,6 +166,11 @@ export class GroupService {
       }),
     ]);
 
+    // upsert both changes the group's roleId/active and (for new groups) flips a
+    // role capability to isGroupRole+canReceiveAwards, so the cached awardable
+    // list for this guild is no longer trustworthy.
+    this.invalidateAwardableRoleCache(guildId);
+
     return this.prisma.group.findUniqueOrThrow({
       where: { id: group.id },
       include: { aliases: true },
@@ -180,32 +222,74 @@ export class GroupService {
    * group-less" from a real lookup failure (which still propagates).
    */
   public async findGroupFromRoleIds(guildId: string, roleIds: string[]): Promise<ResolvedGroup | null> {
+    const groupsByRoleId = await this.loadActiveGroupsByRoleId(guildId);
+    return this.pickGroupFromOrderedRoles(roleIds, groupsByRoleId);
+  }
+
+  /**
+   * Resolve the group for many members at once, sharing a single DB read across
+   * all of them. Mirrors findGroupFromRoleIds' semantics exactly: each member's
+   * roles are walked in the order the caller supplies (callers pass
+   * highest-position-first via getOrderedRoleIds) and the first matching active
+   * awardable group wins. Use this instead of N independent findGroupFromRoleIds
+   * calls (e.g. getEligibleGroupMembers previously fired one query per member).
+   *
+   * Returns a result array aligned to the input order — same index i gives the
+   * resolved group for members[i], or null when that member maps to no group —
+   * so callers don't need a stable key on each member.
+   */
+  public async findGroupsFromOrderedRoles(
+    guildId: string,
+    members: ReadonlyArray<{ orderedRoleIds: string[] }>,
+  ): Promise<(ResolvedGroup | null)[]> {
+    if (members.length === 0) {
+      return [];
+    }
+
+    const groupsByRoleId = await this.loadActiveGroupsByRoleId(guildId);
+    return members.map((member) => this.pickGroupFromOrderedRoles(member.orderedRoleIds, groupsByRoleId));
+  }
+
+  /**
+   * Fetch all active awardable groups for a guild as a roleId -> group map.
+   * Shared across the batch resolution methods so they pay one read (plus the
+   * cached awardable sync) instead of one per member.
+   */
+  private async loadActiveGroupsByRoleId(guildId: string): Promise<Map<string, ResolvedGroup>> {
     const awardableRoleIds = await this.syncAwardableRoleGroups(guildId);
-    const matchingRoleIds = roleIds.filter((roleId) => awardableRoleIds.includes(roleId));
+    if (awardableRoleIds.length === 0) {
+      return new Map();
+    }
 
     const groups = await this.prisma.group.findMany({
       where: {
         guildId,
-        roleId: {
-          in: matchingRoleIds,
-        },
+        roleId: { in: awardableRoleIds },
         active: true,
       },
     });
 
-    if (groups.length === 0) {
-      return null;
-    }
+    return new Map(groups.map((group) => [group.roleId, group] as const));
+  }
 
-    const groupsByRoleId = new Map(groups.map((group) => [group.roleId, group]));
-    for (const roleId of matchingRoleIds) {
+  /**
+   * Walk a member's roles in the order supplied and return the first that maps
+   * to an active awardable group. Returns null when none match. The caller is
+   * responsible for ordering roles by priority (the bot runtime sorts by Discord
+   * role rawPosition descending so the highest-position group role wins, matching
+   * the historical findGroupFromRoleIds behaviour).
+   */
+  private pickGroupFromOrderedRoles(
+    roleIds: string[],
+    groupsByRoleId: Map<string, ResolvedGroup>,
+  ): ResolvedGroup | null {
+    for (const roleId of roleIds) {
       const group = groupsByRoleId.get(roleId);
       if (group) {
         return group;
       }
     }
-
-    return groups[0];
+    return null;
   }
 
   /**
@@ -271,6 +355,11 @@ export class GroupService {
   }
 
   private async syncAwardableRoleGroups(guildId: string) {
+    const cached = this.awardableCache.get(guildId);
+    if (cached && Date.now() - cached.fetchedAt < GroupService.AWARDABLE_CACHE_TTL_MS) {
+      return cached.roleIds;
+    }
+
     const awardableRoles = await this.prisma.discordRoleCapability.findMany({
       where: {
         guildId,
@@ -281,6 +370,10 @@ export class GroupService {
     });
 
     if (awardableRoles.length === 0) {
+      // Don't cache an empty result. A guild that has just had its first group
+      // role enabled should be re-synced on the next lookup rather than waiting
+      // out the TTL.
+      this.awardableCache.delete(guildId);
       return [];
     }
 
@@ -295,7 +388,6 @@ export class GroupService {
       },
     });
 
-    const existingGroupsByRoleId = new Map(existingGroups.map((group) => [group.roleId, group]));
     const usedSlugs = new Set(existingGroups.map((group) => group.slug));
 
     await this.prisma.$transaction(
@@ -320,7 +412,9 @@ export class GroupService {
       ),
     );
 
-    return awardableRoles.map((role) => role.roleId);
+    const roleIds = awardableRoles.map((role) => role.roleId);
+    this.awardableCache.set(guildId, { roleIds, fetchedAt: Date.now() });
+    return roleIds;
   }
 
   private createUniqueSyncedSlug(roleName: string, roleId: string, usedSlugs: Set<string>) {

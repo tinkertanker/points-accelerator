@@ -65,6 +65,27 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: points-accelerator-postgres
+    # Conservative defaults for a shared desktop host (the bot, the API, and
+    # Postgres coexist here, serving ~10 guilds). Override per-host via the
+    # POSTGRES_*_KB env vars if the box has more or less memory. Keep `postgres`
+    # as the first element so the official image's init entrypoint still runs.
+    # statement_timeout caps runaway ledger SUMs so they fail fast instead of
+    # stalling other requests; kept at 30s so legitimate serializable bets and
+    # the (occasional, large) economy-reset transactions still complete.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-256MB}
+      - -c
+      - work_mem=${POSTGRES_WORK_MEM:-4MB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-1GB}
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-100}
+      - -c
+      - statement_timeout=${POSTGRES_STATEMENT_TIMEOUT:-30000}
+      - -c
+      - idle_in_transaction_session_timeout=${POSTGRES_IDLE_TX_TIMEOUT:-10000}
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}

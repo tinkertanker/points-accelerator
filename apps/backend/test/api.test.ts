@@ -61,7 +61,7 @@ describe("points accelerator API", () => {
   beforeEach(async () => {
     groupMemberCounts.clear();
     vi.clearAllMocks();
-    await resetDatabase(ctx.prisma);
+    await resetDatabase(ctx.prisma, ctx.services);
   });
 
   afterAll(async () => {
