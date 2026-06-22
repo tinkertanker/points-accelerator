@@ -48,6 +48,12 @@ export function createServices(prisma: PrismaClient) {
   const sanctionService = new SanctionService(prisma, auditService);
   const channelGuardService = new ChannelGuardService(prisma, auditService);
 
+  // GroupService caches the awardable role list derived from role capabilities,
+  // so hand it the hook to fire whenever capabilities are replaced.
+  roleCapabilityService.setCapabilitiesChangedHook((guildId) =>
+    groupService.invalidateAwardableRoleCache(guildId),
+  );
+
   return {
     prisma,
     configService,

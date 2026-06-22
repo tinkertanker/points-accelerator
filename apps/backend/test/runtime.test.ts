@@ -39,6 +39,23 @@ function createRuntimeFixture() {
       findGroupFromRoleIds: vi
         .fn()
         .mockResolvedValue({ id: "group-1", displayName: "Gryffindor", roleId: "group-role" }),
+      findGroupsFromOrderedRoles: vi.fn().mockImplementation(
+        async (guildId: string, members: Array<{ orderedRoleIds: string[] }>) => {
+          // Default: delegate to resolveGroupFromRoleIds per member so tests that
+          // only stub the single-member resolver still drive group resolution.
+          // Returns an array aligned to the input order (null for no-group).
+          const results: Array<{ id: string; displayName: string; roleId: string } | null> = [];
+          for (const member of members) {
+            try {
+              const group = await services.groupService.resolveGroupFromRoleIds(guildId, member.orderedRoleIds);
+              results.push(group ?? null);
+            } catch {
+              results.push(null);
+            }
+          }
+          return results;
+        },
+      ),
       hasGroupRole: vi.fn().mockResolvedValue(false),
       resolveGroupByIdentifier: vi
         .fn()

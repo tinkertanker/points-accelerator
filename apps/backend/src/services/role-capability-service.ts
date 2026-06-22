@@ -20,7 +20,18 @@ export type RoleCapabilityInput = {
 };
 
 export class RoleCapabilityService {
+  /**
+   * Optional hook invoked after capabilities change, so dependents that cache
+   * derived state (e.g. GroupService's awardable-role cache) can invalidate it.
+   * Wired in createServices to avoid a circular constructor dependency.
+   */
+  private onCapabilitiesChanged: ((guildId: string) => void) | null = null;
+
   public constructor(private readonly prisma: PrismaClient) {}
+
+  public setCapabilitiesChangedHook(hook: (guildId: string) => void) {
+    this.onCapabilitiesChanged = hook;
+  }
 
   public async list(guildId: string) {
     return this.prisma.discordRoleCapability.findMany({
@@ -99,6 +110,10 @@ export class RoleCapabilityService {
         });
       }
     });
+
+    // Toggling isGroupRole/canReceiveAwards changes which roles map to awardable
+    // groups, so any cached awardable list is now stale.
+    this.onCapabilitiesChanged?.(guildId);
 
     return this.list(guildId);
   }

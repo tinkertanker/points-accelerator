@@ -31,11 +31,46 @@ export type GuildConfigUpdateInput = {
   bettingCooldownSeconds?: number;
 };
 
+type GuildConfig = Awaited<ReturnType<PrismaClient["guildConfig"]["upsert"]>>;
+
+/**
+ * In-process cache of GuildConfig rows, keyed by guildId.
+ *
+ * This is the single hottest read in the bot — `getOrCreate` was previously an
+ * `upsert` fired on every passive message, every slash command, and every
+ * dashboard request. GuildConfig is large and changes only when an admin edits
+ * settings or the announcement marker bumps, so a write-through cache eliminates
+ * the upsert round-trip (and the redundant no-op write on existing rows) from
+ * the per-event path.
+ *
+ * Single process is guaranteed: src/index.ts constructs one ConfigService
+ * shared by the bot runtime and the Fastify API. There is no second worker, so
+ * no cross-process invalidation is needed.
+ *
+ * The cache never holds stale data for long: every mutation goes through this
+ * service (getOrCreate/update/markAnnounced are the only three writers), and
+ * each refreshes the entry it touched. A failed write does not populate the
+ * cache. listAll() deliberately bypasses the cache because it crosses guilds
+ * and is used infrequently (deployment announcements on boot).
+ */
+const CACHE_TTL_MS = 5 * 60_000; // 5 minutes — config rarely changes
+
+type CacheEntry = { value: GuildConfig; fetchedAt: number };
+
 export class ConfigService {
+  private readonly cache = new Map<string, CacheEntry>();
+
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async getOrCreate(guildId: string) {
-    return this.prisma.guildConfig.upsert({
+    const cached = this.readCache(guildId);
+    if (cached) {
+      return cached;
+    }
+
+    // upsert (not findFirst) so the very first call for a guild still
+    // auto-provisions the row, exactly as before.
+    const config = await this.prisma.guildConfig.upsert({
       where: { guildId },
       create: {
         guildId,
@@ -45,12 +80,14 @@ export class ConfigService {
       },
       update: {},
     });
+    this.writeCache(guildId, config);
+    return config;
   }
 
   public async update(guildId: string, input: GuildConfigUpdateInput) {
     await this.getOrCreate(guildId);
 
-    return this.prisma.guildConfig.update({
+    const updated = await this.prisma.guildConfig.update({
       where: { guildId },
       data: {
         appName: input.appName,
@@ -84,13 +121,18 @@ export class ConfigService {
         bettingCooldownSeconds: input.bettingCooldownSeconds,
       },
     });
+    this.writeCache(guildId, updated);
+    return updated;
   }
 
   public async markAnnounced(guildId: string, version: string) {
-    await this.prisma.guildConfig.update({
+    const updated = await this.prisma.guildConfig.update({
       where: { guildId },
       data: { lastAnnouncedVersion: version },
     });
+    // Write-through so the announcement loop sees the new marker on its next
+    // iteration and a restart doesn't double-post.
+    this.writeCache(guildId, updated);
   }
 
   public async listAll() {
@@ -106,5 +148,30 @@ export class ConfigService {
       where: { guildId: { in: guildIds } },
       orderBy: { createdAt: "asc" },
     });
+  }
+
+  /**
+   * Drop every cached config. Call this when the underlying rows may have been
+   * removed out-of-band (e.g. the test harness wipes tables between cases) so a
+   * stale cache entry can't mask a missing row and starve a foreign key.
+   */
+  public clearCache() {
+    this.cache.clear();
+  }
+
+  private readCache(guildId: string): GuildConfig | null {
+    const entry = this.cache.get(guildId);
+    if (!entry) {
+      return null;
+    }
+    if (Date.now() - entry.fetchedAt > CACHE_TTL_MS) {
+      this.cache.delete(guildId);
+      return null;
+    }
+    return entry.value;
+  }
+
+  private writeCache(guildId: string, value: GuildConfig) {
+    this.cache.set(guildId, { value, fetchedAt: Date.now() });
   }
 }

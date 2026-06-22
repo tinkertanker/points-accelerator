@@ -187,24 +187,11 @@ export class EconomyService {
       return null;
     }
 
-    // Dedupe per message across both ledgers so an edit or reprocess cannot
-    // double-pay. Group-less rewards only touch the participant currency ledger.
-    const [previousLedger, previousCurrency] = await Promise.all([
-      params.groupId
-        ? this.prisma.ledgerEntry.findFirst({
-            where: { guildId: params.guildId, externalRef: params.messageId },
-          })
-        : Promise.resolve(null),
-      awardsCurrency
-        ? this.prisma.participantCurrencyEntry.findFirst({
-            where: { guildId: params.guildId, externalRef: params.messageId },
-          })
-        : Promise.resolve(null),
-    ]);
-
-    if (previousLedger || previousCurrency) {
-      return null;
-    }
+    // Dedupe per message is enforced by the partial unique indexes on
+    // (guildId, externalRef) for MESSAGE_REWARD entries (see migration
+    // 20260615130000_passive_reward_dedupe). A concurrent duplicate delivery
+    // trips the index; we catch P2002 below and treat it as a no-op, so no
+    // pre-insert findFirst is needed on the hot path.
 
     try {
       return await this.prisma.$transaction(async (tx) => {

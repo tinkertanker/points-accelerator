@@ -144,7 +144,7 @@ describe("Discord dashboard auth", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    await resetDatabase(ctx.prisma);
+    await resetDatabase(ctx.prisma, ctx.services);
     currentDashboardMember = { ...defaultDashboardMember };
   });
 

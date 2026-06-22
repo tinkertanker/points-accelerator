@@ -2894,17 +2894,29 @@ export class BotRuntime {
       (candidate) => !candidate.user.bot && candidate.roles.cache.has(params.roleId),
     );
 
-    const eligibleMembers = await Promise.all(
-      candidates.map(async (candidate) => {
-        const resolvedGroup = await this.services.groupService
-          .resolveGroupFromRoleIds(guildId, this.getOrderedRoleIds(candidate))
-          .catch(() => null);
+    if (candidates.length === 0) {
+      return [];
+    }
 
-        return resolvedGroup?.id === params.groupId ? candidate : null;
-      }),
+    // Resolve every candidate's group in one batched read instead of one query
+    // per member. Role order is preserved (highest Discord rawPosition first) so
+    // each member still resolves to their top-priority active awardable group,
+    // matching the previous per-member resolveGroupFromRoleIds behaviour. The
+    // result array is aligned to `candidates`, so we zip by index. A transient
+    // DB error on the shared read degrades to "no eligible members" (matching
+    // the old per-member .catch(() => null)) rather than failing the command —
+    // /buy group, /approve_purchase, and /award currencygroup retry on the next
+    // attempt instead of erroring out.
+    const resolvedGroups = await this.services.groupService
+      .findGroupsFromOrderedRoles(
+        guildId,
+        candidates.map((candidate) => ({ orderedRoleIds: this.getOrderedRoleIds(candidate) })),
+      )
+      .catch(() => new Array<null>(candidates.length).fill(null));
+
+    return candidates.filter(
+      (_candidate, index) => resolvedGroups[index]?.id === params.groupId,
     );
-
-    return eligibleMembers.filter((candidate): candidate is GuildMember => candidate !== null);
   }
 
   private async syncGroupParticipantsFromGuild(params: {
