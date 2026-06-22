@@ -2,9 +2,12 @@
 set -euo pipefail
 
 REMOTE_HOST="${REMOTE_HOST:-tinkertanker@dev.tk.sg}"
-# Keep the existing checkout defaults for the first in-place rename rollout.
-REMOTE_PATH="${REMOTE_PATH:-/home/tinkertanker-server/Docker/economy-rice}"
-REPO_URL="${REPO_URL:-https://github.com/tinkertanker/economy-rice.git}"
+# Production checkout lives at this path on the server. The legacy default was
+# the pre-rename `economy-rice` repo and path; if you are still running on the
+# old in-place checkout, override REMOTE_PATH (and REPO_URL) in your env for
+# this run rather than flipping it back here.
+REMOTE_PATH="${REMOTE_PATH:-/home/tinkertanker-server/Docker/points-accelerator}"
+REPO_URL="${REPO_URL:-https://github.com/tinkertanker/points-accelerator.git}"
 BRANCH="${BRANCH:-main}"
 SSH_OPTS="${SSH_OPTS:--o IdentityAgent=none -o IdentitiesOnly=yes}"
 

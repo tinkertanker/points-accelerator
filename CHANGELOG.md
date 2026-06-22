@@ -8,6 +8,15 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.11.3] - 2026-06-23
+
+### Changed
+- Behind-the-scenes database tuning so the bot stays snappy as more servers come online: passive message rewards and reaction rewards now hit the database far less often, group purchases no longer fire one lookup per member, and shared leaderboards and balances cost less to load. No behaviour changes for anyone using the bot.
+- Postgres is now configured with sane memory and timeout defaults for a shared host, and a pair of new indexes backs the busiest queries.
+
+### Fixed
+- Web-only dashboard installs are now fully documented, and the Docker builds are faster and more reproducible thanks to a lockfile-based install and a tighter build context.
+
 ## [0.11.2] - 2026-06-19
 
 ### Changed
