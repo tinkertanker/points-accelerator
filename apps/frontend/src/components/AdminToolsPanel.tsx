@@ -74,7 +74,6 @@ type EconomyBucketId = "participant-currency" | "group-points" | "group-currency
 
 type EconomyBucket = {
   id: EconomyBucketId;
-  title: string;
   label: string;
   description: string;
 };
@@ -82,29 +81,20 @@ type EconomyBucket = {
 const ECONOMY_BUCKET_BY_ID = {
   "participant-currency": {
     id: "participant-currency",
-    title: "Participant wallet currency",
     label: "Student wallet currency",
     description: "Personal spendable balance used for transfers, bets and donations.",
   },
   "group-points": {
     id: "group-points",
-    title: "Group points",
     label: "Leaderboard group points",
     description: "Shared group score shown on the leaderboard and spent by group purchases.",
   },
   "group-currency": {
     id: "group-currency",
-    title: "Group currency",
     label: "Legacy shared group currency",
     description: "Shared group ledger currency used by group-to-group transfers and older group currency flows.",
   },
 } satisfies Record<EconomyBucketId, EconomyBucket>;
-
-const ECONOMY_BUCKETS: EconomyBucket[] = [
-  ECONOMY_BUCKET_BY_ID["participant-currency"],
-  ECONOMY_BUCKET_BY_ID["group-points"],
-  ECONOMY_BUCKET_BY_ID["group-currency"],
-];
 
 const PARTICIPANT_LEDGER_TYPES: ParticipantLedgerEntryType[] = [
   "MESSAGE_REWARD",
@@ -407,15 +397,6 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
           </div>
         </header>
 
-        <div className="reset-explainer-grid" aria-label="Economy balance buckets">
-          {ECONOMY_BUCKETS.map((bucket) => (
-            <article className="reset-explainer" key={bucket.id}>
-              <h3>{bucket.title}</h3>
-              <p>{bucket.description}</p>
-            </article>
-          ))}
-        </div>
-
         <div className="reset-mode-grid" role="radiogroup" aria-label="Economy reset mode">
           {RESET_MODE_OPTIONS.map((option) => (
             <button
@@ -438,7 +419,7 @@ export default function AdminToolsPanel({ participants }: AdminToolsPanelProps) 
         <div className="reset-workspace">
           <div className="reset-workspace__intro">
             <h3>{selectedMode.title}</h3>
-            <p>{selectedMode.detail}</p>
+            <p className="reset-workspace__lead">{selectedMode.detail}</p>
             {(state.mode === "modulo-balance" ||
               state.mode === "set-balances" ||
               state.mode === "rescale-balances") && (

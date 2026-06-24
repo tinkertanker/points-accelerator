@@ -29,26 +29,6 @@ const EMPTY_DRAFT: ReactionRewardRuleDraft = {
   enabled: true,
 };
 
-const ROW_STYLE: React.CSSProperties = {
-  display: "flex",
-  gap: "0.5rem",
-  alignItems: "flex-end",
-  flexWrap: "wrap",
-};
-
-const FIELD_STYLES = {
-  channel: { flex: "1 1 180px", minWidth: 160 },
-  botId: { flex: "1 1 200px", minWidth: 180 },
-  emoji: { flex: "0 0 110px" },
-  target: { flex: "0 0 150px" },
-  mode: { flex: "0 0 150px" },
-  delta: { flex: "0 0 120px" },
-  max: { flex: "0 0 120px" },
-  note: { flex: "1 1 160px", minWidth: 140 },
-  enabled: { flex: "0 0 70px" },
-  actions: { flex: "0 0 auto" },
-} as const;
-
 function ruleToDraft(rule: ReactionRewardRule): ReactionRewardRuleDraft {
   return {
     id: rule.id,
@@ -272,7 +252,7 @@ export default function ReactionRulesEditor({
       </p>
 
       {rules.length > 0 ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "0.75rem" }}>
+        <div className="reaction-rule-list">
           {rules.map((rule) => {
             const draft = draftFor(rule);
             const text = deltaTextFor(rule.id, activeDelta(draft));
@@ -286,8 +266,8 @@ export default function ReactionRulesEditor({
             const maxValid = draft.amountMode !== "COUNT_MULTIPLIER" || maxDelta !== null;
             const unit = activeUnit(draft, labels);
             return (
-              <div key={rule.id} style={ROW_STYLE}>
-                <label className="settings-field" style={FIELD_STYLES.channel}>
+              <div key={rule.id} className="reaction-rule-row">
+                <label className="settings-field reaction-rule-row__field reaction-rule-row__field--channel">
                   Channel
                   <select
                     aria-label="Channel"
@@ -300,7 +280,7 @@ export default function ReactionRulesEditor({
                     {renderChannelOptions()}
                   </select>
                 </label>
-                <label className="settings-field" style={FIELD_STYLES.botId}>
+                <label className="settings-field reaction-rule-row__field reaction-rule-row__field--bot-id">
                   Bot user ID
                   <input
                     aria-label="Bot user ID"
@@ -310,7 +290,7 @@ export default function ReactionRulesEditor({
                     }
                   />
                 </label>
-                <label className="settings-field" style={FIELD_STYLES.emoji}>
+                <label className="settings-field reaction-rule-row__field reaction-rule-row__field--emoji">
                   Emoji
                   <input
                     aria-label="Emoji"
@@ -320,7 +300,7 @@ export default function ReactionRulesEditor({
                     }
                   />
                 </label>
-                <label className="settings-field" style={FIELD_STYLES.target}>
+                <label className="settings-field reaction-rule-row__field reaction-rule-row__field--target">
                   Payout
                   <select
                     aria-label="Payout"
@@ -338,7 +318,7 @@ export default function ReactionRulesEditor({
                     <option value="GROUP_POINTS">Group {pointsName}</option>
                   </select>
                 </label>
-                <label className="settings-field" style={FIELD_STYLES.mode}>
+                <label className="settings-field reaction-rule-row__field reaction-rule-row__field--mode">
                   Reward mode
                   <select
                     aria-label="Reward mode"
@@ -354,7 +334,7 @@ export default function ReactionRulesEditor({
                     <option value="COUNT_MULTIPLIER">Count multiplier</option>
                   </select>
                 </label>
-                <label className="settings-field" style={FIELD_STYLES.delta}>
+                <label className="settings-field reaction-rule-row__field reaction-rule-row__field--delta">
                   {draft.amountMode === "COUNT_MULTIPLIER" ? `${unit} per count` : `${unit} delta`}
                   <input
                     type="text"
@@ -369,7 +349,7 @@ export default function ReactionRulesEditor({
                     }}
                   />
                 </label>
-                <label className="settings-field" style={FIELD_STYLES.max}>
+                <label className="settings-field reaction-rule-row__field reaction-rule-row__field--max">
                   Max payout
                   <input
                     type="text"
@@ -386,7 +366,7 @@ export default function ReactionRulesEditor({
                     placeholder={draft.amountMode === "COUNT_MULTIPLIER" ? "10000" : ""}
                   />
                 </label>
-                <label className="settings-field" style={FIELD_STYLES.note}>
+                <label className="settings-field reaction-rule-row__field reaction-rule-row__field--note">
                   Label
                   <input
                     aria-label="Label"
@@ -397,7 +377,7 @@ export default function ReactionRulesEditor({
                     }
                   />
                 </label>
-                <label className="settings-field" style={FIELD_STYLES.enabled}>
+                <label className="settings-field reaction-rule-row__field reaction-rule-row__field--enabled">
                   Enabled
                   <input
                     type="checkbox"
@@ -408,7 +388,7 @@ export default function ReactionRulesEditor({
                     }
                   />
                 </label>
-                <div style={{ ...FIELD_STYLES.actions, display: "flex", gap: "0.25rem" }}>
+                <div className="reaction-rule-row__field reaction-rule-row__actions">
                   <button
                     type="button"
                     onClick={() => void handleSave(rule)}
@@ -429,13 +409,13 @@ export default function ReactionRulesEditor({
           })}
         </div>
       ) : (
-        <p className="channel-picker__empty" style={{ marginBottom: "0.5rem" }}>
+        <p className="channel-picker__empty reaction-rule-list__empty">
           No reaction rules yet. Add one below.
         </p>
       )}
 
-      <div style={ROW_STYLE}>
-        <label className="settings-field" style={FIELD_STYLES.channel}>
+      <div className="reaction-rule-row reaction-rule-row--new">
+        <label className="settings-field reaction-rule-row__field reaction-rule-row__field--channel">
           Channel
           <select
             value={newDraft.channelId}
@@ -445,7 +425,7 @@ export default function ReactionRulesEditor({
             {renderChannelOptions()}
           </select>
         </label>
-        <label className="settings-field" style={FIELD_STYLES.botId}>
+        <label className="settings-field reaction-rule-row__field reaction-rule-row__field--bot-id">
           Bot user ID
           <input
             value={newDraft.botUserId}
@@ -453,7 +433,7 @@ export default function ReactionRulesEditor({
             placeholder="e.g. 510016054391734273"
           />
         </label>
-        <label className="settings-field" style={FIELD_STYLES.emoji}>
+        <label className="settings-field reaction-rule-row__field reaction-rule-row__field--emoji">
           Emoji
           <input
             value={newDraft.emoji}
@@ -461,7 +441,7 @@ export default function ReactionRulesEditor({
             placeholder="paste here"
           />
         </label>
-        <label className="settings-field" style={FIELD_STYLES.target}>
+        <label className="settings-field reaction-rule-row__field reaction-rule-row__field--target">
           Payout
           <select
             value={newDraft.payoutTarget}
@@ -478,7 +458,7 @@ export default function ReactionRulesEditor({
             <option value="GROUP_POINTS">Group {pointsName}</option>
           </select>
         </label>
-        <label className="settings-field" style={FIELD_STYLES.mode}>
+        <label className="settings-field reaction-rule-row__field reaction-rule-row__field--mode">
           Reward mode
           <select
             value={newDraft.amountMode}
@@ -493,7 +473,7 @@ export default function ReactionRulesEditor({
             <option value="COUNT_MULTIPLIER">Count multiplier</option>
           </select>
         </label>
-        <label className="settings-field" style={FIELD_STYLES.delta}>
+        <label className="settings-field reaction-rule-row__field reaction-rule-row__field--delta">
           {newDraft.amountMode === "COUNT_MULTIPLIER"
             ? `${activeUnit(newDraft, labels)} per count`
             : `${activeUnit(newDraft, labels)} delta`}
@@ -505,7 +485,7 @@ export default function ReactionRulesEditor({
             placeholder={newDraft.amountMode === "COUNT_MULTIPLIER" ? "10" : "1 or -1"}
           />
         </label>
-        <label className="settings-field" style={FIELD_STYLES.max}>
+        <label className="settings-field reaction-rule-row__field reaction-rule-row__field--max">
           Max payout
           <input
             type="text"
@@ -516,7 +496,7 @@ export default function ReactionRulesEditor({
             placeholder={newDraft.amountMode === "COUNT_MULTIPLIER" ? "10000" : ""}
           />
         </label>
-        <label className="settings-field" style={FIELD_STYLES.note}>
+        <label className="settings-field reaction-rule-row__field reaction-rule-row__field--note">
           Label
           <input
             title="Internal label — shown only on the dashboard"
@@ -525,7 +505,7 @@ export default function ReactionRulesEditor({
             placeholder="dashboard label (optional)"
           />
         </label>
-        <label className="settings-field" style={FIELD_STYLES.enabled}>
+        <label className="settings-field reaction-rule-row__field reaction-rule-row__field--enabled">
           Enabled
           <input
             type="checkbox"
@@ -533,7 +513,7 @@ export default function ReactionRulesEditor({
             onChange={(event) => setNewDraft({ ...newDraft, enabled: event.target.checked })}
           />
         </label>
-        <div style={{ ...FIELD_STYLES.actions, display: "flex" }}>
+        <div className="reaction-rule-row__field reaction-rule-row__actions">
           <button type="button" onClick={() => void handleCreate()} disabled={!canSubmitNew}>
             Add reaction rule
           </button>
