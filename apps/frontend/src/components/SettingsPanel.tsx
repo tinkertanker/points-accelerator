@@ -407,8 +407,25 @@ export default function SettingsPanel({
                 </label>
               </div>
             </fieldset>
+          </div>
+        </article>
+
+        <article className="section">
+          <header className="section-header">
+            <h2>Discord channels</h2>
+            <button
+              aria-label="Save Discord channel settings"
+              className="primary-action"
+              type="button"
+              onClick={() => void onSaveSettings()}
+              disabled={isBusy}
+            >
+              Save Settings
+            </button>
+          </header>
+          <div className="form-grid settings-form-grid">
             <fieldset className="settings-section span-full">
-              <legend>Discord channels</legend>
+              <legend className="visually-hidden">Discord channels</legend>
               <div className="settings-section__grid">
                 <label>
                   Listing channel
@@ -507,143 +524,164 @@ export default function SettingsPanel({
                 </label>
               </div>
             </fieldset>
-            <fieldset className="settings-section span-full">
-              <legend>Passive channel eligibility</legend>
-              <div className="settings-section__grid settings-section__grid--channels">
-                <ChannelMultiSelectField
-                  label="Allowed passive channels"
-                  selectedIds={settingsDraft.passiveAllowedChannelIds}
-                  channels={sortedDiscordChannels}
-                  emptyState="All channels are currently allowed."
-                  hint="Leave this empty to allow passive rewards in every channel. Add channels here only if you want a strict allow-list."
-                  placeholder="Type a channel name or ID"
-                  onChange={(passiveAllowedChannelIds) =>
-                    onSettingsChange({
-                      ...settingsDraft,
-                      passiveAllowedChannelIds,
-                    })
-                  }
-                />
-                <ChannelMultiSelectField
-                  label="Denied passive channels"
-                  selectedIds={settingsDraft.passiveDeniedChannelIds}
-                  channels={sortedDiscordChannels}
-                  emptyState="No channels are currently denied."
-                  hint="Leave this empty to deny none. Denied channels always block passive rewards, even if they also appear in the allowed list."
-                  placeholder="Type a channel name or ID"
-                  onChange={(passiveDeniedChannelIds) =>
-                    onSettingsChange({
-                      ...settingsDraft,
-                      passiveDeniedChannelIds,
-                    })
-                  }
-                />
-              </div>
-            </fieldset>
-            <fieldset className="settings-section span-full">
-              <legend>Activity channel restrictions</legend>
-              <p className="section-help">
-                If a list is empty, the activity is allowed in any channel. Otherwise commands run
-                outside the listed channels are blocked, and the offender pays the wrong-channel
-                penalty (capped at their current balance, never goes negative).
-              </p>
-              <div className="form-row">
-                <label className="field">
-                  <span>Wrong-channel penalty (currency)</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.000001"
-                    value={settingsDraft.wrongChannelPenalty}
-                    onChange={(event) =>
-                      onSettingsChange({
-                        ...settingsDraft,
-                        wrongChannelPenalty: Number(event.target.value),
-                      })
-                    }
-                  />
-                  <small className="field-hint">
-                    Set to 0 to block without taxing.
-                  </small>
-                </label>
-              </div>
-              <div className="settings-section__grid settings-section__grid--channels">
-                <ChannelMultiSelectField
-                  label="Betting channels"
-                  selectedIds={settingsDraft.bettingChannelIds}
-                  channels={sortedDiscordChannels}
-                  emptyState="Empty = no restriction (betting allowed anywhere)."
-                  hint="Allowed channels for /bet and /betstats. Anyone running these elsewhere pays the penalty."
-                  placeholder="Type a channel name or ID"
-                  onChange={(bettingChannelIds) =>
-                    onSettingsChange({ ...settingsDraft, bettingChannelIds })
-                  }
-                />
-                <ChannelMultiSelectField
-                  label="Lucky-draw channels"
-                  selectedIds={settingsDraft.luckyDrawChannelIds}
-                  channels={sortedDiscordChannels}
-                  emptyState="Empty = no restriction (lucky draws allowed anywhere)."
-                  hint="Allowed channels for /luckydraw."
-                  placeholder="Type a channel name or ID"
-                  onChange={(luckyDrawChannelIds) =>
-                    onSettingsChange({ ...settingsDraft, luckyDrawChannelIds })
-                  }
-                />
-                <ChannelMultiSelectField
-                  label="Points-action channels"
-                  selectedIds={settingsDraft.pointsChannelIds}
-                  channels={sortedDiscordChannels}
-                  emptyState="Empty = no restriction."
-                  hint="Allowed channels for /award, /deduct, /transfer and /donate."
-                  placeholder="Type a channel name or ID"
-                  onChange={(pointsChannelIds) =>
-                    onSettingsChange({ ...settingsDraft, pointsChannelIds })
-                  }
-                />
-                <ChannelMultiSelectField
-                  label="Store channels"
-                  selectedIds={settingsDraft.shopChannelIds}
-                  channels={sortedDiscordChannels}
-                  emptyState="Empty = no restriction."
-                  hint="Allowed channels for /buy."
-                  placeholder="Type a channel name or ID"
-                  onChange={(shopChannelIds) =>
-                    onSettingsChange({ ...settingsDraft, shopChannelIds })
-                  }
-                />
-              </div>
-            </fieldset>
-            <fieldset className="span-full role-checklist">
-              <legend>Mentor roles</legend>
-              <p className="role-checklist__help">
-                These roles can manage the store, assignments, and submission reviews without getting access to
-                settings or groups.
-              </p>
-              <div className="role-checklist__options">
-                {discordRoles.map((role) => {
-                  const isChecked = settingsDraft.mentorRoleIds.includes(role.id);
-                  return (
-                    <label key={role.id} className="role-checklist__option">
+
+            <details className="capability-help settings-collapsible span-full">
+              <summary>Channel allow-lists &amp; restrictions</summary>
+              <div className="settings-collapsible__body">
+                <fieldset className="settings-section">
+                  <legend>Passive channel eligibility</legend>
+                  <div className="settings-section__grid settings-section__grid--channels">
+                    <ChannelMultiSelectField
+                      label="Allowed passive channels"
+                      selectedIds={settingsDraft.passiveAllowedChannelIds}
+                      channels={sortedDiscordChannels}
+                      emptyState="All channels are currently allowed."
+                      hint="Leave this empty to allow passive rewards in every channel. Add channels here only if you want a strict allow-list."
+                      placeholder="Type a channel name or ID"
+                      onChange={(passiveAllowedChannelIds) =>
+                        onSettingsChange({
+                          ...settingsDraft,
+                          passiveAllowedChannelIds,
+                        })
+                      }
+                    />
+                    <ChannelMultiSelectField
+                      label="Denied passive channels"
+                      selectedIds={settingsDraft.passiveDeniedChannelIds}
+                      channels={sortedDiscordChannels}
+                      emptyState="No channels are currently denied."
+                      hint="Leave this empty to deny none. Denied channels always block passive rewards, even if they also appear in the allowed list."
+                      placeholder="Type a channel name or ID"
+                      onChange={(passiveDeniedChannelIds) =>
+                        onSettingsChange({
+                          ...settingsDraft,
+                          passiveDeniedChannelIds,
+                        })
+                      }
+                    />
+                  </div>
+                </fieldset>
+                <fieldset className="settings-section">
+                  <legend>Activity channel restrictions</legend>
+                  <p className="section-help">
+                    If a list is empty, the activity is allowed in any channel. Otherwise commands run
+                    outside the listed channels are blocked, and the offender pays the wrong-channel
+                    penalty (capped at their current balance, never goes negative).
+                  </p>
+                  <div className="form-row">
+                    <label className="field">
+                      <span>Wrong-channel penalty (currency)</span>
                       <input
-                        type="checkbox"
-                        checked={isChecked}
+                        type="number"
+                        min={0}
+                        step="0.000001"
+                        value={settingsDraft.wrongChannelPenalty}
                         onChange={(event) =>
                           onSettingsChange({
                             ...settingsDraft,
-                            mentorRoleIds: event.target.checked
-                              ? [...settingsDraft.mentorRoleIds, role.id]
-                              : settingsDraft.mentorRoleIds.filter((candidate) => candidate !== role.id),
+                            wrongChannelPenalty: Number(event.target.value),
                           })
                         }
                       />
-                      <span>{role.name}</span>
+                      <small className="field-hint">
+                        Set to 0 to block without taxing.
+                      </small>
                     </label>
-                  );
-                })}
+                  </div>
+                  <div className="settings-section__grid settings-section__grid--channels">
+                    <ChannelMultiSelectField
+                      label="Betting channels"
+                      selectedIds={settingsDraft.bettingChannelIds}
+                      channels={sortedDiscordChannels}
+                      emptyState="Empty = no restriction (betting allowed anywhere)."
+                      hint="Allowed channels for /bet and /betstats. Anyone running these elsewhere pays the penalty."
+                      placeholder="Type a channel name or ID"
+                      onChange={(bettingChannelIds) =>
+                        onSettingsChange({ ...settingsDraft, bettingChannelIds })
+                      }
+                    />
+                    <ChannelMultiSelectField
+                      label="Lucky-draw channels"
+                      selectedIds={settingsDraft.luckyDrawChannelIds}
+                      channels={sortedDiscordChannels}
+                      emptyState="Empty = no restriction (lucky draws allowed anywhere)."
+                      hint="Allowed channels for /luckydraw."
+                      placeholder="Type a channel name or ID"
+                      onChange={(luckyDrawChannelIds) =>
+                        onSettingsChange({ ...settingsDraft, luckyDrawChannelIds })
+                      }
+                    />
+                    <ChannelMultiSelectField
+                      label="Points-action channels"
+                      selectedIds={settingsDraft.pointsChannelIds}
+                      channels={sortedDiscordChannels}
+                      emptyState="Empty = no restriction."
+                      hint="Allowed channels for /award, /deduct, /transfer and /donate."
+                      placeholder="Type a channel name or ID"
+                      onChange={(pointsChannelIds) =>
+                        onSettingsChange({ ...settingsDraft, pointsChannelIds })
+                      }
+                    />
+                    <ChannelMultiSelectField
+                      label="Store channels"
+                      selectedIds={settingsDraft.shopChannelIds}
+                      channels={sortedDiscordChannels}
+                      emptyState="Empty = no restriction."
+                      hint="Allowed channels for /buy."
+                      placeholder="Type a channel name or ID"
+                      onChange={(shopChannelIds) =>
+                        onSettingsChange({ ...settingsDraft, shopChannelIds })
+                      }
+                    />
+                  </div>
+                </fieldset>
               </div>
-            </fieldset>
+            </details>
           </div>
+        </article>
+
+        <article className="section">
+          <header className="section-header">
+            <h2>Mentor roles</h2>
+            <button
+              aria-label="Save mentor role settings"
+              className="primary-action"
+              type="button"
+              onClick={() => void onSaveSettings()}
+              disabled={isBusy}
+            >
+              Save Settings
+            </button>
+          </header>
+          <fieldset className="role-checklist">
+            <legend className="visually-hidden">Mentor roles</legend>
+            <p className="role-checklist__help">
+              These roles can manage the store, assignments, and submission reviews without getting access to
+              settings or groups.
+            </p>
+            <div className="role-checklist__options">
+              {discordRoles.map((role) => {
+                const isChecked = settingsDraft.mentorRoleIds.includes(role.id);
+                return (
+                  <label key={role.id} className="role-checklist__option">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(event) =>
+                        onSettingsChange({
+                          ...settingsDraft,
+                          mentorRoleIds: event.target.checked
+                            ? [...settingsDraft.mentorRoleIds, role.id]
+                            : settingsDraft.mentorRoleIds.filter((candidate) => candidate !== role.id),
+                        })
+                      }
+                    />
+                    <span>{role.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
         </article>
 
         <article className="section">

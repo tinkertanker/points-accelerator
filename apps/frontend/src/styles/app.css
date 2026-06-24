@@ -406,27 +406,13 @@ html[data-theme="dark"] .theme-toggle {
   border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   border-radius: 18px;
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
-  overflow-x: auto;
+  overflow-x: visible;
   padding: 0.45rem;
   scrollbar-width: thin;
   scroll-behavior: smooth;
   scroll-padding-inline: 0.75rem;
-  /* Hint horizontal scrollability with static fade edges */
-  mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 1.25rem,
-    #000 calc(100% - 1.25rem),
-    transparent 100%
-  );
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 1.25rem,
-    #000 calc(100% - 1.25rem),
-    transparent 100%
-  );
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -442,9 +428,10 @@ button.tab-bar__tab {
   border-radius: 14px;
   color: var(--text);
   display: flex;
+  flex: 1 1 8.75rem;
   flex-direction: column;
   gap: 0.15rem;
-  min-width: 11.5rem;
+  min-width: 8.75rem;
   padding: 0.7rem 0.85rem;
   text-align: left;
 }
@@ -482,10 +469,15 @@ button.tab-bar__tab:focus-visible {
 }
 
 .tab-bar__description {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   color: var(--text-dim);
+  display: -webkit-box;
   font-size: 0.72rem;
   line-height: 1.35;
-  max-width: 18ch;
+  max-width: 20ch;
+  min-height: 1.95rem;
+  overflow: hidden;
 }
 
 .dashboard-panel-view {
@@ -938,7 +930,6 @@ dl.stats-row {
   font-size: 0.82rem;
 }
 
-.reset-explainer-grid,
 .reset-mode-grid,
 .reset-target-grid,
 .reset-ledger-grid {
@@ -946,19 +937,6 @@ dl.stats-row {
   gap: 0.75rem;
 }
 
-.reset-explainer-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-bottom: 1rem;
-}
-
-.reset-explainer {
-  background: color-mix(in srgb, var(--bg-panel) 65%, var(--bg-elevated));
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 8px;
-  padding: 0.9rem;
-}
-
-.reset-explainer h3,
 .reset-workspace__intro h3 {
   color: var(--text);
   font-size: 0.92rem;
@@ -966,8 +944,7 @@ dl.stats-row {
   margin: 0 0 0.35rem;
 }
 
-.reset-explainer p,
-.reset-workspace__intro p,
+.reset-workspace__lead,
 .reset-target-card small {
   color: var(--text-muted);
   font-size: 0.8rem;
@@ -1299,6 +1276,143 @@ button.reset-mode-card[aria-checked="true"] {
 .settings-section__grid--channels .channel-picker-field {
   grid-column: span 1;
   min-width: 0;
+}
+
+/* Collapsible long-tail config (channel allow/deny lists, etc.) */
+.settings-collapsible {
+  margin: 0;
+}
+
+.settings-collapsible > summary {
+  align-items: center;
+  display: flex;
+  font-size: 0.875rem;
+}
+
+.settings-collapsible__body {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.85rem;
+}
+
+.settings-collapsible__body .settings-section {
+  background: var(--bg-panel);
+}
+
+/* Reaction-reward rule editor: a responsive grid that replaces the old
+   overflowing inline-flex row. Fields keep consistent track widths and
+   wrap predictably instead of truncating. */
+.reaction-rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.reaction-rule-list__empty {
+  margin-bottom: 0.5rem;
+}
+
+.reaction-rule-row {
+  align-items: end;
+  background: color-mix(in srgb, var(--bg-panel) 55%, var(--bg-elevated));
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 0.6rem;
+  display: grid;
+  gap: 0.5rem 0.6rem;
+  grid-template-columns:
+    minmax(10rem, 1.1fr)  /* channel */
+    minmax(12rem, 1.2fr)  /* bot id  */
+    5rem                  /* emoji    */
+    minmax(10rem, 1fr)    /* payout   */
+    minmax(10rem, 1fr)    /* mode     */
+    minmax(6rem, 0.7fr)   /* delta    */
+    minmax(6rem, 0.7fr)   /* max      */
+    auto;                 /* enabled  */
+  grid-template-areas:
+    "channel bot emoji target mode delta max enabled"
+    "note note note note actions actions actions actions";
+  padding: 0.6rem;
+}
+
+.reaction-rule-row--new {
+  background: transparent;
+  border: 1px dashed var(--border);
+}
+
+.reaction-rule-row__field {
+  min-width: 0;
+}
+
+.reaction-rule-row__field--channel {
+  grid-area: channel;
+}
+
+.reaction-rule-row__field--bot-id {
+  grid-area: bot;
+}
+
+.reaction-rule-row__field--emoji {
+  grid-area: emoji;
+}
+
+.reaction-rule-row__field--target {
+  grid-area: target;
+}
+
+.reaction-rule-row__field--mode {
+  grid-area: mode;
+}
+
+.reaction-rule-row__field--delta {
+  grid-area: delta;
+}
+
+.reaction-rule-row__field--max {
+  grid-area: max;
+}
+
+.reaction-rule-row__field--note {
+  grid-area: note;
+}
+
+.reaction-rule-row__field--enabled {
+  align-items: center;
+  display: flex;
+  gap: 0.35rem;
+  grid-area: enabled;
+}
+
+.reaction-rule-row__actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  grid-area: actions;
+  justify-content: flex-end;
+}
+
+@media (max-width: 1200px) {
+  .reaction-rule-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: none;
+  }
+
+  .reaction-rule-row__field,
+  .reaction-rule-row__actions {
+    grid-area: auto;
+  }
+
+  .reaction-rule-row__field--emoji,
+  .reaction-rule-row__field--delta,
+  .reaction-rule-row__field--max,
+  .reaction-rule-row__field--enabled {
+    grid-column: span 1;
+  }
+
+  .reaction-rule-row__actions {
+    grid-column: 1 / -1;
+  }
 }
 
 .channel-picker {
@@ -1754,7 +1868,7 @@ button.reset-mode-card[aria-checked="true"] {
 }
 
 .shop-table {
-  min-width: 52rem;
+  min-width: 72rem;
 }
 
 .shop-table input,
@@ -1829,12 +1943,20 @@ button.reset-mode-card[aria-checked="true"] {
   width: 5rem;
 }
 
+.shop-table .col-emoji {
+  width: 4.75rem;
+}
+
+.shop-table .col-owner {
+  width: 5rem;
+}
+
 .shop-table .col-name input {
-  min-width: 5rem;
+  min-width: 9rem;
 }
 
 .shop-table .col-description input {
-  min-width: 12rem;
+  min-width: 17rem;
 }
 
 .shop-table .col-cost,
@@ -1848,13 +1970,13 @@ button.reset-mode-card[aria-checked="true"] {
 }
 
 .shop-table .col-fulfil input {
-  min-width: 9rem;
+  min-width: 15rem;
 }
 
 .shop-table .col-actions {
   text-align: right;
   white-space: nowrap;
-  width: 7rem;
+  width: 5.75rem;
 }
 
 .shop-table .col-actions .shop-icon-button {
@@ -2160,7 +2282,6 @@ button.reset-mode-card[aria-checked="true"] {
     min-width: 9rem;
   }
 
-  .reset-explainer-grid,
   .reset-mode-grid,
   .reset-target-grid,
   .reset-ledger-grid {
@@ -2258,7 +2379,6 @@ button.reset-mode-card[aria-checked="true"] {
     grid-column: auto;
   }
 
-  .reset-explainer-grid,
   .reset-mode-grid,
   .reset-target-grid,
   .reset-ledger-grid {
