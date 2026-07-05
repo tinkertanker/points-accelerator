@@ -120,6 +120,44 @@ describe("ReactionRulesEditor", () => {
     expect(screen.getByRole("button", { name: "Add reaction rule" })).toBeDisabled();
   });
 
+  it("allows a negative maximum payout for an existing count-multiplier deduction", async () => {
+    const { onUpdate } = renderEditor({
+      rules: [
+        {
+          id: "rule-deduct",
+          guildId: "guild-1",
+          channelId: "channel-counting",
+          botUserId: "bot-counter",
+          emoji: "❌",
+          payoutTarget: "PARTICIPANT_CURRENCY",
+          currencyDelta: -100,
+          pointsDelta: 0,
+          amountMode: "COUNT_MULTIPLIER",
+          maxCurrencyDelta: null,
+          maxPointsDelta: null,
+          description: null,
+          enabled: true,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    fireEvent.change(screen.getByLabelText("Maximum payout"), {
+      target: { value: "-100000" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
+    expect(onUpdate).toHaveBeenCalledWith(
+      "rule-deduct",
+      expect.objectContaining({
+        currencyDelta: -100,
+        maxCurrencyDelta: -100000,
+      }),
+    );
+  });
+
   it("clears an existing count-multiplier maximum payout with explicit null", async () => {
     const { onUpdate } = renderEditor({
       rules: [

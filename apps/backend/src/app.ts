@@ -303,8 +303,20 @@ const reactionRewardRuleSchema = z.object({
     })
     .optional(),
   amountMode: z.enum(["FIXED", "COUNT_MULTIPLIER"]).optional(),
-  maxCurrencyDelta: z.number().positive().nullable().optional(),
-  maxPointsDelta: z.number().positive().nullable().optional(),
+  maxCurrencyDelta: z
+    .number()
+    .refine((value) => Number.isFinite(value) && value !== 0, {
+      message: "maxCurrencyDelta must be a non-zero finite number",
+    })
+    .nullable()
+    .optional(),
+  maxPointsDelta: z
+    .number()
+    .refine((value) => Number.isFinite(value) && value !== 0, {
+      message: "maxPointsDelta must be a non-zero finite number",
+    })
+    .nullable()
+    .optional(),
   description: z.string().nullable().optional(),
   enabled: z.boolean().optional(),
 }).superRefine((value, context) => {

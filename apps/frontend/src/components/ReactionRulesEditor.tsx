@@ -94,16 +94,16 @@ function parseDelta(text: string): number | null {
   return parsed;
 }
 
-function parseOptionalPositive(text: string): number | null {
+function parseOptionalNonZero(text: string): number | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
   const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  if (!Number.isFinite(parsed) || parsed === 0) return null;
   return parsed;
 }
 
-function isValidOptionalPositive(text: string) {
-  return text.trim().length === 0 || parseOptionalPositive(text) !== null;
+function isValidOptionalNonZero(text: string) {
+  return text.trim().length === 0 || parseOptionalNonZero(text) !== null;
 }
 
 export default function ReactionRulesEditor({
@@ -180,10 +180,10 @@ export default function ReactionRulesEditor({
     const parsed = parseDelta(deltaTextFor(key, activeDelta(draft)));
     const maxText = maxTextFor(key, activeMax(draft));
     if (parsed === null) return null;
-    if (draft.amountMode === "COUNT_MULTIPLIER" && !isValidOptionalPositive(maxText)) return null;
+    if (draft.amountMode === "COUNT_MULTIPLIER" && !isValidOptionalNonZero(maxText)) return null;
     const maxDelta =
       draft.amountMode === "COUNT_MULTIPLIER" && maxText.trim()
-        ? parseOptionalPositive(maxText)
+        ? parseOptionalNonZero(maxText)
         : null;
     return withActiveMax(withActiveDelta(draft, parsed), maxDelta);
   };
@@ -237,7 +237,7 @@ export default function ReactionRulesEditor({
   const newDeltaText = deltaTextFor(NEW_ROW_KEY, activeDelta(newDraft));
   const newDeltaValid = parseDelta(newDeltaText) !== null;
   const newMaxText = maxTextFor(NEW_ROW_KEY, activeMax(newDraft));
-  const newMaxValid = newDraft.amountMode !== "COUNT_MULTIPLIER" || isValidOptionalPositive(newMaxText);
+  const newMaxValid = newDraft.amountMode !== "COUNT_MULTIPLIER" || isValidOptionalNonZero(newMaxText);
   const canSubmitNew =
     !isBusy &&
     Boolean(newDraft.channelId) &&
@@ -264,12 +264,12 @@ export default function ReactionRulesEditor({
             const text = deltaTextFor(rule.id, activeDelta(draft));
             const parsed = parseDelta(text);
             const maxText = maxTextFor(rule.id, activeMax(draft));
-            const parsedMax = parseOptionalPositive(maxText);
+            const parsedMax = parseOptionalNonZero(maxText);
             const maxDelta = draft.amountMode === "COUNT_MULTIPLIER" && maxText.trim() ? parsedMax : null;
             const normalisedDraft =
               parsed === null ? draft : withActiveMax(withActiveDelta(draft, parsed), maxDelta);
             const dirty = isDirty(rule, normalisedDraft);
-            const maxValid = draft.amountMode !== "COUNT_MULTIPLIER" || isValidOptionalPositive(maxText);
+            const maxValid = draft.amountMode !== "COUNT_MULTIPLIER" || isValidOptionalNonZero(maxText);
             const unit = activeUnit(draft, labels);
             return (
               <div key={rule.id} className="reaction-rule-row">

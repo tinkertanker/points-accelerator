@@ -93,13 +93,14 @@ describe("reaction reward rules", () => {
         emoji: "❌",
         currencyDelta: -2,
         amountMode: "COUNT_MULTIPLIER",
-        maxCurrencyDelta: 100,
+        maxCurrencyDelta: -100,
         description: null,
         enabled: true,
       },
     });
     expect(update.statusCode).toBe(200);
     expect((update.json() as { currencyDelta: number }).currencyDelta).toBe(-2);
+    expect((update.json() as { maxCurrencyDelta: number }).maxCurrencyDelta).toBe(-100);
     expect((update.json() as { amountMode: string }).amountMode).toBe("COUNT_MULTIPLIER");
 
     const remove = await ctx.app.inject({
@@ -529,7 +530,7 @@ describe("reaction reward rules", () => {
     ).resolves.toBe(80);
   });
 
-  it("caps count-multiplier deductions by magnitude when a maximum payout is configured", async () => {
+  it("caps count-multiplier deductions by magnitude when a negative maximum payout is configured", async () => {
     const { participant } = await seedGroupAndParticipant();
     await ctx.services.participantCurrencyService.awardParticipants({
       guildId: ctx.env.GUILD_ID,
@@ -547,7 +548,7 @@ describe("reaction reward rules", () => {
         emoji: "❌",
         currencyDelta: -2,
         amountMode: "COUNT_MULTIPLIER",
-        maxCurrencyDelta: 100,
+        maxCurrencyDelta: -100,
       },
     });
 
