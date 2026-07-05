@@ -177,7 +177,7 @@ describe("reaction reward rules", () => {
     expect(duplicate.statusCode).toBe(409);
   });
 
-  it("requires a maximum payout for count multiplier rules", async () => {
+  it("allows count multiplier rules without a configured maximum payout", async () => {
     await ctx.services.configService.getOrCreate(ctx.env.GUILD_ID);
 
     const response = await ctx.app.inject({
@@ -193,7 +193,8 @@ describe("reaction reward rules", () => {
       },
     });
 
-    expect(response.statusCode).toBe(400);
+    expect(response.statusCode).toBe(200);
+    expect((response.json() as { maxCurrencyDelta: number | null }).maxCurrencyDelta).toBeNull();
 
     const pointsResponse = await ctx.app.inject({
       method: "POST",
@@ -209,7 +210,8 @@ describe("reaction reward rules", () => {
       },
     });
 
-    expect(pointsResponse.statusCode).toBe(400);
+    expect(pointsResponse.statusCode).toBe(200);
+    expect((pointsResponse.json() as { maxPointsDelta: number | null }).maxPointsDelta).toBeNull();
   });
 
   it("preserves amount mode and maximum payout when an update omits those fields", async () => {
@@ -240,6 +242,39 @@ describe("reaction reward rules", () => {
 
     expect(updated.amountMode).toBe("COUNT_MULTIPLIER");
     expect(updated.maxCurrencyDelta).toBe(1000);
+  });
+
+  it("clears an existing maximum payout when an update sends null", async () => {
+    await ctx.services.configService.getOrCreate(ctx.env.GUILD_ID);
+
+    const rule = await ctx.services.reactionRewardService.create({
+      guildId: ctx.env.GUILD_ID,
+      input: {
+        channelId: "ch-counting",
+        botUserId: "bot-counter",
+        emoji: "⭐",
+        payoutTarget: "GROUP_POINTS",
+        pointsDelta: 10,
+        amountMode: "COUNT_MULTIPLIER",
+        maxPointsDelta: 1000,
+      },
+    });
+
+    const updated = await ctx.services.reactionRewardService.update({
+      guildId: ctx.env.GUILD_ID,
+      id: rule.id,
+      input: {
+        channelId: "ch-counting",
+        botUserId: "bot-counter",
+        emoji: "⭐",
+        payoutTarget: "GROUP_POINTS",
+        pointsDelta: 10,
+        amountMode: "COUNT_MULTIPLIER",
+        maxPointsDelta: null,
+      },
+    });
+
+    expect(updated.maxPointsDelta).toBeNull();
   });
 
   it("applies a positive rule and credits the participant exactly once per message", async () => {
@@ -295,6 +330,35 @@ describe("reaction reward rules", () => {
       rule,
       participantId: participant.id,
       messageId: "msg-count-100",
+      messageContent: "100",
+      messageAuthorUserId: "user-counter",
+      messageAuthorUsername: "counter",
+    });
+
+    await expect(
+      ctx.services.participantCurrencyService.getParticipantBalance(participant.id),
+    ).resolves.toBe(1000);
+  });
+
+  it("can multiply participant currency without a configured maximum payout", async () => {
+    const { participant } = await seedGroupAndParticipant();
+    const rule = await ctx.services.reactionRewardService.create({
+      guildId: ctx.env.GUILD_ID,
+      input: {
+        channelId: "ch-counting",
+        botUserId: "bot-counter",
+        emoji: "✅",
+        currencyDelta: 10,
+        amountMode: "COUNT_MULTIPLIER",
+        maxCurrencyDelta: null,
+      },
+    });
+
+    await ctx.services.reactionRewardService.applyReaction({
+      guildId: ctx.env.GUILD_ID,
+      rule,
+      participantId: participant.id,
+      messageId: "msg-count-100-uncapped",
       messageContent: "100",
       messageAuthorUserId: "user-counter",
       messageAuthorUsername: "counter",
@@ -368,6 +432,37 @@ describe("reaction reward rules", () => {
     });
   });
 
+  it("can multiply group points without a configured maximum payout", async () => {
+    const { group, participant } = await seedGroupAndParticipant();
+    const rule = await ctx.services.reactionRewardService.create({
+      guildId: ctx.env.GUILD_ID,
+      input: {
+        channelId: "ch-counting",
+        botUserId: "bot-counter",
+        emoji: "⭐",
+        payoutTarget: "GROUP_POINTS",
+        pointsDelta: 2,
+        amountMode: "COUNT_MULTIPLIER",
+        maxPointsDelta: null,
+      },
+    });
+
+    await ctx.services.reactionRewardService.applyReaction({
+      guildId: ctx.env.GUILD_ID,
+      rule,
+      participantId: participant.id,
+      groupId: group.id,
+      messageId: "msg-count-points-uncapped",
+      messageContent: "100",
+      messageAuthorUserId: "user-counter",
+      messageAuthorUsername: "counter",
+    });
+
+    await expect(ctx.services.economyService.getGroupBalance(group.id)).resolves.toMatchObject({
+      pointsBalance: 200,
+    });
+  });
+
   it("caps count-multiplier rewards at the configured maximum payout", async () => {
     const { participant } = await seedGroupAndParticipant();
     const rule = await ctx.services.reactionRewardService.create({
@@ -395,6 +490,109 @@ describe("reaction reward rules", () => {
     await expect(
       ctx.services.participantCurrencyService.getParticipantBalance(participant.id),
     ).resolves.toBe(1000);
+  });
+
+  it("applies uncapped count-multiplier deductions when the participant has enough currency", async () => {
+    const { participant } = await seedGroupAndParticipant();
+    await ctx.services.participantCurrencyService.awardParticipants({
+      guildId: ctx.env.GUILD_ID,
+      actor: { userId: "system", username: "system", roleIds: [] },
+      targetParticipantIds: [participant.id],
+      currencyDelta: 100,
+      description: "Seed balance",
+      systemAction: true,
+    });
+    const rule = await ctx.services.reactionRewardService.create({
+      guildId: ctx.env.GUILD_ID,
+      input: {
+        channelId: "ch-counting",
+        botUserId: "bot-counter",
+        emoji: "❌",
+        currencyDelta: -2,
+        amountMode: "COUNT_MULTIPLIER",
+        maxCurrencyDelta: null,
+      },
+    });
+
+    await ctx.services.reactionRewardService.applyReaction({
+      guildId: ctx.env.GUILD_ID,
+      rule,
+      participantId: participant.id,
+      messageId: "msg-count-deduct-10",
+      messageContent: "10",
+      messageAuthorUserId: "user-counter",
+      messageAuthorUsername: "counter",
+    });
+
+    await expect(
+      ctx.services.participantCurrencyService.getParticipantBalance(participant.id),
+    ).resolves.toBe(80);
+  });
+
+  it("caps count-multiplier deductions by magnitude when a maximum payout is configured", async () => {
+    const { participant } = await seedGroupAndParticipant();
+    await ctx.services.participantCurrencyService.awardParticipants({
+      guildId: ctx.env.GUILD_ID,
+      actor: { userId: "system", username: "system", roleIds: [] },
+      targetParticipantIds: [participant.id],
+      currencyDelta: 500,
+      description: "Seed balance",
+      systemAction: true,
+    });
+    const rule = await ctx.services.reactionRewardService.create({
+      guildId: ctx.env.GUILD_ID,
+      input: {
+        channelId: "ch-counting",
+        botUserId: "bot-counter",
+        emoji: "❌",
+        currencyDelta: -2,
+        amountMode: "COUNT_MULTIPLIER",
+        maxCurrencyDelta: 100,
+      },
+    });
+
+    await ctx.services.reactionRewardService.applyReaction({
+      guildId: ctx.env.GUILD_ID,
+      rule,
+      participantId: participant.id,
+      messageId: "msg-count-deduct-capped",
+      messageContent: "1000",
+      messageAuthorUserId: "user-counter",
+      messageAuthorUsername: "counter",
+    });
+
+    await expect(
+      ctx.services.participantCurrencyService.getParticipantBalance(participant.id),
+    ).resolves.toBe(400);
+  });
+
+  it("caps uncapped count-multiplier rewards at the database decimal boundary", async () => {
+    const { participant } = await seedGroupAndParticipant();
+    const rule = await ctx.services.reactionRewardService.create({
+      guildId: ctx.env.GUILD_ID,
+      input: {
+        channelId: "ch-counting",
+        botUserId: "bot-counter",
+        emoji: "✅",
+        currencyDelta: 2,
+        amountMode: "COUNT_MULTIPLIER",
+        maxCurrencyDelta: null,
+      },
+    });
+
+    await ctx.services.reactionRewardService.applyReaction({
+      guildId: ctx.env.GUILD_ID,
+      rule,
+      participantId: participant.id,
+      messageId: "msg-count-db-boundary",
+      messageContent: "1,000,000,000,000",
+      messageAuthorUserId: "user-counter",
+      messageAuthorUsername: "counter",
+    });
+
+    await expect(
+      ctx.services.participantCurrencyService.getParticipantBalance(participant.id),
+    ).resolves.toBe(999_999_999_999);
   });
 
   it("accepts comma-formatted counted numbers", async () => {
