@@ -1,0 +1,8 @@
+services:
+  dashboard:
+    command: npm run dev:design -- --host 0.0.0.0 --port "$PORT" --strictPort
+    cwd: apps/frontend
+    health: /
+    portal:
+      title: Points accelerator preview
+      description: Sample-data dashboard; no Discord credentials or backend required.

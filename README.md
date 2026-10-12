@@ -48,6 +48,24 @@ The design preview uses bundled sample data. For a dashboard connected to a back
 - Frontend unit: `npm run test:frontend`
 - Browser E2E: `npm run e2e`
 
+## Amp orbs
+
+`.agents/setup` prepares Node.js 22 (matching CI), PostgreSQL 15 test binaries,
+locked npm workspace dependencies, the Prisma client, and Playwright Chromium.
+Amp snapshots these dependencies for reuse. On a stale snapshot, setup checks
+installed system packages and only runs `npm ci` when the lockfile, workspace
+manifests, or Node/npm versions change. It regenerates Prisma on cache hits.
+Delete `node_modules/.amp-install-fingerprint` to force a dependency reinstall.
+
+Run `amp orb services ensure` to open the supervised sample-data dashboard through
+the returned portal URL. It requires no Discord credentials, backend, or database.
+There is no resume hook because no authentication or wake-time repair is needed.
+
+Setup deliberately does not copy `.env.example` or export `DATABASE_URL`. With
+`DATABASE_URL` unset, backend tests create, migrate, and remove their own ephemeral
+PostgreSQL database. Never point tests at a shared or production database. Running
+the live bot still requires the separate configuration described above.
+
 ## Deployment notes
 
 - The app is designed to run with PostgreSQL and can be deployed on a single Docker host with the provided Compose stack.

@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+export CI=true
+TIMEFORMAT='[orb setup] step took %3R seconds'
+
+echo '[orb setup] Node.js 22 (matches CI and Docker)'
+if [[ "$(node --version 2>/dev/null || true)" != v22.* ]]; then
+  time (
+    download_dir=$(mktemp -d)
+    trap 'rm -rf "$download_dir"' EXIT
+    case "$(uname -m)" in
+      x86_64) arch=x64 ;;
+      aarch64) arch=arm64 ;;
+      *) echo 'Unsupported Node.js architecture' >&2; exit 1 ;;
+    esac
+    curl --fail --silent --show-error --location https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt \
+      -o "$download_dir/SHASUMS256.txt"
+    checksum=$(grep " node-v22.*-linux-${arch}\.tar\.xz$" "$download_dir/SHASUMS256.txt")
+    archive=${checksum##* }
+    curl --fail --silent --show-error --location "https://nodejs.org/dist/latest-v22.x/$archive" \
+      -o "$download_dir/$archive"
+    (cd "$download_dir" && printf '%s\n' "$checksum" | sha256sum --check -)
+    sudo tar -xJf "$download_dir/$archive" -C /usr/local --strip-components=1
+  )
+fi
+node --version
+npm --version
+
+echo '[orb setup] PostgreSQL 15 and Chromium system dependencies'
+# Debian 12 packages from `playwright install-deps --dry-run chromium`.
+packages=(
+  postgresql-15 libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0
+  libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 libnspr4 libnss3
+  libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6
+  libxfixes3 libxkbcommon0 libxrandr2 xvfb fonts-noto-color-emoji fonts-unifont
+  libfontconfig1 libfreetype6 xfonts-scalable fonts-liberation fonts-ipafont-gothic
+  fonts-wqy-zenhei fonts-tlwg-loma-otf fonts-freefont-ttf
+)
+missing=()
+for package in "${packages[@]}"; do
+  if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -qx 'install ok installed'; then
+    missing+=("$package")
+  fi
+done
+if (( ${#missing[@]} )); then
+  time sudo apt-get update
+  time sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+fi
+
+echo '[orb setup] Locked workspace dependencies and Prisma client'
+# Warm npm ci takes ~15s and replaces all packages; npm install rewrites the lockfile.
+# Keep the successful-install marker inside node_modules so removing it forces repair.
+fingerprint=$({
+  sha256sum package-lock.json package.json apps/backend/package.json apps/frontend/package.json
+  node --version
+  npm --version
+} | sha256sum)
+marker=node_modules/.amp-install-fingerprint
+if [[ ! -f "$marker" ]] || [[ "$(cat "$marker")" != "$fingerprint" ]]; then
+  time npm ci --include=dev --prefer-offline --no-audit --no-fund
+  printf '%s\n' "$fingerprint" > "$marker"
+else
+  echo '[orb setup] Reusing installed workspace dependencies'
+  # The schema can change independently of the package lockfile.
+  time npm --workspace apps/backend run prisma:generate
+fi
+
+echo '[orb setup] Playwright Chromium (reuses downloaded browser revisions)'
+time npx --no-install playwright install chromium
+
+echo '[orb setup] Ready. Use npm run build, npm run test, npm run e2e.'
+echo '[orb setup] Use amp orb services ensure for the sample-data dashboard.'

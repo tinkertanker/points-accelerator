@@ -14,4 +14,4 @@ apps/backend/.tmp/
 apps/frontend/.tmp/
 .claude/
 output/
-
+.amp/portals/
