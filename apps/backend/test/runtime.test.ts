@@ -1,4 +1,4 @@
-import { REST } from "discord.js";
+import { Client, REST } from "discord.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BotRuntime } from "../src/bot/runtime.js";
@@ -336,6 +336,20 @@ describe("bot runtime", () => {
       expect(fixture.send).not.toHaveBeenCalled();
       expect(fixture.reply).not.toHaveBeenCalled();
       expect(fixture.editReply).not.toHaveBeenCalled();
+    });
+
+    it("rejects a cached channel that Discord no longer allows before creating a listing", async () => {
+      const fixture = sellFixture();
+      const client = new Client({ intents: [] });
+      client.channels.cache.set("listing-channel", fixture.channel as never);
+      vi.spyOn(client.rest, "get").mockRejectedValue(new Error("Missing Access"));
+      (fixture.runtime as any).client = client;
+
+      await expect(fixture.sell()).rejects.toThrow("A configured channel is not a text channel in this guild.");
+
+      expect(fixture.services.listingService.create).not.toHaveBeenCalled();
+      expect(await fixture.runtime.postListing("guild-test", "listing-channel", "Listing content")).toBeNull();
+      expect(fixture.send).not.toHaveBeenCalled();
     });
 
     it.each(invalidChannels)("does not post directly to a %s channel at the shared boundary", async (kind) => {

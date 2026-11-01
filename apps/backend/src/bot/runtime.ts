@@ -912,7 +912,7 @@ export class BotRuntime {
       return null;
     }
 
-    const channel = await this.client.channels.fetch(channelId).catch(() => null);
+    const channel = await this.client.channels.fetch(channelId, { force: true }).catch(() => null);
     if (!channel || !channel.isTextBased() || !("guildId" in channel) || channel.guildId !== guildId) {
       return null;
     }
