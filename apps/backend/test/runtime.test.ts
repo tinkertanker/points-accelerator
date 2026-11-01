@@ -182,6 +182,10 @@ function createRuntimeFixture() {
       transferCurrency: vi.fn().mockResolvedValue({ id: "entry-1" }),
       awardParticipants: vi.fn().mockResolvedValue({ id: "entry-3" }),
     },
+    reactionRewardService: {
+      findApplicable: vi.fn().mockResolvedValue(null),
+      applyReaction: vi.fn().mockResolvedValue({ id: "reaction-entry-1" }),
+    },
     bettingService: {
       placeBet: vi.fn().mockResolvedValue({ won: true, amount: 1, newCurrencyBalance: 8 }),
       getStats: vi.fn().mockResolvedValue({
@@ -247,6 +251,60 @@ afterEach(() => {
 });
 
 describe("bot runtime", () => {
+  it("applies configured reaction rewards when the reacting bot is itself", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    const rule = {
+      id: "rule-cross",
+      botUserId: "bot-self",
+      emoji: "❌",
+      currencyDelta: -1,
+    };
+    services.reactionRewardService.findApplicable.mockResolvedValue(rule);
+    (runtime as any).client = { user: { id: "bot-self" } };
+
+    const member = {
+      roles: {
+        cache: new Map([["group-role", { rawPosition: 1 }]]),
+      },
+    };
+    const message = {
+      id: "message-cross",
+      partial: false,
+      guildId: "guild-test",
+      guild: { id: "guild-test" },
+      channelId: "channel-counting",
+      content: "10",
+      author: { id: "student-1", username: "Alice", bot: false },
+      member,
+    };
+    const reaction = {
+      partial: false,
+      emoji: { id: null, name: "❌" },
+      message,
+    };
+
+    await (runtime as any).handleBotReaction(reaction, { id: "bot-self" });
+
+    expect(services.reactionRewardService.findApplicable).toHaveBeenCalledWith({
+      guildId: "guild-test",
+      channelId: "channel-counting",
+      botUserId: "bot-self",
+      emoji: "❌",
+    });
+    expect(services.reactionRewardService.applyReaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guildId: "guild-test",
+        rule,
+        participantId: "participant-1",
+        groupId: "group-1",
+        messageId: "message-cross",
+        messageContent: "10",
+        messageAuthorUserId: "student-1",
+        messageAuthorUsername: "Alice",
+      }),
+    );
+  });
+
   it("uses the saved passive cooldown for message rewards", async () => {
     const { config, runtime, services } = createRuntimeFixture();
     const nowSpy = vi.spyOn(Date, "now");

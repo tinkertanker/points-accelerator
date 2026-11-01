@@ -147,25 +147,18 @@ function normaliseInput(input: ReactionRewardRuleInput, existing?: ExistingReact
     payoutTarget === "PARTICIPANT_CURRENCY" ? normaliseNonZeroDelta(currencyDelta, "Currency delta") : currencyDelta ?? 0;
   const normalisedPointsDelta =
     payoutTarget === "GROUP_POINTS" ? normaliseNonZeroDelta(pointsDelta, "Points delta") : pointsDelta ?? 0;
-  if (maxCurrencyDelta !== null && (!Number.isFinite(maxCurrencyDelta) || maxCurrencyDelta <= 0)) {
-    throw new AppError("Maximum payout must be a positive number.");
+  if (maxCurrencyDelta !== null && (!Number.isFinite(maxCurrencyDelta) || maxCurrencyDelta === 0)) {
+    throw new AppError("Maximum payout must be a non-zero number.");
   }
-  if (maxCurrencyDelta !== null && maxCurrencyDelta > MAX_REACTION_REWARD_MAGNITUDE) {
+  if (maxCurrencyDelta !== null && Math.abs(maxCurrencyDelta) > MAX_REACTION_REWARD_MAGNITUDE) {
     throw new AppError("Maximum payout is too large.");
   }
-  if (maxPointsDelta !== null && (!Number.isFinite(maxPointsDelta) || maxPointsDelta <= 0)) {
-    throw new AppError("Maximum payout must be a positive number.");
+  if (maxPointsDelta !== null && (!Number.isFinite(maxPointsDelta) || maxPointsDelta === 0)) {
+    throw new AppError("Maximum payout must be a non-zero number.");
   }
-  if (maxPointsDelta !== null && maxPointsDelta > MAX_REACTION_REWARD_MAGNITUDE) {
+  if (maxPointsDelta !== null && Math.abs(maxPointsDelta) > MAX_REACTION_REWARD_MAGNITUDE) {
     throw new AppError("Maximum payout is too large.");
   }
-  if (amountMode === "COUNT_MULTIPLIER" && payoutTarget === "PARTICIPANT_CURRENCY" && maxCurrencyDelta === null) {
-    throw new AppError("Maximum payout is required for count multiplier rules.");
-  }
-  if (amountMode === "COUNT_MULTIPLIER" && payoutTarget === "GROUP_POINTS" && maxPointsDelta === null) {
-    throw new AppError("Maximum payout is required for count multiplier rules.");
-  }
-
   return {
     channelId,
     botUserId,
@@ -220,18 +213,15 @@ function resolveRewardDelta(params: {
     return { delta: 0, countedNumber: null, wasCapped: false };
   }
 
-  if (maxAmount === null) {
-    return { delta: 0, countedNumber, wasCapped: false };
-  }
-
   const computedDelta = baseDelta * countedNumber;
+  const effectiveMaxAmount = maxAmount === null ? MAX_REACTION_REWARD_MAGNITUDE : Math.abs(maxAmount);
   if (!Number.isFinite(computedDelta)) {
-    return { delta: Math.sign(baseDelta) * maxAmount, countedNumber, wasCapped: true };
+    return { delta: Math.sign(baseDelta) * effectiveMaxAmount, countedNumber, wasCapped: true };
   }
 
   const magnitude = Math.abs(computedDelta);
-  if (magnitude > maxAmount) {
-    return { delta: Math.sign(computedDelta) * maxAmount, countedNumber, wasCapped: true };
+  if (magnitude > effectiveMaxAmount) {
+    return { delta: Math.sign(computedDelta) * effectiveMaxAmount, countedNumber, wasCapped: true };
   }
 
   return { delta: computedDelta, countedNumber, wasCapped: false };

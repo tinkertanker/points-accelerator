@@ -3014,10 +3014,6 @@ export class BotRuntime {
     reaction: MessageReaction | PartialMessageReaction,
     user: User | PartialUser,
   ) {
-    if (user.id === this.client?.user?.id) {
-      return;
-    }
-
     let resolvedReaction: MessageReaction;
     try {
       resolvedReaction = reaction.partial ? await reaction.fetch() : (reaction as MessageReaction);

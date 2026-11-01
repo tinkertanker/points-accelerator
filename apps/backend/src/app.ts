@@ -303,8 +303,20 @@ const reactionRewardRuleSchema = z.object({
     })
     .optional(),
   amountMode: z.enum(["FIXED", "COUNT_MULTIPLIER"]).optional(),
-  maxCurrencyDelta: z.number().positive().nullable().optional(),
-  maxPointsDelta: z.number().positive().nullable().optional(),
+  maxCurrencyDelta: z
+    .number()
+    .refine((value) => Number.isFinite(value) && value !== 0, {
+      message: "maxCurrencyDelta must be a non-zero finite number",
+    })
+    .nullable()
+    .optional(),
+  maxPointsDelta: z
+    .number()
+    .refine((value) => Number.isFinite(value) && value !== 0, {
+      message: "maxPointsDelta must be a non-zero finite number",
+    })
+    .nullable()
+    .optional(),
   description: z.string().nullable().optional(),
   enabled: z.boolean().optional(),
 }).superRefine((value, context) => {
@@ -1553,6 +1565,15 @@ export function createApp(params: {
   app.post("/api/listings", { preHandler: requireAdmin }, async (request) => {
     const payload = listingSchema.parse(request.body);
     const config = await services.configService.getOrCreate(guildIdOf(request));
+    // Validate the same snapshot used to post; a concurrent settings write must
+    // never switch the channel after verification, including through MCP.
+    if (config.listingChannelId) {
+      if (!params.botRuntime) throw new AppError("Live Discord channel verification is unavailable.", 503);
+      const channels = await params.botRuntime.getTextChannels(guildIdOf(request));
+      if (!channels.some((channel) => channel.id === config.listingChannelId)) {
+        throw new AppError("A configured channel is not a text channel in this guild.", 404);
+      }
+    }
     const posted = config.listingChannelId
       ? await params.botRuntime?.postListing(
           config.listingChannelId,
@@ -2025,9 +2046,7 @@ export function createApp(params: {
       ? Object.entries(args.input as Record<string, unknown>)
           .filter(([key]) => /ChannelIds?$/.test(key))
           .flatMap(([, value]) => typeof value === "string" ? [value] : Array.isArray(value) ? value as string[] : [])
-      : tool.name === "create_listing"
-        ? [(await services.configService.getOrCreate(session.activeGuildId)).listingChannelId].filter((id): id is string => id !== null)
-        : [];
+      : [];
     if (channelIds.length) {
       if (!params.botRuntime) throw new AppError("Live Discord channel verification is unavailable.", 503);
       const allowed = new Set((await params.botRuntime.getTextChannels(session.activeGuildId)).map((channel) => channel.id));

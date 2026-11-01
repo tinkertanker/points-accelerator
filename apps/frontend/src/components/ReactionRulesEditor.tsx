@@ -94,12 +94,16 @@ function parseDelta(text: string): number | null {
   return parsed;
 }
 
-function parseOptionalPositive(text: string): number | null {
+function parseOptionalNonZero(text: string): number | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
   const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  if (!Number.isFinite(parsed) || parsed === 0) return null;
   return parsed;
+}
+
+function isValidOptionalNonZero(text: string) {
+  return text.trim().length === 0 || parseOptionalNonZero(text) !== null;
 }
 
 export default function ReactionRulesEditor({
@@ -175,9 +179,12 @@ export default function ReactionRulesEditor({
   ): ReactionRewardRuleDraft | null => {
     const parsed = parseDelta(deltaTextFor(key, activeDelta(draft)));
     const maxText = maxTextFor(key, activeMax(draft));
-    const parsedMax = parseOptionalPositive(maxText);
-    const maxDelta = draft.amountMode === "COUNT_MULTIPLIER" && maxText.trim() ? parsedMax : null;
-    if (parsed === null || (draft.amountMode === "COUNT_MULTIPLIER" && maxDelta === null)) return null;
+    if (parsed === null) return null;
+    if (draft.amountMode === "COUNT_MULTIPLIER" && !isValidOptionalNonZero(maxText)) return null;
+    const maxDelta =
+      draft.amountMode === "COUNT_MULTIPLIER" && maxText.trim()
+        ? parseOptionalNonZero(maxText)
+        : null;
     return withActiveMax(withActiveDelta(draft, parsed), maxDelta);
   };
 
@@ -230,8 +237,7 @@ export default function ReactionRulesEditor({
   const newDeltaText = deltaTextFor(NEW_ROW_KEY, activeDelta(newDraft));
   const newDeltaValid = parseDelta(newDeltaText) !== null;
   const newMaxText = maxTextFor(NEW_ROW_KEY, activeMax(newDraft));
-  const newMaxValid =
-    newDraft.amountMode !== "COUNT_MULTIPLIER" || parseOptionalPositive(newMaxText) !== null;
+  const newMaxValid = newDraft.amountMode !== "COUNT_MULTIPLIER" || isValidOptionalNonZero(newMaxText);
   const canSubmitNew =
     !isBusy &&
     Boolean(newDraft.channelId) &&
@@ -248,7 +254,7 @@ export default function ReactionRulesEditor({
       <p className="role-checklist__help">
         Award or deduct participant {currencyName} or group {pointsName} when a configured bot reacts to a
         message in a chosen channel. Fixed amount pays the configured delta. Count multiplier reads a
-        number at the start of the message and pays number x delta, capped at the configured maximum payout.
+        number at the start of the message and pays number x delta. Leave max payout blank for no configured cap.
       </p>
 
       {rules.length > 0 ? (
@@ -258,12 +264,12 @@ export default function ReactionRulesEditor({
             const text = deltaTextFor(rule.id, activeDelta(draft));
             const parsed = parseDelta(text);
             const maxText = maxTextFor(rule.id, activeMax(draft));
-            const parsedMax = parseOptionalPositive(maxText);
+            const parsedMax = parseOptionalNonZero(maxText);
             const maxDelta = draft.amountMode === "COUNT_MULTIPLIER" && maxText.trim() ? parsedMax : null;
             const normalisedDraft =
               parsed === null ? draft : withActiveMax(withActiveDelta(draft, parsed), maxDelta);
             const dirty = isDirty(rule, normalisedDraft);
-            const maxValid = draft.amountMode !== "COUNT_MULTIPLIER" || maxDelta !== null;
+            const maxValid = draft.amountMode !== "COUNT_MULTIPLIER" || isValidOptionalNonZero(maxText);
             const unit = activeUnit(draft, labels);
             return (
               <div key={rule.id} className="reaction-rule-row">
@@ -359,11 +365,11 @@ export default function ReactionRulesEditor({
                     disabled={draft.amountMode !== "COUNT_MULTIPLIER"}
                     onChange={(event) => setMaxText(rule.id, event.target.value)}
                     onBlur={() => {
-                      if (maxDelta !== null) {
+                      if (maxText.trim().length === 0 || maxDelta !== null) {
                         updateDraft(rule.id, withActiveMax(draft, maxDelta));
                       }
                     }}
-                    placeholder={draft.amountMode === "COUNT_MULTIPLIER" ? "10000" : ""}
+                    placeholder={draft.amountMode === "COUNT_MULTIPLIER" ? "Unlimited" : ""}
                   />
                 </label>
                 <label className="settings-field reaction-rule-row__field reaction-rule-row__field--note">
@@ -493,7 +499,7 @@ export default function ReactionRulesEditor({
             value={newMaxText}
             disabled={newDraft.amountMode !== "COUNT_MULTIPLIER"}
             onChange={(event) => setMaxText(NEW_ROW_KEY, event.target.value)}
-            placeholder={newDraft.amountMode === "COUNT_MULTIPLIER" ? "10000" : ""}
+            placeholder={newDraft.amountMode === "COUNT_MULTIPLIER" ? "Unlimited" : ""}
           />
         </label>
         <label className="settings-field reaction-rule-row__field reaction-rule-row__field--note">
