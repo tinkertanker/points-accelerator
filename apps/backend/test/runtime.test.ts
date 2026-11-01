@@ -251,6 +251,139 @@ afterEach(() => {
 });
 
 describe("bot runtime", () => {
+  describe("listing channel ownership", () => {
+    function sellFixture() {
+      const fixture = createRuntimeFixture();
+      Object.assign(fixture.config, { listingChannelId: "listing-channel" });
+      const send = vi.fn().mockResolvedValue({ channelId: "listing-channel", id: "message-1" });
+      const channel = { guildId: "guild-test", isTextBased: () => true, send };
+      const fetch = vi.fn().mockResolvedValue(channel);
+      (fixture.runtime as any).client = { channels: { fetch } };
+      fixture.services.listingService.create.mockResolvedValue({
+        title: "Sticker",
+        description: "Limited run",
+        quantity: 3,
+      } as never);
+      const reply = vi.fn();
+      const sell = () => (fixture.runtime as any).handleCommand({
+        guildId: "guild-test",
+        commandName: "sell",
+        options: {
+          getString: (name: string) => name === "title" ? "Sticker" : "Limited run",
+          getInteger: () => 3,
+        },
+        user: { id: "seller-1", username: "Seller" },
+        reply,
+      });
+      return { ...fixture, channel, fetch, send, sell, reply };
+    }
+
+    const invalidChannels = ["foreign", "DM", "non-text", "missing", "inaccessible", "fetch-error"] as const;
+    function invalidate(fixture: ReturnType<typeof sellFixture>, kind: typeof invalidChannels[number]) {
+      if (kind === "foreign") fixture.channel.guildId = "guild-other";
+      if (kind === "DM") fixture.channel.guildId = undefined as never;
+      if (kind === "non-text") fixture.channel.isTextBased = () => false;
+      if (kind === "missing") fixture.fetch.mockResolvedValue(null);
+      if (kind === "inaccessible") fixture.fetch.mockRejectedValue(new Error("Missing Access"));
+      if (kind === "fetch-error") fixture.fetch.mockRejectedValue(new Error("Discord unavailable"));
+    }
+
+    it.each(invalidChannels)("does not create or post /sell listings for a %s configured channel", async (kind) => {
+      const fixture = sellFixture();
+      invalidate(fixture, kind);
+
+      await expect(fixture.sell()).rejects.toThrow("A configured channel is not a text channel in this guild.");
+
+      expect(fixture.services.listingService.create).not.toHaveBeenCalled();
+      expect(fixture.send).not.toHaveBeenCalled();
+      expect(fixture.reply).not.toHaveBeenCalled();
+    });
+
+    it.each(invalidChannels)("does not post directly to a %s channel at the shared boundary", async (kind) => {
+      const fixture = sellFixture();
+      invalidate(fixture, kind);
+
+      expect(await fixture.runtime.postListing("guild-test", "listing-channel", "Listing content")).toBeNull();
+      expect(fixture.send).not.toHaveBeenCalled();
+    });
+
+    it("creates and posts to the same-guild snapshot despite a concurrent settings change", async () => {
+      const fixture = sellFixture();
+      const foreignSend = vi.fn();
+      fixture.services.listingService.create.mockImplementationOnce(async () => {
+        Object.assign(fixture.config, { listingChannelId: "foreign-channel" });
+        return { title: "Sticker", description: "Limited run", quantity: 3 } as never;
+      });
+      fixture.fetch.mockImplementation(async (id: string) => id === "listing-channel"
+        ? fixture.channel
+        : { guildId: "guild-other", isTextBased: () => true, send: foreignSend });
+
+      await fixture.sell();
+
+      expect(fixture.services.listingService.create).toHaveBeenCalledWith(expect.objectContaining({
+        guildId: "guild-test", channelId: "listing-channel", title: "Sticker", quantity: 3,
+      }));
+      expect(fixture.send).toHaveBeenCalledExactlyOnceWith(
+        "New listing from <@seller-1>: **Sticker**\nLimited run\nQuantity: 3",
+      );
+      expect(foreignSend).not.toHaveBeenCalled();
+      expect(fixture.reply).toHaveBeenCalledWith({ content: "Created listing: Sticker", ephemeral: true });
+    });
+
+    it("returns the same-guild message identifiers from the shared posting boundary", async () => {
+      const fixture = sellFixture();
+      expect(await fixture.runtime.postListing("guild-test", "listing-channel", "Listing content")).toEqual({
+        channelId: "listing-channel", messageId: "message-1",
+      });
+      expect(fixture.send).toHaveBeenCalledExactlyOnceWith("Listing content");
+    });
+
+    it("creates an unposted listing when no channel is configured, even while disconnected", async () => {
+      const fixture = sellFixture();
+      Object.assign(fixture.config, { listingChannelId: null });
+      (fixture.runtime as any).client = null;
+      await fixture.sell();
+      expect(fixture.services.listingService.create).toHaveBeenCalledWith(expect.objectContaining({ channelId: null }));
+      expect(fixture.send).not.toHaveBeenCalled();
+      expect(fixture.reply).toHaveBeenCalledWith({ content: "Created listing: Sticker", ephemeral: true });
+    });
+
+    it("rejects a configured channel while disconnected without persisting a listing", async () => {
+      const fixture = sellFixture();
+      (fixture.runtime as any).client = null;
+      await expect(fixture.sell()).rejects.toThrow("A configured channel is not a text channel in this guild.");
+      expect(fixture.services.listingService.create).not.toHaveBeenCalled();
+      expect(await fixture.runtime.postListing("guild-test", "listing-channel", "Listing content")).toBeNull();
+    });
+
+    it.each(invalidChannels)("keeps an already-created listing but blocks a channel that becomes %s before posting", async (kind) => {
+      const fixture = sellFixture();
+      fixture.services.listingService.create.mockImplementationOnce(async () => {
+        invalidate(fixture, kind);
+        return { title: "Sticker", description: "Limited run", quantity: 3 } as never;
+      });
+      await fixture.sell();
+      expect(fixture.services.listingService.create).toHaveBeenCalledTimes(1);
+      expect(fixture.send).not.toHaveBeenCalled();
+      expect(fixture.reply).toHaveBeenCalledWith({ content: "Created listing: Sticker", ephemeral: true });
+    });
+
+    it("keeps an already-created listing on send failure and surfaces the error", async () => {
+      const fixture = sellFixture();
+      fixture.send.mockRejectedValue(new Error("Missing Permissions"));
+      await expect(fixture.sell()).rejects.toThrow("Missing Permissions");
+      expect(fixture.services.listingService.create).toHaveBeenCalledTimes(1);
+      expect(fixture.reply).not.toHaveBeenCalled();
+    });
+
+    it("does not post when listing creation rejects the seller", async () => {
+      const fixture = sellFixture();
+      fixture.services.listingService.create.mockRejectedValue(new Error("Cannot sell"));
+      await expect(fixture.sell()).rejects.toThrow("Cannot sell");
+      expect(fixture.send).not.toHaveBeenCalled();
+    });
+  });
+
   it("applies configured reaction rewards when the reacting bot is itself", async () => {
     const { runtime, services } = createRuntimeFixture();
     const rule = {
@@ -3064,10 +3197,12 @@ describe("bot runtime", () => {
     });
     expect(services.participantService.ensureForGroup).toHaveBeenCalledTimes(3);
     expect(postListingSpy).toHaveBeenCalledWith(
+      "guild-test",
       "channel-current",
       expect.stringContaining("from <@&group-role>, requested by <@user-1>"),
     );
     expect(postListingSpy).toHaveBeenCalledWith(
+      "guild-test",
       "channel-current",
       expect.stringContaining("Request ID: `redemption-12345678`"),
     );

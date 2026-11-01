@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { BotRuntimeApi } from "../src/bot/runtime.js";
+import { BotRuntime, type BotRuntimeApi } from "../src/bot/runtime.js";
 import { createTestApp, resetDatabase } from "./helpers/test-app.js";
 import { ensureTestDatabase } from "./helpers/test-database.js";
 
@@ -70,6 +70,57 @@ describe("points accelerator API", () => {
       await ctx.prisma.$disconnect();
     }
     cleanupDatabase();
+  });
+
+  it("guards /sell against foreign dashboard settings and preserves listing persistence on send failure", async () => {
+    const headers = { "x-admin-token": ctx.env.ADMIN_TOKEN };
+    const settings = (await ctx.app.inject({ method: "GET", url: "/api/settings", headers })).json();
+    const update = await ctx.app.inject({
+      method: "PUT", url: "/api/settings", headers,
+      payload: { ...settings, listingChannelId: "foreign-channel" },
+    });
+    expect(update.statusCode).toBe(200);
+    await ctx.prisma.discordRoleCapability.create({
+      data: { guildId: "guild-test", roleId: "seller-role", roleName: "Seller", canSell: true },
+    });
+    const runtime = new BotRuntime(ctx.env, ctx.services, null as never);
+    const send = vi.fn().mockResolvedValue({ channelId: "local-channel", id: "message-1" });
+    (runtime as any).client = { channels: {
+      fetch: vi.fn(async (id: string) => ({
+        guildId: id === "local-channel" ? "guild-test" : "guild-other",
+        isTextBased: () => true,
+        send,
+      })),
+    } };
+    const sell = () => (runtime as any).handleCommand({
+      guildId: "guild-test", commandName: "sell",
+      guild: { members: { fetch: async () => ({
+        roles: { cache: new Map([["seller-role", { id: "seller-role", rawPosition: 1 }]]) },
+      }) } },
+      options: {
+        getString: (name: string) => name === "title" ? "Sticker" : "Limited run",
+        getInteger: () => 3,
+      },
+      user: { id: "seller-1", username: "Seller" },
+      reply: vi.fn(),
+    });
+
+    await expect(sell()).rejects.toThrow("A configured channel is not a text channel in this guild.");
+    expect(send).not.toHaveBeenCalled();
+    expect(await ctx.prisma.marketplaceListing.count()).toBe(0);
+    expect(await ctx.prisma.auditLog.count({ where: { action: "listing.created" } })).toBe(0);
+
+    await ctx.services.configService.update("guild-test", { listingChannelId: "local-channel" });
+    await sell();
+    expect(await ctx.services.listingService.list("guild-test")).toEqual([
+      expect.objectContaining({ title: "Sticker", quantity: 3, channelId: "local-channel", createdByUserId: "seller-1" }),
+    ]);
+    expect(send).toHaveBeenCalledExactlyOnceWith("New listing from <@seller-1>: **Sticker**\nLimited run\nQuantity: 3");
+
+    send.mockRejectedValueOnce(new Error("Missing Permissions"));
+    await expect(sell()).rejects.toThrow("Missing Permissions");
+    expect(await ctx.prisma.marketplaceListing.count()).toBe(2);
+    expect(await ctx.prisma.auditLog.count({ where: { action: "listing.created" } })).toBe(2);
   });
 
   it("creates settings, groups, and awards with leaderboard output", async () => {

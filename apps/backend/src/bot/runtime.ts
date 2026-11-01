@@ -381,7 +381,7 @@ export interface BotRuntimeApi {
   getDashboardMember(guildId: string, userId: string): Promise<DashboardMember | null>;
   getGroupMemberCount(guildId: string, roleId: string): Promise<number | null>;
   getGroupMemberDiscordUserIds(guildId: string, roleId: string): Promise<string[] | null>;
-  postListing(channelId: string, content: string): Promise<{ channelId: string; messageId: string } | null>;
+  postListing(guildId: string, channelId: string, content: string): Promise<{ channelId: string; messageId: string } | null>;
   clearRedemptionButtons(channelId: string, messageId: string, statusLine: string): Promise<void>;
   listBotGuilds(): Promise<Array<{ id: string; name: string; iconUrl: string | null }>>;
 }
@@ -907,17 +907,27 @@ export class BotRuntime {
     return eligibleMembers.map((member) => member.user.id);
   }
 
-  public async postListing(channelId: string, content: string): Promise<{ channelId: string; messageId: string } | null> {
+  private async resolveListingChannel(guildId: string, channelId: string): Promise<GuildTextBasedChannel | null> {
     if (!this.client) {
       return null;
     }
 
     const channel = await this.client.channels.fetch(channelId).catch(() => null);
-    if (!channel || !channel.isTextBased()) {
+    if (!channel || !channel.isTextBased() || !("guildId" in channel) || channel.guildId !== guildId) {
       return null;
     }
 
-    const sent = await (channel as GuildTextBasedChannel).send(content);
+    return channel as GuildTextBasedChannel;
+  }
+
+  public async postListing(guildId: string, channelId: string, content: string): Promise<{ channelId: string; messageId: string } | null> {
+    // Verify the actual fetched destination, not just a previously validated setting.
+    const channel = await this.resolveListingChannel(guildId, channelId);
+    if (!channel) {
+      return null;
+    }
+
+    const sent = await channel.send(content);
     return {
       channelId: sent.channelId,
       messageId: sent.id,
@@ -4453,6 +4463,10 @@ export class BotRuntime {
       }
       case "sell": {
         const config = await this.services.configService.getOrCreate(guildId);
+        const channelId = config.listingChannelId;
+        if (channelId && !(await this.resolveListingChannel(guildId, channelId))) {
+          throw new AppError("A configured channel is not a text channel in this guild.", 404);
+        }
         const title = interaction.options.getString("title", true);
         const description = interaction.options.getString("description", true);
         const quantity = interaction.options.getInteger("quantity");
@@ -4462,12 +4476,13 @@ export class BotRuntime {
           title,
           description,
           quantity,
-          channelId: config.listingChannelId,
+          channelId,
         });
 
-        if (config.listingChannelId) {
+        if (channelId) {
           await this.postListing(
-            config.listingChannelId,
+            guildId,
+            channelId,
             `New listing from ${this.formatUserReference(
               interaction.user.id,
               member?.displayName ?? interaction.user.username,
@@ -4575,6 +4590,7 @@ export class BotRuntime {
           const groupLabel = this.formatGroupReference(group);
           const posted = announcementChannelId
             ? await this.postListing(
+                guildId,
                 announcementChannelId,
                 `Group purchase request for ${redemption.shopItem.emoji} **${redemption.shopItem.name}** x${redemption.quantity} from ${groupLabel}, requested by ${requesterLabel}.\nRequest ID: \`${redemption.id}\`\n${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded.\nApprove with \`/approve_purchase purchase_id:${redemption.id}\`.`,
               )
