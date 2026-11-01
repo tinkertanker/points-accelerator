@@ -2786,6 +2786,10 @@ export class BotRuntime {
     if (result.ok) return true;
     const publicContent = `<@${params.interaction.user.id}> ${result.message}`;
     const allowedMentions = { users: [params.interaction.user.id] };
+    if (params.interaction.deferred && !params.interaction.replied) {
+      // Settle the private original before sending a separate public notice.
+      await params.interaction.editReply({ content: result.message });
+    }
     if (params.interaction.replied || params.interaction.deferred) {
       await params.interaction
         .followUp({ content: publicContent, allowedMentions })
@@ -3927,7 +3931,8 @@ export class BotRuntime {
     }
     const guildId = interaction.guildId;
 
-    if (interaction.commandName === "sell") {
+    if (interaction.commandName === "sell" ||
+      (interaction.commandName === "buy" && interaction.options.getSubcommand() === "group")) {
       await interaction.deferReply({ ephemeral: true });
     }
 
@@ -4640,9 +4645,8 @@ export class BotRuntime {
           }
         }
 
-        await interaction.reply({
+        await interaction.editReply({
           content: `Group purchase request created for ${this.formatGroupReference(group)} for ${quantity} item(s). Request ID: ${redemption.id}. ${this.formatGroupPurchaseProgress(redemption.approvals.length, redemption.approvalThreshold ?? 1)} recorded. Group members can approve it with /approve_purchase and spend shared ${config.pointsName} if it passes.${sharedMessageSuffix}`,
-          ephemeral: true,
         });
         return;
       }

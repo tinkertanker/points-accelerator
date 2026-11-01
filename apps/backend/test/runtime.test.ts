@@ -3166,7 +3166,7 @@ describe("bot runtime", () => {
     expect(fetchMember).not.toHaveBeenCalledWith("student-12");
   });
 
-  it("creates a group purchase from /buy group", async () => {
+  it.each([false, true])("creates a group purchase from /buy group with slow channel lookup: %s", async (slowChannel) => {
     const { runtime, services } = createRuntimeFixture();
     services.groupService.resolveGroupFromRoleIds.mockImplementation(async (_guildId: string, roleIds: string[]) => {
       if (roleIds.includes("other-group-role")) {
@@ -3182,11 +3182,25 @@ describe("bot runtime", () => {
       quantity: 2,
       shopItem: { name: "Bubble Tea" },
     });
-    const reply = vi.fn().mockResolvedValue(undefined);
-    const postListingSpy = vi.spyOn(runtime, "postListing").mockResolvedValue({
-      channelId: "channel-announce",
-      messageId: "message-1",
+    let elapsedMs = 0;
+    let acknowledged = false;
+    const acknowledge = async () => {
+      if (elapsedMs >= 3000) throw new Error("Unknown interaction: acknowledgement expired");
+      acknowledged = true;
+    };
+    const reply = vi.fn(acknowledge);
+    const deferReply = vi.fn(acknowledge);
+    const editReply = vi.fn(async () => {
+      if (!acknowledged) throw new Error("Interaction has not been acknowledged");
     });
+    (runtime as any).client = { channels: { fetch: vi.fn(async () => {
+      if (slowChannel) elapsedMs += 4000;
+      return {
+        guildId: "guild-test", isTextBased: () => true,
+        send: vi.fn().mockResolvedValue({ channelId: "channel-announce", id: "message-1" }),
+      };
+    }) } };
+    const postListingSpy = vi.spyOn(runtime, "postListing");
 
     await (runtime as any).handleCommand({
       guildId: "guild-test",
@@ -3235,6 +3249,8 @@ describe("bot runtime", () => {
         getInteger: vi.fn((name: string) => (name === "quantity" ? 2 : null)),
       },
       reply,
+      deferReply,
+      editReply,
       user: {
         id: "user-1",
         username: "Alice",
@@ -3268,11 +3284,44 @@ describe("bot runtime", () => {
       channelId: "channel-announce",
       messageId: "message-1",
     });
-    expect(reply).toHaveBeenCalledWith(
+    expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(reply).not.toHaveBeenCalled();
+    expect(editReply).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringMatching(/<@&group-role>.*Request ID: redemption-12345678/),
       }),
     );
+  });
+
+  it("settles the private /buy group acknowledgement before sending the public channel guard notice", async () => {
+    const { runtime, services } = createRuntimeFixture();
+    services.channelGuardService.check.mockResolvedValue({ ok: false, penaltyApplied: 0, message: "Use the shop channel." } as never);
+    const publicNotices: unknown[] = [];
+    const interaction = {
+      guildId: "guild-test",
+      commandName: "buy",
+      channelId: "wrong-channel",
+      guild: null,
+      user: { id: "user-1", username: "Alice" },
+      options: { getSubcommand: () => "group", getString: () => "item-1", getInteger: () => 1 },
+      deferred: false,
+      replied: false,
+      deferReply: vi.fn(async () => { interaction.deferred = true; }),
+      editReply: vi.fn(async () => { interaction.replied = true; }),
+      followUp: vi.fn(async (payload: unknown) => {
+        // An immediate follow-up to an unedited defer can inherit its private visibility.
+        if (interaction.replied) publicNotices.push(payload);
+      }),
+    };
+
+    await (runtime as any).handleCommand(interaction);
+
+    expect(interaction.deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(interaction.editReply).toHaveBeenCalledWith({ content: "Use the shop channel." });
+    expect(publicNotices).toEqual([{
+      content: "<@user-1> Use the shop channel.", allowedMentions: { users: ["user-1"] },
+    }]);
+    expect(services.shopService.redeem).not.toHaveBeenCalled();
   });
 
   it("registers required award and deduct command options", async () => {
