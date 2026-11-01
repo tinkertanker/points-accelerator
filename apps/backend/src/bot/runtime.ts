@@ -3927,6 +3927,10 @@ export class BotRuntime {
     }
     const guildId = interaction.guildId;
 
+    if (interaction.commandName === "sell") {
+      await interaction.deferReply({ ephemeral: true });
+    }
+
     if (interaction.commandName === "leaderboard") {
       await interaction.deferReply();
       const view = await this.buildLeaderboardView({ guildId, ownerId: interaction.user.id, page: 1 });
@@ -4490,7 +4494,7 @@ export class BotRuntime {
           );
         }
 
-        await interaction.reply({ content: `Created listing: ${listing.title}`, ephemeral: true });
+        await interaction.editReply({ content: `Created listing: ${listing.title}` });
         return;
       }
       case "store": {

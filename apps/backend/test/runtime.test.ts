@@ -265,18 +265,56 @@ describe("bot runtime", () => {
         quantity: 3,
       } as never);
       const reply = vi.fn();
-      const sell = () => (fixture.runtime as any).handleCommand({
+      const deferReply = vi.fn();
+      const editReply = vi.fn();
+      const interaction = {
         guildId: "guild-test",
         commandName: "sell",
+        guild: { members: { fetch: vi.fn().mockResolvedValue(null) } },
         options: {
           getString: (name: string) => name === "title" ? "Sticker" : "Limited run",
           getInteger: () => 3,
         },
         user: { id: "seller-1", username: "Seller" },
         reply,
-      });
-      return { ...fixture, channel, fetch, send, sell, reply };
+        deferReply,
+        editReply,
+      };
+      const sell = () => (fixture.runtime as any).handleCommand(interaction);
+      return { ...fixture, channel, fetch, send, sell, reply, deferReply, editReply, interaction };
     }
+
+    it.each(["member", "settings", "channel"])("acknowledges /sell before a slow %s lookup exceeds Discord's reply deadline", async (lookup) => {
+      const fixture = sellFixture();
+      let elapsedMs = 0;
+      let acknowledged = false;
+      const acknowledge = async () => {
+        if (elapsedMs >= 3000) throw new Error("Unknown interaction: acknowledgement expired");
+        acknowledged = true;
+      };
+      fixture.deferReply.mockImplementation(acknowledge);
+      fixture.reply.mockImplementation(acknowledge);
+      fixture.editReply.mockImplementation(async () => {
+        if (!acknowledged) throw new Error("Interaction has not been acknowledged");
+      });
+      if (lookup === "member") fixture.interaction.guild.members.fetch.mockImplementationOnce(async () => {
+        elapsedMs += 4000;
+        return null;
+      });
+      if (lookup === "settings") fixture.services.configService.getOrCreate.mockImplementationOnce(async () => {
+        elapsedMs += 4000;
+        return fixture.config;
+      });
+      if (lookup === "channel") fixture.fetch.mockImplementationOnce(async () => {
+        elapsedMs += 4000;
+        return fixture.channel;
+      });
+
+      await expect(fixture.sell()).resolves.toBeUndefined();
+      expect(fixture.deferReply).toHaveBeenCalledWith({ ephemeral: true });
+      expect(fixture.editReply).toHaveBeenCalledWith({ content: "Created listing: Sticker" });
+      expect(fixture.services.listingService.create).toHaveBeenCalledTimes(1);
+    });
 
     const invalidChannels = ["foreign", "DM", "non-text", "missing", "inaccessible", "fetch-error"] as const;
     function invalidate(fixture: ReturnType<typeof sellFixture>, kind: typeof invalidChannels[number]) {
@@ -297,6 +335,7 @@ describe("bot runtime", () => {
       expect(fixture.services.listingService.create).not.toHaveBeenCalled();
       expect(fixture.send).not.toHaveBeenCalled();
       expect(fixture.reply).not.toHaveBeenCalled();
+      expect(fixture.editReply).not.toHaveBeenCalled();
     });
 
     it.each(invalidChannels)("does not post directly to a %s channel at the shared boundary", async (kind) => {
@@ -327,7 +366,7 @@ describe("bot runtime", () => {
         "New listing from <@seller-1>: **Sticker**\nLimited run\nQuantity: 3",
       );
       expect(foreignSend).not.toHaveBeenCalled();
-      expect(fixture.reply).toHaveBeenCalledWith({ content: "Created listing: Sticker", ephemeral: true });
+      expect(fixture.editReply).toHaveBeenCalledWith({ content: "Created listing: Sticker" });
     });
 
     it("returns the same-guild message identifiers from the shared posting boundary", async () => {
@@ -345,7 +384,7 @@ describe("bot runtime", () => {
       await fixture.sell();
       expect(fixture.services.listingService.create).toHaveBeenCalledWith(expect.objectContaining({ channelId: null }));
       expect(fixture.send).not.toHaveBeenCalled();
-      expect(fixture.reply).toHaveBeenCalledWith({ content: "Created listing: Sticker", ephemeral: true });
+      expect(fixture.editReply).toHaveBeenCalledWith({ content: "Created listing: Sticker" });
     });
 
     it("rejects a configured channel while disconnected without persisting a listing", async () => {
@@ -365,7 +404,7 @@ describe("bot runtime", () => {
       await fixture.sell();
       expect(fixture.services.listingService.create).toHaveBeenCalledTimes(1);
       expect(fixture.send).not.toHaveBeenCalled();
-      expect(fixture.reply).toHaveBeenCalledWith({ content: "Created listing: Sticker", ephemeral: true });
+      expect(fixture.editReply).toHaveBeenCalledWith({ content: "Created listing: Sticker" });
     });
 
     it("keeps an already-created listing on send failure and surfaces the error", async () => {
@@ -374,6 +413,7 @@ describe("bot runtime", () => {
       await expect(fixture.sell()).rejects.toThrow("Missing Permissions");
       expect(fixture.services.listingService.create).toHaveBeenCalledTimes(1);
       expect(fixture.reply).not.toHaveBeenCalled();
+      expect(fixture.editReply).not.toHaveBeenCalled();
     });
 
     it("does not post when listing creation rejects the seller", async () => {
@@ -1868,6 +1908,8 @@ describe("bot runtime", () => {
         getInteger: vi.fn().mockReturnValue(null),
       },
       reply,
+      deferReply: vi.fn(),
+      editReply: vi.fn(),
       user: {
         id: "staff-1",
         username: "Mentor",

@@ -103,6 +103,8 @@ describe("points accelerator API", () => {
       },
       user: { id: "seller-1", username: "Seller" },
       reply: vi.fn(),
+      deferReply: vi.fn(),
+      editReply: vi.fn(),
     });
 
     await expect(sell()).rejects.toThrow("A configured channel is not a text channel in this guild.");
