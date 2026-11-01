@@ -1,5 +1,6 @@
 import type { DiscordOAuthClient } from "../../src/auth/discord-oauth.js";
 import type { BotRuntimeApi } from "../../src/bot/runtime.js";
+import type { StorageService } from "../../src/services/storage-service.js";
 import { loadEnv } from "../../src/config/env.js";
 import { createPrismaClient } from "../../src/db/client.js";
 import { createServices } from "../../src/services/app-services.js";
@@ -10,6 +11,7 @@ export async function createTestApp(
   options?: {
     botRuntime?: BotRuntimeApi | null;
     discordOAuthClient?: DiscordOAuthClient | null;
+    storageService?: StorageService | null;
   },
 ) {
   const env = loadEnv({
@@ -36,6 +38,7 @@ export async function createTestApp(
     services,
     botRuntime: options?.botRuntime ?? null,
     discordOAuthClient: options?.discordOAuthClient ?? null,
+    storageService: options?.storageService ?? null,
   });
 
   await prisma.$connect();

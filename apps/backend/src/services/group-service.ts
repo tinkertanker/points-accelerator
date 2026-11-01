@@ -92,6 +92,10 @@ export class GroupService {
   }
 
   public async upsert(guildId: string, input: GroupInput) {
+    if (input.id) {
+      const existing = await this.prisma.group.findFirst({ where: { id: input.id, guildId } });
+      if (!existing) throw new AppError("Group not found.", 404);
+    }
     await this.prisma.guildConfig.upsert({
       where: { guildId },
       create: {

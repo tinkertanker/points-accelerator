@@ -8,6 +8,14 @@ the configured announcements channel. Entries follow
 The bot reads the version from `apps/backend/package.json` on startup,
 finds the matching entry here, and announces it once per version.
 
+## [0.12.0] - 2026-11-01
+
+### Added
+- Trusted local AI clients can connect through MCP with 43 administrator tools for settings, groups, points, wallets, shop, purchases, participants, assignments and more. Tools use your Discord dashboard session, recheck administrator access and guild membership, and audit writes, including destructive operations. See `docs/mcp.md` for setup and safety details.
+
+### Fixed
+- Group updates now reject IDs belonging to another guild instead of allowing cross-guild changes.
+
 ## [0.11.3] - 2026-06-23
 
 ### Changed
