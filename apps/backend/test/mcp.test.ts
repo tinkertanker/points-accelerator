@@ -18,6 +18,7 @@ let memberPresent = true;
 let roles: string[] = [];
 let storageConfigured = false;
 const storedImages = new Map<string, Buffer>();
+const postedListingChannels: string[] = [];
 const connections: Array<{ close: () => Promise<void> }> = [];
 const itemInput = { name: "Team reward", description: "An afternoon activity", cost: 17.5, stock: 3, enabled: true };
 
@@ -29,7 +30,10 @@ const botRuntime = {
   getGroupMemberCount: vi.fn(async () => 4),
   getGroupMemberDiscordUserIds: vi.fn(async () => ["student-one", "student-two", "student-three", "student-four"]),
   clearRedemptionButtons: vi.fn(async () => undefined),
-  postListing: vi.fn(async () => null),
+  postListing: vi.fn(async (channelId: string) => {
+    postedListingChannels.push(channelId);
+    return null;
+  }),
   getDashboardMember: vi.fn(async () => memberPresent ? {
     userId: "staff-user", username: "Staff", displayName: "Staff", avatarUrl: null,
     roleIds: roles, isGuildOwner: false, hasAdministrator: false, hasManageGuild: false,
@@ -103,6 +107,7 @@ describe("Points Accelerator MCP", () => {
     roles = ["admin-role"];
     storageConfigured = false;
     storedImages.clear();
+    postedListingChannels.length = 0;
     await ctx.services.configService.getOrCreate("guild-test");
     await ctx.prisma.discordRoleCapability.create({
       data: { guildId: "guild-test", roleId: "admin-role", roleName: "Admin", canManageDashboard: true },
@@ -336,7 +341,29 @@ describe("Points Accelerator MCP", () => {
     await ctx.prisma.guildConfig.update({ where: { guildId: "guild-test" }, data: { listingChannelId: "foreign-channel" } });
     ctx.services.configService.clearCache();
     expect((await tool(client, "create_listing", { input: { title: "Foreign", description: "Must not post" } })).body.status).toBe(404);
+    const dashboard = await ctx.app.inject({
+      method: "POST", url: "/api/listings",
+      headers: { cookie: `dashboard_session=${session}` },
+      payload: { title: "Dashboard foreign", description: "Must not post either", actorUserId: "staff-user", actorRoleIds: [] },
+    });
+    expect(dashboard.statusCode).toBe(404);
+    expect(postedListingChannels).toEqual([]);
     expect(await ctx.prisma.marketplaceListing.count()).toBe(0);
+  });
+
+  it("posts only to the validated guild channel when settings change concurrently", async () => {
+    const client = await connect();
+    await ctx.prisma.guildConfig.update({ where: { guildId: "guild-test" }, data: { listingChannelId: "local-channel" } });
+    ctx.services.configService.clearCache();
+    vi.mocked(botRuntime.getTextChannels).mockImplementationOnce(async () => {
+      await ctx.prisma.guildConfig.update({ where: { guildId: "guild-test" }, data: { listingChannelId: "foreign-channel" } });
+      ctx.services.configService.clearCache();
+      return [{ id: "local-channel", name: "local" }];
+    });
+    const result = await tool(client, "create_listing", { input: { title: "Concurrent change", description: "Must not cross guilds" } });
+    expect(result.body.status).toBe(200);
+    expect(postedListingChannels).toEqual(["local-channel"]);
+    expect((await ctx.prisma.marketplaceListing.findFirstOrThrow()).channelId).toBe("local-channel");
   });
 
   it("validates image uploads and does not retain binary content in audit records", async () => {
