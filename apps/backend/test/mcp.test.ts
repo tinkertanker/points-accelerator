@@ -1,3 +1,5 @@
+import { extname } from "node:path";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -78,8 +80,8 @@ describe("Points Accelerator MCP", () => {
       botRuntime,
       storageService: {
         get isConfigured() { return storageConfigured; },
-        async upload({ buffer, folder }: { buffer: Buffer; folder: string }) {
-          const key = `${folder}/test-image.png`;
+        async upload({ buffer, folder, originalFilename }: { buffer: Buffer; folder: string; originalFilename: string }) {
+          const key = `${folder}/test-image${extname(originalFilename)}`;
           storedImages.set(key, buffer);
           return { key, url: `https://storage.example.com/${key}` };
         },

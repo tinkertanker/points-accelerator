@@ -2047,7 +2047,7 @@ export function createApp(params: {
     const dispatchToken = randomBytes(24).toString("hex");
     const boundary = `mcp-${dispatchToken}`;
     const body = image && imageBuffer ? Buffer.concat([
-      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="image"\r\nContent-Type: ${image.contentType}\r\n\r\n`),
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="image.${image.contentType.slice(6).replace("jpeg", "jpg")}"\r\nContent-Type: ${image.contentType}\r\n\r\n`),
       imageBuffer,
       Buffer.from(`\r\n--${boundary}--\r\n`),
     ]) : args.input === undefined ? undefined : JSON.stringify(args.input);
