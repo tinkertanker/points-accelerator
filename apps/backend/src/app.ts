@@ -5,6 +5,7 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 import type { AppEnv } from "./config/env.js";
 import type { DiscordOAuthClient } from "./auth/discord-oauth.js";
@@ -555,6 +556,10 @@ export function createApp(params: {
       return requestWithSession[sessionAttachKey];
     }
     const session = await resolveDashboardSession(request);
+    const expectedGuildId = request.headers["x-points-accelerator-guild-id"];
+    if (expectedGuildId !== undefined && expectedGuildId !== session.activeGuildId) {
+      throw new AppError("Selected guild changed. Select the MCP-configured guild in the dashboard before retrying.", 409);
+    }
     requestWithSession[sessionAttachKey] = session;
     return session;
   };
@@ -589,6 +594,35 @@ export function createApp(params: {
       throw new AppError("Only mentors and dashboard admins can manage the shop and assignments.", 403);
     }
   };
+
+  const mcpAdminRequests = new WeakSet<FastifyRequest>();
+  const mcpDispatchTokens = new Set<string>();
+  app.addHook("preHandler", async (request) => {
+    const token = request.headers["x-points-accelerator-mcp-admin"];
+    if (token === undefined) return;
+    if (typeof token !== "string" || !mcpDispatchTokens.delete(token)) {
+      throw new AppError("Invalid internal MCP dispatch.", 403);
+    }
+    if (!request.headers["x-points-accelerator-guild-id"]) {
+      throw new AppError("MCP requests require an expected guild ID.", 400);
+    }
+    await requireAdmin(request);
+    const session = sessionFor(request);
+    if (request.body && typeof request.body === "object" && !Array.isArray(request.body) && !Buffer.isBuffer(request.body)) {
+      request.body = {
+        ...request.body,
+        actorUserId: session.userId,
+        actorUsername: session.username,
+        actorRoleIds: session.roleIds,
+        requestedByUserId: session.userId,
+        requestedByUsername: session.username,
+        approvedByUserId: session.userId,
+        approvedByUsername: session.username,
+      };
+    }
+    // Only a server-authorized administrator can reach explicit override paths.
+    mcpAdminRequests.add(request);
+  });
 
   type AccessibleGuild = {
     guildId: string;
@@ -1540,6 +1574,7 @@ export function createApp(params: {
       quantity: payload.quantity ?? null,
       channelId: posted?.channelId ?? config.listingChannelId,
       messageId: posted?.messageId,
+      adminAction: mcpAdminRequests.has(request),
     });
   });
 
@@ -1572,6 +1607,7 @@ export function createApp(params: {
           pointsDelta: payload.pointsDelta,
           currencyDelta: 0,
           description: payload.description,
+          systemAction: mcpAdminRequests.has(request),
           executor: tx,
         });
       }
@@ -1583,6 +1619,7 @@ export function createApp(params: {
           targetParticipantIds: [payload.targetParticipantId],
           currencyDelta: payload.currencyDelta,
           description: payload.description,
+          systemAction: mcpAdminRequests.has(request),
           executor: tx,
         });
       }
@@ -1894,6 +1931,143 @@ export function createApp(params: {
     });
 
     return result;
+  });
+
+  // MCP uses the same schemas, routes and services as the dashboard. No arbitrary
+  // URL/method or caller-selected actor is accepted by this gateway.
+  const mcpImageSchema = z.object({
+    contentType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+    base64: z.string().min(4).max(6_990_508).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+  }).strict();
+  const mcpOperations: Array<{
+    name: string;
+    description: string;
+    method: "GET" | "POST" | "PUT" | "DELETE";
+    path: string;
+    input?: z.ZodTypeAny;
+    query?: z.ZodTypeAny;
+  }> = [
+    { name: "get_bootstrap", description: "Read guild configuration, Discord roles/channels/members and dashboard data.", method: "GET", path: "/api/bootstrap" },
+    { name: "get_leaderboard", description: "Read group points rankings.", method: "GET", path: "/api/leaderboard" },
+    { name: "get_settings", description: "Read guild economy and channel configuration.", method: "GET", path: "/api/settings" },
+    { name: "update_settings", description: "Replace guild settings. Read current settings first and include unchanged required fields.", method: "PUT", path: "/api/settings", input: settingsSchema },
+    { name: "list_capabilities", description: "Read configured Discord role powers.", method: "GET", path: "/api/capabilities" },
+    { name: "replace_capabilities", description: "Replace ALL role capability rows, including dashboard access. Omitted roles lose configured powers. Can revoke your own access.", method: "PUT", path: "/api/capabilities", input: z.array(roleCapabilitySchema) },
+    { name: "list_groups", description: "Read groups, aliases, roles and balances, including inactive groups.", method: "GET", path: "/api/groups" },
+    { name: "upsert_group", description: "Create or update a group; set active=false to deactivate it.", method: "POST", path: "/api/groups", input: groupSchema },
+    { name: "suggest_groups", description: "Inspect live Discord membership and suggest group role mappings.", method: "GET", path: "/api/groups/suggestions" },
+    { name: "apply_group_suggestion", description: "Map selected Discord roles as earning groups.", method: "POST", path: "/api/groups/apply-suggestion", input: applySuggestionSchema },
+    { name: "apply_setup_preset", description: "Apply a setup preset and optional staff role mappings.", method: "POST", path: "/api/setup/apply-preset", input: applyPresetSchema },
+    { name: "get_ledger", description: "Read append-only group ledger history. Use nextCursor for the next page.", method: "GET", path: "/api/ledger", query: z.object({ limit: z.number().int().min(1).max(100).default(25), cursor: z.string().min(1).optional(), offset: z.number().int().nonnegative().optional() }) },
+    { name: "list_shop_items", description: "Read shop items, prices, stock and fulfilment settings.", method: "GET", path: "/api/shop-items" },
+    { name: "upsert_shop_item", description: "Create or replace a shop item. Read existing item first to preserve optional fulfilment/owner fields. Catalogue currently uses GROUP audience.", method: "POST", path: "/api/shop-items", input: shopItemSchema },
+    { name: "delete_shop_item", description: "Delete a shop item. Items with redemption history must be archived instead.", method: "DELETE", path: "/api/shop-items/:id" },
+    { name: "archive_shop_item", description: "Disable a shop item, preserving purchase history.", method: "POST", path: "/api/shop-items/:id/archive" },
+    { name: "list_shop_redemptions", description: "Read purchase requests, approvals and fulfilment status. Contains participant data.", method: "GET", path: "/api/shop-redemptions" },
+    { name: "update_redemption_status", description: "Fulfil or cancel a purchase; cancellation refunds through existing ledger paths.", method: "POST", path: "/api/shop-redemptions/:id/status", input: redemptionStatusUpdateSchema },
+    { name: "list_listings", description: "Read marketplace listings.", method: "GET", path: "/api/listings" },
+    { name: "create_listing", description: "Create a marketplace listing and post to its configured Discord channel.", method: "POST", path: "/api/listings", input: listingSchema.omit({ actorUserId: true, actorUsername: true, actorRoleIds: true }).strict() },
+    { name: "adjust_balances", description: "Award/deduct group points and/or participant currency atomically. Administrator authority overrides staff award powers/limits; recipient eligibility still applies. Actor is the signed-in administrator.", method: "POST", path: "/api/actions/award", input: awardSchema.omit({ actorUserId: true, actorUsername: true, actorRoleIds: true }).strict() },
+    { name: "transfer_currency", description: "Move spendable currency between participants as administrator. Existing balance and guild checks apply.", method: "POST", path: "/api/actions/pay", input: paySchema.omit({ actorUserId: true, actorUsername: true, actorRoleIds: true }).strict() },
+    { name: "donate_currency", description: "Convert participant currency to their group's points using configured donation rate.", method: "POST", path: "/api/actions/donate", input: donateSchema.omit({ actorUserId: true, actorUsername: true, actorRoleIds: true }).strict() },
+    { name: "redeem_shop_item", description: "Purchase on behalf of a participant. GROUP requests record that participant's approval; reaching the live membership threshold completes approval and charges group points.", method: "POST", path: "/api/actions/redeem", input: redeemSchema.omit({ requestedByUserId: true, requestedByUsername: true }).strict() },
+    { name: "approve_group_purchase", description: "Record approval on the chosen participant's behalf, without their own consent. An administrator can approve for multiple members and complete approval, charging group points when the live membership threshold is reached. Audit actor remains the administrator.", method: "POST", path: "/api/actions/approve-group-purchase", input: approveGroupPurchaseSchema.omit({ approvedByUserId: true, approvedByUsername: true }).strict() },
+    { name: "reset_economy", description: "DESTRUCTIVE: reverse entries, cap, set, modulo or rescale balances. Use dryRun=true to preview, then explicitly dryRun=false to apply. Corrections append ledger entries, not edits to history.", method: "POST", path: "/api/admin/economy/reset", input: economyResetSchema },
+    { name: "list_sanctions", description: "Read guild participant sanctions.", method: "GET", path: "/api/sanctions" },
+    { name: "list_participant_sanctions", description: "Read sanctions for one participant.", method: "GET", path: "/api/participants/:id/sanctions" },
+    { name: "apply_sanction", description: "Apply a participant restriction, optionally expiring.", method: "POST", path: "/api/participants/:id/sanctions", input: sanctionApplySchema },
+    { name: "revoke_sanction", description: "Revoke a participant restriction.", method: "POST", path: "/api/sanctions/:id/revoke" },
+    { name: "list_participants", description: "Read Discord-linked participant records and wallets. Contains personal metadata.", method: "GET", path: "/api/participants" },
+    { name: "register_participant", description: "Register a Discord-linked participant in a group. Duplicate registrations are rejected.", method: "POST", path: "/api/participants", input: participantRegisterSchema },
+    { name: "delete_participant", description: "DESTRUCTIVE: delete a participant and cascaded wallet splits, submissions, approvals and sanctions. This is NOT an append-only balance correction; use reset_economy to correct balances instead.", method: "DELETE", path: "/api/participants/:id" },
+    { name: "list_assignments", description: "Read assignments and rewards.", method: "GET", path: "/api/assignments" },
+    { name: "upsert_assignment", description: "Create/update an assignment, reward configuration and deadline; active=false deactivates it.", method: "POST", path: "/api/assignments", input: assignmentSchema },
+    { name: "list_submissions", description: "Read participant submissions, optionally filtered.", method: "GET", path: "/api/submissions", query: z.object({ assignmentId: z.string().min(1).optional(), participantId: z.string().min(1).optional(), status: z.enum(["PENDING", "APPROVED", "OUTSTANDING", "REJECTED"]).optional() }) },
+    { name: "review_submission", description: "Approve, mark outstanding or reject a submission. Approval/outstanding may credit points and currency.", method: "POST", path: "/api/submissions/:id/review", input: submissionReviewSchema },
+    { name: "get_submission_completion", description: "Read assignment completion summary.", method: "GET", path: "/api/submissions/completion" },
+    { name: "list_reaction_rules", description: "Read configured reaction reward automation.", method: "GET", path: "/api/reaction-rules" },
+    { name: "create_reaction_rule", description: "Create reaction-driven points/currency reward automation.", method: "POST", path: "/api/reaction-rules", input: reactionRewardRuleSchema },
+    { name: "update_reaction_rule", description: "Update a reaction reward rule.", method: "PUT", path: "/api/reaction-rules/:id", input: reactionRewardRuleSchema },
+    { name: "delete_reaction_rule", description: "Delete a reaction reward rule, stopping its automation.", method: "DELETE", path: "/api/reaction-rules/:id" },
+    { name: "upload_image", description: "Upload a PNG/JPEG/WebP/GIF image as base64 (maximum 5 MiB decoded). Requires configured object storage. Returns its public URL; does not create a submission.", method: "POST", path: "/api/upload/image", input: mcpImageSchema },
+  ];
+  const mcpTools = mcpOperations.map((operation) => ({
+    ...operation,
+    schema: z.object({
+      ...(operation.path.includes(":id") ? { id: z.string().min(1) } : {}),
+      ...(operation.input ? { input: operation.input } : {}),
+      ...(operation.query ? { query: operation.query.optional() } : {}),
+    }).strict(),
+  }));
+  const requireMcpAdmin = async (request: FastifyRequest) => {
+    if (!request.headers["x-points-accelerator-guild-id"]) {
+      throw new AppError("MCP requests require an expected guild ID.", 400);
+    }
+    await requireAdmin(request);
+  };
+  app.get("/api/mcp/tools", { preHandler: requireMcpAdmin }, async () => ({
+    tools: mcpTools.map((tool) => ({
+      name: tool.name,
+      description: `Administrator only. ${tool.description}`,
+      inputSchema: zodToJsonSchema(tool.schema, { $refStrategy: "none" }),
+      annotations: { readOnlyHint: tool.method === "GET", destructiveHint: tool.method !== "GET", openWorldHint: true },
+    })),
+  }));
+  app.post("/api/mcp/call", { preHandler: requireMcpAdmin, bodyLimit: 8 * 1024 * 1024 }, async (request, reply) => {
+    const payload = z.object({ name: z.string(), arguments: z.record(z.unknown()) }).strict().parse(request.body);
+    const tool = mcpTools.find((candidate) => candidate.name === payload.name);
+    if (!tool) throw new AppError("Unknown MCP tool.", 400);
+    const args = tool.schema.parse(payload.arguments) as { id?: string; input?: unknown; query?: Record<string, unknown> };
+    const session = sessionFor(request);
+    // Discord channel IDs are global: a guild-scoped settings row alone does not
+    // prevent the bot from posting into another guild through a configured ID.
+    const channelIds = tool.name === "update_settings"
+      ? Object.entries(args.input as Record<string, unknown>)
+          .filter(([key]) => /ChannelIds?$/.test(key))
+          .flatMap(([, value]) => typeof value === "string" ? [value] : Array.isArray(value) ? value as string[] : [])
+      : tool.name === "create_listing"
+        ? [(await services.configService.getOrCreate(session.activeGuildId)).listingChannelId].filter((id): id is string => id !== null)
+        : [];
+    if (channelIds.length) {
+      if (!params.botRuntime) throw new AppError("Live Discord channel verification is unavailable.", 503);
+      const allowed = new Set((await params.botRuntime.getTextChannels(session.activeGuildId)).map((channel) => channel.id));
+      if (channelIds.some((id) => !allowed.has(id))) throw new AppError("A configured channel is not a text channel in this guild.", 404);
+    }
+    const image = tool.name === "upload_image" ? mcpImageSchema.parse(args.input) : null;
+    const imageBuffer = image ? Buffer.from(image.base64, "base64") : null;
+    if (imageBuffer && imageBuffer.length > 5 * 1024 * 1024) throw new AppError("Image exceeds 5 MiB.", 400);
+    const audit = tool.method === "GET" ? null : await services.auditService.record({
+      guildId: session.activeGuildId, actorUserId: session.userId, actorUsername: session.username,
+      action: "mcp.admin.requested", entityType: "McpOperation",
+      payload: { tool: tool.name, arguments: image ? { contentType: image.contentType, bytes: imageBuffer!.length } : args },
+    });
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(args.query ?? {})) query.set(key, String(value));
+    const url = tool.path.replace(":id", encodeURIComponent(args.id ?? "")) + (query.size ? `?${query}` : "");
+    const dispatchToken = randomBytes(24).toString("hex");
+    const boundary = `mcp-${dispatchToken}`;
+    const body = image && imageBuffer ? Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="image.${image.contentType.slice(6).replace("jpeg", "jpg")}"\r\nContent-Type: ${image.contentType}\r\n\r\n`),
+      imageBuffer,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]) : args.input === undefined ? undefined : JSON.stringify(args.input);
+    mcpDispatchTokens.add(dispatchToken);
+    const response = await app.inject({
+      method: tool.method, url,
+      headers: {
+        cookie: `dashboard_session=${request.cookies[SESSION_COOKIE_NAME] ?? ""}`,
+        "x-points-accelerator-guild-id": session.activeGuildId,
+        "x-points-accelerator-mcp-admin": dispatchToken,
+        ...(body === undefined ? {} : { "content-type": image ? `multipart/form-data; boundary=${boundary}` : "application/json" }),
+      },
+      payload: body,
+    }).finally(() => mcpDispatchTokens.delete(dispatchToken));
+    if (audit) await services.auditService.record({
+      guildId: session.activeGuildId, actorUserId: session.userId, actorUsername: session.username,
+      action: "mcp.admin.completed", entityType: "McpOperation", entityId: audit.id,
+      payload: { tool: tool.name, status: response.statusCode },
+    });
+    return reply.status(response.statusCode === 204 ? 200 : response.statusCode).send(response.body ? response.json() : { ok: true });
   });
 
   return app;

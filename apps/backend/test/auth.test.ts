@@ -166,6 +166,24 @@ describe("Discord dashboard auth", () => {
     expect(response.json()).toEqual({ authenticated: false });
   });
 
+  it("rejects guild-pinned requests before reading or mutating another guild", async () => {
+    const cookie = await startDashboardSession();
+    const headers = { cookie: cookie!, "x-points-accelerator-guild-id": "another-guild" };
+    const read = await ctx.app.inject({ method: "GET", url: "/api/leaderboard", headers });
+    expect(read.statusCode).toBe(409);
+    const write = await ctx.app.inject({
+      method: "POST", url: "/api/shop-items", headers,
+      payload: { name: "Wrong guild", description: "Must not exist", cost: 5, stock: 1, enabled: true },
+    });
+    expect(write.statusCode).toBe(409);
+    expect(await ctx.prisma.shopItem.count()).toBe(0);
+    const matching = await ctx.app.inject({
+      method: "GET", url: "/api/leaderboard",
+      headers: { cookie: cookie!, "x-points-accelerator-guild-id": TEST_GUILD_ID },
+    });
+    expect(matching.statusCode).toBe(200);
+  });
+
   it("creates an admin dashboard session for a role with dashboard access", async () => {
     await seedDashboardCapability();
     await seedSettings();

@@ -30,9 +30,13 @@ export class ListingService {
     quantity?: number | null;
     channelId?: string | null;
     messageId?: string | null;
+    /** Explicit override for a live-authorized dashboard administrator. */
+    adminAction?: boolean;
   }) {
-    const capabilities = await this.roleCapabilityService.listForRoleIds(params.guildId, params.actor.roleIds);
-    assertCanSell(resolveCapabilities(capabilities));
+    if (!params.adminAction) {
+      const capabilities = await this.roleCapabilityService.listForRoleIds(params.guildId, params.actor.roleIds);
+      assertCanSell(resolveCapabilities(capabilities));
+    }
 
     const listing = await this.prisma.marketplaceListing.create({
       data: {
@@ -63,4 +67,3 @@ export class ListingService {
     return listing;
   }
 }
-

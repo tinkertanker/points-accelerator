@@ -96,6 +96,11 @@ the live bot still requires the separate configuration described above.
 
 ## Command set
 
+AI clients can use the administrator MCP interface over local stdio, including
+points/currency movement, shop management, configuration, and destructive admin
+operations. See [MCP connection and tool reference](docs/mcp.md) for setup,
+Discord session authentication, permissions, and safety notes.
+
 - Staff roles such as admins or alumni: `/award points`, `/award currency`, `/award currencygroup`, `/award currencybulk`, `/deduct group`, `/deduct member`, `/deduct mixed`, `/luckydraw`
 - Students: `/balance`, `/leaderboard`, `/forbes`, `/ledger`, `/transfer`, `/donate`, `/store`, `/buy group`, `/approve_purchase`, `/bet`, `/betstats`
 
