@@ -30,7 +30,7 @@ const botRuntime = {
   getGroupMemberCount: vi.fn(async () => 4),
   getGroupMemberDiscordUserIds: vi.fn(async () => ["student-one", "student-two", "student-three", "student-four"]),
   clearRedemptionButtons: vi.fn(async () => undefined),
-  postListing: vi.fn(async (channelId: string) => {
+  postListing: vi.fn(async (_guildId: string, channelId: string) => {
     postedListingChannels.push(channelId);
     return null;
   }),

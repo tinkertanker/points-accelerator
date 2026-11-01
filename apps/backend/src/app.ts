@@ -1576,6 +1576,7 @@ export function createApp(params: {
     }
     const posted = config.listingChannelId
       ? await params.botRuntime?.postListing(
+          guildIdOf(request),
           config.listingChannelId,
           `New listing from ${payload.actorUsername ?? payload.actorUserId}: **${payload.title}**\n${payload.description}\nQuantity: ${
             payload.quantity ?? "infinite"
