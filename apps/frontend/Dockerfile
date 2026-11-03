@@ -20,3 +20,6 @@ RUN npm --workspace apps/frontend run build
 FROM nginx:alpine
 
 COPY --from=build /app/apps/frontend/dist /usr/share/nginx/html
+
+# Vite preserves public asset modes; nginx workers must be able to read them.
+RUN chmod -R a+rX /usr/share/nginx/html
