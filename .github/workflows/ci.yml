@@ -2,7 +2,16 @@ name: CI
 
 on:
   push:
+    # PRs check feature branches; main seeds the npm cache for new PRs.
+    branches: [main]
+    tags: ['**']
   pull_request:
+
+# Cancel competing runs of the same PR, leaving main/tag checks independent.
+# Re-running an older PR workflow can cancel a newer run; prefer the latest commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -17,10 +26,10 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U pointsaccelerator"
-          --health-interval 10s
+          --health-cmd "pg_isready -h 127.0.0.1 -U pointsaccelerator"
+          --health-interval 2s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 25
     env:
       DATABASE_URL: postgresql://pointsaccelerator:pointsaccelerator@localhost:5432/pointsaccelerator
       ADMIN_TOKEN: ci-admin-token
@@ -32,8 +41,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm install
-      - run: npm --workspace apps/backend run prisma:generate
+      # Keep lifecycle scripts: backend postinstall generates Prisma Client.
+      - run: npm ci --prefer-offline
       - run: npm --workspace apps/backend run prisma:migrate
       - run: npm run build
       - run: npm run test
